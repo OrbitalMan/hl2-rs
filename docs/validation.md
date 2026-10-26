@@ -1,5 +1,47 @@
 # Local validation — 2026-10-05
 
+## Motion blur Advanced / viewmodel animation (2026-10-26)
+
+`scripts/checks/validate.sh`: 1,122 Rust tests pass, 92 ignored; three Python image-reader
+checks, architecture, strict Clippy and formatting pass. `scripts/checks/check_windows.sh`
+passes. Owning tests exercise history warming/reset, three dropdown states, invalid picks,
+old boolean saves, Advanced round trips and retail console-command behavior. A minimal
+Bevy app regression verifies existing blur/prepass components are removed when gameplay
+resources disappear. The owned
+`cargo test -p hl2-ui owned_motion_blur_advanced_token --locked -- --ignored --nocapture`
+verifies installed Disabled/Enabled/Advanced text. The initial token search found that
+GameUI_Advanced means Lock; the implementation uses verified GameUI_SettingAdvanced.
+
+Packaged, muted checks: `NO_BUILD=1 ONLY='motion_blur_options viewmodel_motion_blur
+flashlight_shadows flashlight_viewmodel options_status lamp_emission coverage' python3
+scripts/checks/replays.py`. Checks run separately against copies of the release package;
+see recorded checkpoint results. The dropdown is selected through real pointer/keyboard
+input, visually inspected, applied and read back from saved settings. Its preview is
+`artifacts/replays/motion_blur_selected.png`.
+
+The crowbar fixture releases the selection lock before attacking, asserts a miss animation
+and a fixed player view, then captures the swing and four following frames. A shader control
+bypasses only weapon reconstruction; moving-weapon pixels change while the upper still
+world is identical. A separate diagnostic colour after the one-pixel velocity threshold
+proves actual GPU-skinned movement at no MSAA and 4x MSAA, restricted to the lower weapon
+region. Settled poses, pause, switching, Disabled and retail Enabled have no stale vectors.
+Diagnostic edits affect only the copied package and are restored in finally blocks.
+
+Rejected evidence is retained under artifacts/viewmodel-motion-blur: separate material
+uniforms exceeded Metal vertex bindings with previous-pose skinning; a single shared
+buffer fixes it without third-party changes. The initial attack fixture retained the
+selection lock; an initial report assertion used a nonexistent player.eye field. A
+coverage run overlapped addition of a new registered fixture. Packing renamed two test
+shader hooks; corrected hooks are asserted against the actual shader before rerunning.
+An early recommendation initializer and profiling-span borrow also failed compilation;
+subsequent complete checks pass. These are not accepted captures or measurements.
+
+Windows/Linux runtime, every weapon/reload, native visual parity and transparent/diagnostic
+CPU-skinned weapon blur are **not tested**. Screen-space reconstruction does not expand
+silhouette coverage. Advanced is an owner-requested extension; SDK viewrender.cpp applies
+retail camera blur before DrawViewModels.
+
+
 ## Options platform visibility and development hints (2026-10-26)
 
 Owning checks: `cargo test -p hl2-ui --locked`, `cargo test -p source-ui --locked` and

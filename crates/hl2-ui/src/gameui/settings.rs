@@ -5,6 +5,8 @@
 //! and draws. Retail ranges come from the installed `GameUI.dll` slider constants (see
 //! `docs/gameui.md` section 3).
 
+#[cfg(test)]
+mod motion_blur_tests;
 pub mod support;
 
 use super::{
@@ -268,7 +270,6 @@ impl AdvancedChoice {
         Some(match self {
             Self::ColorCorrection => a.color_correction,
             Self::VSync => a.vsync,
-            Self::MotionBlur => a.motion_blur,
             Self::Multicore => a.multicore,
             Self::ClassicEffects => a.classic_effects,
             Self::D3D9Ex => a.d3d9ex,
@@ -280,7 +281,6 @@ impl AdvancedChoice {
         Some(match self {
             Self::ColorCorrection => &mut a.color_correction,
             Self::VSync => &mut a.vsync,
-            Self::MotionBlur => &mut a.motion_blur,
             Self::Multicore => &mut a.multicore,
             Self::ClassicEffects => &mut a.classic_effects,
             Self::D3D9Ex => &mut a.d3d9ex,
@@ -317,6 +317,7 @@ impl AdvancedChoice {
             }
             Self::Filtering => listed_tokens::<Filtering>(),
             Self::ClassicEffects => CLASSIC_EFFECTS_TOKENS.to_vec(),
+            Self::MotionBlur => vec![FLAG_TOKENS[0], FLAG_TOKENS[1], "#GameUI_SettingAdvanced"],
             _ => FLAG_TOKENS.to_vec(),
         }
     }
@@ -330,6 +331,13 @@ impl AdvancedChoice {
             Self::ShadowDetail => listed_index(a.shadow_detail),
             Self::Antialiasing => listed_index(a.antialiasing),
             Self::Filtering => listed_index(a.filtering),
+            Self::MotionBlur => {
+                if a.motion_blur {
+                    1 + usize::from(a.motion_blur_viewmodel)
+                } else {
+                    0
+                }
+            }
             flag => usize::from(flag.flag(a).unwrap_or(false)),
         }
     }
@@ -343,6 +351,12 @@ impl AdvancedChoice {
             Self::ShadowDetail => listed_pick(index, &mut a.shadow_detail),
             Self::Antialiasing => listed_pick(index, &mut a.antialiasing),
             Self::Filtering => listed_pick(index, &mut a.filtering),
+            Self::MotionBlur => {
+                if index < 3 {
+                    a.motion_blur = index != 0;
+                    a.motion_blur_viewmodel = index == 2;
+                }
+            }
             flag => {
                 if let (Some(value), true) = (flag.flag_mut(a), index < 2) {
                     *value = index == 1;

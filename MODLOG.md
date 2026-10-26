@@ -1,5 +1,43 @@
 # MODLOG
 
+## 2026-10-26 Checkpoint: opt-in Advanced motion blur for viewmodel animation
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Motion blur dropdown adds Advanced using an installed localized token.
+Disabled and Enabled keep retail off/camera-only behavior. A false-by-default stored
+viewmodel flag preserves old saves; retail console commands select retail modes.
+Advanced uses previous/current GPU-skinned poses on the weapon camera, including crowbar
+swings, in a cached seven-tap half-frame pass before bloom/HUD. MSAA vectors, alpha masks,
+stationary-pixel rejection and history resets are supported. Shared material uniforms are
+packed into one buffer to fit Metal's vertex-stage binding limit. README unchanged.
+
+**Why:** SDK viewrender.cpp applies image-space motion blur before DrawViewModels; weapon
+animation blur is the owner's optional extension, not a retail parity claim.
+
+**Tested how:** validate.sh: 1,122 Rust tests pass/92 ignored, three Python tests, strict
+Clippy/fmt/architecture; Windows-target check; owned token verification; packaged executable
+and ten hashes. Packaged dropdown Apply/persistence, actual GPU crowbar motion without AA
+and with 4x AA, sharp reconstruction control, settled/pause/switch/off/retail modes, and
+flashlight lighting/shadow cutouts/lamp emission/Options status/coverage checks pass.
+Captures inspected. Old saves, mode selection and console behavior are unit-tested.
+
+**Result:** Advanced changes 6,985 weapon pixels above threshold 2 in the accepted sharp
+control while the upper still world changes zero pixels. Motion diagnostics remain on
+the weapon. Three isolated timings per build/mode: prior/current Disabled 18.444/18.509 ms,
+prior/current Enabled 18.403/18.430 ms, Advanced 18.481 ms (+0.051 ms versus current Enabled).
+Ranges overlap; no FPS guarantee. New pass CPU encoding span is 0.000588 ms; GPU timing
+is unavailable and this excludes the copy/prepass. Details: docs/performance.md.
+
+**Still broken or not tested:** Screen-space reconstruction does not expand silhouettes;
+transparent effects and diagnostic CPU-skinning mode are excluded. Every weapon/reload,
+Windows/Linux runtime, native image comparison and an ordinary campaign are not tested.
+Rejected binding overflow, fixture selection lock/report field, stale test shader hooks/
+coverage inventory and early initializer/profiler borrow errors are retained, followed
+by passing checks. Details and reproduction commands: docs/validation.md.
+
+**Next:** Broader weapon/reload and Windows runtime visual validation, if requested.
+
 ## 2026-10-26 Checkpoint: platform-aware Options and development hints
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

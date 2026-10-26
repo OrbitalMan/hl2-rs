@@ -702,6 +702,88 @@ def check_flashlight_shadows():
     holds("alpha cutout holes transmit the flashlight", changes["brighter"] > 1000, changes)
 
 
+def check_motion_blur_options():
+    if CONFIG.exists():
+        CONFIG.unlink()
+    preview = json.loads((REPO / "test-inputs/bevy-options-motion-blur.json").read_text())
+    fixture = OUT / "motion_blur_selected.input.json"
+    fixture.write_text(json.dumps([f for f in preview if f["tick"] <= 150]))
+    game("motion_blur_selected", *MENU, "--movement-script", str(fixture))
+    if CONFIG.exists():
+        CONFIG.unlink()
+    result = game("motion_blur_options", *MENU, "--movement-script", "test-inputs/bevy-options-motion-blur.json")
+    selected = result.sample("advanced-selected")["console"]["options"]
+    holds("Advanced changes the draft", selected["changed"] and not selected["list_open"], selected)
+    a = saved()["video"]["advanced"]
+    expect("camera blur saved", a["motion_blur"], True)
+    expect("Advanced weapon blur saved", a["motion_blur_viewmodel"], True)
+
+
+def check_viewmodel_motion_blur():
+    """A still world view has animated weapon vectors, with MSAA and the option lifecycle."""
+    script = json.loads((REPO / "test-inputs/bevy-viewmodel-motion-blur.json").read_text())
+    shader = GAME / "bevy-assets/shaders/motion_blur.wgsl"
+    original = shader.read_text(encoding="utf-8")
+    hook = "if dot(pixels, pixels) < 1.0 { return base; }"
+    holds("animation reconstruction hook", hook in original)
+
+    def run(name, aa="none", enabled=True, state="swing", advanced=True):
+        settings(video={"hdr": "none", "hdr_migrated": True, "advanced": {
+            "motion_blur": enabled, "motion_blur_viewmodel": advanced, "antialiasing": aa, "vsync": False}})
+        frames = json.loads(json.dumps(script))
+        if state == "still":
+            frames[-1]["tick"] = 170
+        elif state == "paused":
+            frames[-1]["paused"] = True
+        elif state == "switch":
+            frames[-1]["actions"] = [{"action": "slot", "slot": 1}, {"action": "confirm"}]
+        fixture = OUT / f"{name}.input.json"
+        fixture.write_text(json.dumps(frames))
+        result = game(name, "--map", "d1_trainstation_02", "--width", "1024", "--height", "768",
+                      "--movement-script", str(fixture), "--capture-burst", "4")
+        sample = result.sample("swing")
+        expect("fixed player view", result.report["render"]["simulation"]["eye"], [-4324.0, -224.0, 64.0])
+        expect("posed geometry", result.report["render"]["presentation"]["pose_or_visibility_mismatches"], 0)
+        holds("no rendering errors", "Caught rendering error" not in result.log)
+        if state == "swing":
+            holds("crowbar attack animation", sample["gameplay"]["viewmodel"]["animation"].startswith("miss"),
+                  sample["gameplay"]["viewmodel"])
+        return result
+
+    def moving_pixels(result, burst=True):
+        images = [result.capture] + ([OUT / f"{result.name}-{i}.png" for i in range(1, 5)] if burst else [])
+        counts = []
+        for path in images:
+            width, height, rgb = png_rgb(path)
+            locations = [(i // 3 % width, i // 3 // width) for i in range(0, len(rgb), 3)
+                         if rgb[i] > 240 and rgb[i+1] < 15 and rgb[i+2] > 240]
+            # Diagnostic magenta belongs to the lower weapon region, never the still world/HUD.
+            holds("vectors restricted to weapon", all(y > height * 0.4 for _, y in locations))
+            counts.append(len(locations))
+        return max(counts)
+
+    normal = run("viewmodel_blur_swing")
+    try:
+        shader.write_text(original.replace("let motion = velocity(in.uv) * blur.params.z;", "let motion = vec2(0.0);"), encoding="utf-8")
+        control = run("viewmodel_blur_sharp")
+        changes = pixel_changes(control.capture, normal.capture, threshold=2, region=(180, 430, 1000, 768))
+        holds("reconstruction changes the moving weapon", changes["changed"] > 100, changes)
+        world = pixel_changes(control.capture, normal.capture, threshold=2, region=(0, 0, 1024, 300))
+        expect("still world unchanged", world["changed"], 0)
+        # Debug reconstruction only after the shader's one-pixel motion threshold. This
+        # proves skinned motion reaches the GPU, independently of similar-looking poses.
+        shader.write_text(original.replace(hook, hook + "\n    return vec4(1.0, 0.0, 1.0, 1.0);"), encoding="utf-8")
+        for aa in ("none", "x4"):
+            result = run("viewmodel_vectors_" + aa, aa=aa)
+            holds("animated pixels", moving_pixels(result) > 100)
+        for state in ("still", "paused", "switch"):
+            expect(state + " has no stale motion", moving_pixels(run("viewmodel_vectors_" + state, state=state), burst=state != "switch"), 0)
+        expect("disabled has no motion pass", moving_pixels(run("viewmodel_vectors_off", enabled=False)), 0)
+        expect("retail Enabled keeps the weapon sharp", moving_pixels(run("viewmodel_vectors_retail", advanced=False)), 0)
+    finally:
+        shader.write_text(original, encoding="utf-8")
+
+
 def check_flashlight_viewmodel():
     """The same beam lights the weapon, including rotated views and portrait framing."""
     def run(weapon: str, name: str, on: bool = True, portrait: bool = False):
@@ -723,7 +805,7 @@ def check_flashlight_viewmodel():
         return result
     shader = GAME / "bevy-assets/shaders/source.wgsl"
     original = shader.read_text(encoding="utf-8")
-    marker = "if viewmodel_flashlight.limits.z < 0.5"
+    marker = "if material.viewmodel_flashlight.limits.z < 0.5"
     holds("control hook exists", marker in original)
     for weapon, portrait in (("pistol", False), ("smg", False), ("pistol", True)):
         label = f"flashlight_vm_{weapon}_{'portrait' if portrait else 'landscape'}"
@@ -827,7 +909,7 @@ def check_lamp_emission():
     holds("completed", normal.report["render"]["simulation"]["script_finished"])
     shader = GAME / "bevy-assets/shaders/source.wgsl"
     original = shader.read_text(encoding="utf-8")
-    marker = "srgb_to_linear(material_albedo * tint.rgb), base_alpha"
+    marker = "srgb_to_linear(material_albedo * material.tint.rgb), base_alpha"
     holds("emissive albedo control exists", marker in original)
     try:
         shader.write_text(original.replace(marker, "srgb_to_linear(base.rgb), base_alpha"),
@@ -925,7 +1007,7 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape",
                "bevy-console-open", "bevy-flashlight-hud-on", "bevy-flashlight-hud-recharged",
                "bevy-flashlight-depth-actor", "bevy-flashlight-depth-fence",
-               "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg", "bevy-canals-lamp", "bevy-flashlight-availability",
+               "bevy-options-motion-blur", "bevy-viewmodel-motion-blur", "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg", "bevy-canals-lamp", "bevy-flashlight-availability",
                "bevy-options-status-mouse", "bevy-options-status-audio", "bevy-options-status-advanced")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
@@ -1475,6 +1557,8 @@ CHECKS = [
     Check("flashlight_availability", check_flashlight_availability, "shared"),
     Check("options_status", check_options_status, "shared"),
     Check("lamp_emission", check_lamp_emission, "shared"),
+    Check("motion_blur_options", check_motion_blur_options, "shared"),
+    Check("viewmodel_motion_blur", check_viewmodel_motion_blur, "shared"),
     Check("flashlight_viewmodel", check_flashlight_viewmodel, "shared"),
     Check("window", check_window, "windowed"),
     Check("window_place", check_window_place, "macos"),

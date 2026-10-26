@@ -1715,11 +1715,37 @@ research notes for this option.
 - `bloom::motion_blur::update` runs it only with the option on and puts `SourceMotionBlur` on the world camera while a value
   is not zero. `bloom::motion_blur_pass` runs after that camera's main pass: it copies the frame to a scratch texture and
   draws it back blurred (7 / 11 / 15 taps by frame height, `motion_blur.wgsl`) into the camera's attachment, the
-  multisampled one included, so the viewmodel camera that follows draws the weapon sharp over the blurred world and
+  multisampled one included, so the viewmodel camera that follows draws the weapon sharp over the blurred world in retail Enabled mode, and
   bloom, color correction and the HUD come after, as in the engine. With the option off nothing of it exists; with it on and a still
   view one scratch texture is kept and no pass runs.
 - Not matched: retail averages gamma-space values in an LDR frame (HL2RS averages linear at every level);
   the `mat_motion_blur_*` cvars have no console commands. Not tested: Windows.
+
+### 23c.1. Motion blur Advanced: weapon animation (2026-10-26)
+
+The owner's optional extension adds a third dropdown item using the installed
+`#GameUI_SettingAdvanced` token. Disabled and Enabled retain retail off/camera-only
+behavior. `motion_blur` keeps its existing persisted boolean; `motion_blur_viewmodel`
+defaults false, so old saves retain retail behavior. Advanced selects both flags. The
+retail `mat_motion_blur_enabled 0/1` command selects retail modes and clears the extension.
+
+Advanced enables a motion-vector prepass only on the viewmodel camera, using Bevy's
+current/previous GPU skinning and alpha-tested Source silhouettes. The existing cached
+frame-copy pass reconstructs seven colour samples over a half-frame shutter, capped at
+4% of the screen. Stationary pixels return their original colour, unrelated sample
+velocities are rejected, and multisampled vectors are averaged. Reconstruction runs
+before bloom, colour correction and HUD; world camera blur remains independent.
+
+History warms for two rendered frames after activation, weapon changes, map changes,
+pause, holstering, lens/framing changes or discontinuous time. Disabled/retail Enabled,
+background levels and absent GPU-skinned weapon draws keep no weapon prepass/pass state.
+The diagnostic CPU-skinning path and transparent effects are excluded. Screen-space
+reconstruction softens detail inside the current silhouette; it does not reconstruct
+new coverage outside its edge. This is an owner-requested extension, not native parity.
+
+SourceMaterial shares one packed uniform buffer between colour/depth shaders. Separate
+small uniform bindings plus previous-pose skinning exceeded Metal's vertex-stage buffer
+limit; packing them fixes this without modifying Bevy or replacing game materials.
 
 ### 23d. Model detail: levels of detail switch with distance (2026-10-25)
 

@@ -1,6 +1,35 @@
 # STATUS
  
- Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. Options now enforce platform availability and show cyan development markers/status hints while retaining orange retail help. Lighting/flashlight checkpoints below remain implemented; native shader/shadow parity remains unverified. Sections below are newest first.
+ Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. Motion blur Advanced adds opt-in weapon animation blur; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
+
+## Motion blur Advanced / viewmodel animation (2026-10-26)
+
+- Motion blur now offers Disabled, Enabled and Advanced. Disabled/Enabled preserve retail
+  off/camera-only behavior; Advanced adds current/previous GPU-skinned weapon motion.
+  Old saves default the new flag off. Retail mat_motion_blur_enabled 0/1 selects retail
+  modes. Installed GameUI_SettingAdvanced supplies the localized third label.
+- Seven-tap half-frame reconstruction runs on the weapon camera before bloom/HUD, with
+  a one-pixel threshold, 4% cap and MSAA vector averaging. History warms after activation,
+  switch, pause, holstering, lens/map changes or time jumps. Disabled/retail Enabled and
+  absent visible GPU-skinned weapons keep no weapon pass state. Material uniforms share
+  one buffer to fit Metal's previous-skinning bindings. README unchanged.
+- Verified: validate.sh 1,122 Rust tests/92 ignored +3 Python; architecture, strict Clippy,
+  fmt, Windows-target check, owned localization, release package/ten hashes. Packaged
+  motion_blur_options, viewmodel_motion_blur, flashlight_shadows, flashlight_viewmodel,
+  options_status, lamp_emission and coverage pass. Dropdown preview inspected; real Apply
+  saves Advanced. Swings assert GPU motion with no AA/4x AA, settled/pause/switch/off/
+  retail modes and zero pose mismatches. Sharp control changes 6,985 weapon pixels above
+  threshold 2 while the upper world changes zero; captures inspected.
+- Three isolated runs/build/mode: prior/current Disabled 18.444/18.509 ms; prior/current
+  Enabled 18.403/18.430 ms; Advanced 18.481 ms. Advanced adds 0.051 ms versus current
+  Enabled, with overlapping ranges. GPU timestamps unavailable; no FPS guarantee or
+  isolated GPU-cost claim. Detailed windows and pass encoding time: docs/performance.md.
+- Rejected evidence retained: Metal binding overflow before packing; attack-selection
+  lock in initial fixture; nonexistent report field; stale test shader hooks and coverage
+  inventory; initializer/profiler borrow compilation errors. Corrected checks pass.
+- Windows/Linux runtime, all weapons/reloads, native visual comparison and ordinary
+  campaign remain **not tested**. Transparent effects and diagnostic CPU-skinned meshes
+  are excluded; reconstruction does not expand the current silhouette's edge coverage.
 
 ## Options platform availability and development status (2026-10-26)
 

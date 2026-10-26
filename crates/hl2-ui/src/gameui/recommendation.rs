@@ -319,8 +319,7 @@ impl SystemRecommendation {
                     vsync: false,
                     motion_blur: false,
                     multicore: cpu.is_multicore(),
-                    classic_effects: false,
-                    d3d9ex: true,
+                    ..AdvancedVideoSettings::default()
                 },
                 HdrMode::Full,
             ),
@@ -341,8 +340,7 @@ impl SystemRecommendation {
                     vsync: false,
                     motion_blur: false,
                     multicore: cpu.is_multicore(),
-                    classic_effects: false,
-                    d3d9ex: true,
+                    ..AdvancedVideoSettings::default()
                 },
                 HdrMode::Full,
             ),
@@ -363,8 +361,7 @@ impl SystemRecommendation {
                     vsync: false,
                     motion_blur: false,
                     multicore: cpu.is_multicore(),
-                    classic_effects: false,
-                    d3d9ex: true,
+                    ..AdvancedVideoSettings::default()
                 },
                 HdrMode::Full,
             ),
@@ -381,8 +378,8 @@ impl SystemRecommendation {
                     vsync: false,
                     motion_blur: false,
                     multicore: cpu.is_multicore(),
-                    classic_effects: false,
                     d3d9ex: false,
+                    ..AdvancedVideoSettings::default()
                 },
                 HdrMode::None,
             ),

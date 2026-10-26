@@ -33,7 +33,7 @@ pub struct SourceMaterial {
     #[uniform(0)]
     pub(crate) tint: Vec4,
     // x = alpha cutoff, y = ignore base alpha, z = additive output.
-    #[uniform(3)]
+    #[uniform(0)]
     pub(crate) parameters: Vec4,
     #[texture(1)]
     #[sampler(2)]
@@ -44,38 +44,38 @@ pub struct SourceMaterial {
     #[texture(6)]
     #[sampler(7)]
     pub(crate) iris: Handle<Image>,
-    #[uniform(8)]
+    #[uniform(0)]
     pub(crate) secondary_uv: Mat3,
-    #[uniform(9)]
+    #[uniform(0)]
     pub(crate) lighting: ModelLighting,
     /// LightmappedGeneric $envmap; a black fallback cube when absent.
     #[texture(10, dimension = "cube")]
     #[sampler(11)]
     pub(crate) envmap: Handle<Image>,
     /// xyz = $envmaptint, w = 1 when an envmap is bound.
-    #[uniform(12)]
+    #[uniform(0)]
     pub(crate) envmap_tint: Vec4,
     /// xyz = $envmapcontrast, w = $fresnelreflection.
-    #[uniform(13)]
+    #[uniform(0)]
     pub(crate) envmap_contrast: Vec4,
     /// xyz = $envmapsaturation, w = mask flags: 1 = 1 - base alpha
     /// ($basealphaenvmapmask), 2 = mask RGB ($envmapmask), 4 = mask alpha
     /// ($normalmapalphaenvmapmask on the $bumpmap), 8 = the mask texture is the $bumpmap
     /// and its normals perturb the reflection.
-    #[uniform(14)]
+    #[uniform(0)]
     pub(crate) envmap_saturation: Vec4,
     /// The envmap mask texture; white when absent.
     #[texture(15)]
     #[sampler(16)]
     pub(crate) envmap_mask: Handle<Image>,
     /// xyz = $selfillumtint, w = 1 when $selfillum applies.
-    #[uniform(17)]
+    #[uniform(0)]
     pub(crate) self_illum: Vec4,
     /// The flashlight's projected texture (one handle shared by every material).
     #[texture(18)]
     #[sampler(19)]
     pub(crate) flashlight: Handle<Image>,
-    #[uniform(20)]
+    #[uniform(0)]
     pub(crate) viewmodel_flashlight: crate::flashlight::ViewmodelLight,
     pub(crate) alpha: AlphaMode,
     pub(crate) two_sided: bool,
@@ -673,7 +673,7 @@ fn skin_normal(
     if total > 0. { out } else { normal }
 }
 #[derive(Component)]
-pub struct WeaponMesh(String);
+pub struct WeaponMesh(pub(crate) String);
 /// A viewmodel draw that belongs to one skin only (surfaces whose material differs
 /// between skins 0 and 1).
 #[derive(Component)]

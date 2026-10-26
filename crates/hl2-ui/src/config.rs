@@ -219,6 +219,8 @@ pub struct AdvancedVideoSettings {
     pub vsync: bool,
     /// `mat_motion_blur_enabled`.
     pub motion_blur: bool,
+    /// Opt-in animation blur; false preserves retail camera-only blur and old saves.
+    pub motion_blur_viewmodel: bool,
     /// `mat_queue_mode` (-1 multicore, 0 single).
     pub multicore: bool,
     /// Classic Effects (`r_classic_fire` / `r_classic_blood`).
@@ -240,6 +242,7 @@ impl Default for AdvancedVideoSettings {
             filtering: Filtering::Trilinear,
             vsync: true,
             motion_blur: true,
+            motion_blur_viewmodel: false,
             multicore: true,
             classic_effects: false,
             d3d9ex: true,

@@ -1,5 +1,38 @@
 # Performance measurements - 2026-10-05
 
+## Motion blur Advanced / weapon animation (2026-10-26)
+
+Packaged Metal, Apple M1 Pro, 1024x768, HDR None, MSAA off, VSync off, muted background
+`hl2/d1_trainstation_02`. Fixed player view, crowbar attacks every 40 ticks from tick 100,
+900-tick script, 2,000-frame safety cap. Preserved parent package: 553ad19; current package:
+this checkpoint atop that parent. Three runs per build/mode, reversed order for the middle
+round; no concurrent build/replay during timing. All scripts finish, measuring 595-609
+frames after 120 warm-up frames, 11.035-11.228 measured seconds each.
+
+| Mode | Prior mean frame | Current mean frame | Prior range | Current range |
+| --- | ---: | ---: | ---: | ---: |
+| Disabled | 18.444 ms | 18.509 ms | 18.386-18.526 ms | 18.428-18.590 ms |
+| Enabled (retail) | 18.403 ms | 18.430 ms | 18.391-18.411 ms | 18.402-18.456 ms |
+| Advanced | unavailable | 18.481 ms | unavailable | 18.408-18.546 ms |
+
+Advanced averages +0.051 ms versus current Enabled, +0.078 ms versus prior Enabled.
+Ranges overlap; the Disabled difference is itself +0.066 ms, so these scene means do not
+isolate GPU cost or establish an FPS guarantee. The new reconstruction draw's recorded
+CPU encoding span averages 0.000588 ms; it excludes the frame copy and prepass. GPU
+timestamp values are unavailable in these reports, so the CPU span is not a GPU timing.
+
+Advanced adds the weapon-only motion-vector prepass, one cached full-size frame copy,
+and a seven-tap half-frame reconstruction (moving pixels only, capped at 4% UV distance).
+No weapon prepass, scratch, bind group or draw exists in Disabled or retail Enabled, or
+without a visible GPU-skinned weapon. No asset reads, CPU skinning or vertex-history
+allocation are introduced per frame. History strings change only on weapon/time resets;
+buffers/bind groups are cached. Nine material uniform buffers become one shared buffer,
+which also avoids Metal's vertex-binding limit with previous-pose skinning.
+
+Evidence: artifacts/viewmodel-motion-blur/benchmark.py, benchmark.input.json,
+timing-summary.json, timing-aggregate.json and all fifteen timing reports/logs. Runtime
+shader diagnostic/capture checks and Windows/Linux limitations: docs/validation.md.
+
 ## Options platform filtering and development hints (2026-10-26)
 
 Packaged Metal, Apple M1 Pro, 1024x768, default settings, live `hl2/background01` menu,

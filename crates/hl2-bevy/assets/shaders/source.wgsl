@@ -1,35 +1,19 @@
+#import "shaders/source_uniforms.wgsl"::material
 #import bevy_pbr::forward_io::VertexOutput
 #import bevy_pbr::mesh_view_bindings::{view, clustered_lights, lights, directional_shadow_textures, directional_shadow_textures_comparison_sampler}
 #import bevy_render::maths::orthonormalize
 #import bevy_pbr::clustered_forward
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> tint: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var base_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var base_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> parameters: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var lightmap_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var lightmap_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var iris_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(7) var iris_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(8) var<uniform> secondary_uv: mat3x3<f32>;
-struct ModelLighting {
-    params: vec4<f32>,
-    basis: mat4x4<f32>,
-    ambient: array<vec4<f32>, 6>,
-    position: array<vec4<f32>, 4>,
-    color: array<vec4<f32>, 4>,
-    direction: array<vec4<f32>, 4>,
-    attenuation: array<vec4<f32>, 4>,
-    spot: array<vec4<f32>, 4>,
-}
-@group(#{MATERIAL_BIND_GROUP}) @binding(9) var<uniform> lighting: ModelLighting;
+
 @group(#{MATERIAL_BIND_GROUP}) @binding(10) var envmap_texture: texture_cube<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(11) var envmap_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(12) var<uniform> envmap_tint: vec4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(13) var<uniform> envmap_contrast: vec4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(14) var<uniform> envmap_saturation: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(15) var envmap_mask_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(16) var envmap_mask_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(17) var<uniform> self_illum: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(18) var flashlight_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(19) var flashlight_sampler: sampler;
 // SDK lightmappedgeneric_ps2_3_x.h CUBEMAP: reflection of the eye vector about the face
@@ -54,7 +38,7 @@ fn bump_normal(mesh: VertexOutput, n: vec3<f32>, bump: vec3<f32>) -> vec3<f32> {
 fn envmap_specular(mesh: VertexOutput, base_alpha: f32) -> vec3<f32> {
     // specularFactor: $normalmapalphaenvmapmask (bump alpha), $envmapmask (RGB) and
     // $basealphaenvmapmask (1 - base alpha). Masks and bump maps use the base UVs.
-    let flags = u32(envmap_saturation.w + 0.5);
+    let flags = u32(material.envmap_saturation.w + 0.5);
     let mask = textureSample(envmap_mask_texture, envmap_mask_sampler, mesh.uv);
     var factor = vec3(1.0);
     if (flags & 4u) != 0u { factor *= mask.a; }
@@ -66,11 +50,11 @@ fn envmap_specular(mesh: VertexOutput, base_alpha: f32) -> vec3<f32> {
     let r = 2.0 * dot(n, to_eye) * n - to_eye;
     var spec = min(textureSample(envmap_texture, envmap_sampler, vec3(r.x, -r.z, r.y)).rgb, vec3(16.0));
     spec *= factor;
-    spec *= envmap_tint.xyz;
-    spec = mix(spec, spec * spec, envmap_contrast.xyz);
-    spec = mix(vec3(dot(spec, vec3(0.299, 0.587, 0.114))), spec, envmap_saturation.xyz);
+    spec *= material.envmap_tint.xyz;
+    spec = mix(spec, spec * spec, material.envmap_contrast.xyz);
+    spec = mix(vec3(dot(spec, vec3(0.299, 0.587, 0.114))), spec, material.envmap_saturation.xyz);
     let fresnel = pow(1.0 - dot(n, normalize(to_eye)), 5.0);
-    return spec * (fresnel * (1.0 - envmap_contrast.w) + envmap_contrast.w);
+    return spec * (fresnel * (1.0 - material.envmap_contrast.w) + material.envmap_contrast.w);
 }
 fn srgb_to_linear(color: vec3<f32>) -> vec3<f32> {
     return select(pow((color + vec3(0.055)) / 1.055, vec3(2.4)), color / 12.92, color <= vec3(0.04045));
@@ -79,52 +63,47 @@ fn srgb_to_linear(color: vec3<f32>) -> vec3<f32> {
 fn ambient_light(n: vec3<f32>) -> vec3<f32> {
     let s = vec3(n.x, -n.z, n.y);
     let n2 = s * s;
-    let x = select(lighting.ambient[0].xyz, lighting.ambient[1].xyz, s.x < 0.0);
-    let y = select(lighting.ambient[2].xyz, lighting.ambient[3].xyz, s.y < 0.0);
-    let z = select(lighting.ambient[4].xyz, lighting.ambient[5].xyz, s.z < 0.0);
+    let x = select(material.lighting.ambient[0].xyz, material.lighting.ambient[1].xyz, s.x < 0.0);
+    let y = select(material.lighting.ambient[2].xyz, material.lighting.ambient[3].xyz, s.y < 0.0);
+    let z = select(material.lighting.ambient[4].xyz, material.lighting.ambient[5].xyz, s.z < 0.0);
     return n2.x * x + n2.y * y + n2.z * z;
 }
 // SDK DoLighting: per light color * cosine (or half-Lambert) * distance/spot attenuation.
 fn model_light(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     var sum = ambient_light(n);
-    let count = i32(lighting.params.y);
+    let count = i32(material.lighting.params.y);
     for (var i = 0; i < 4; i++) {
         if i >= count { break; }
-        let kind = lighting.position[i].w;
-        let to_light = lighting.position[i].xyz - p;
+        let kind = material.lighting.position[i].w;
+        let to_light = material.lighting.position[i].xyz - p;
         let d2 = max(dot(to_light, to_light), 1e-6);
         let d = sqrt(d2);
         var l = to_light / d;
         var atten = 1.0;
         if kind > 1.5 {
-            l = -lighting.direction[i].xyz;
+            l = -material.lighting.direction[i].xyz;
         } else {
-            atten = 1.0 / dot(lighting.attenuation[i].xyz, vec3(1.0, d, d2));
+            atten = 1.0 / dot(material.lighting.attenuation[i].xyz, vec3(1.0, d, d2));
             if kind > 0.5 {
-                let cos_theta = dot(lighting.direction[i].xyz, -l);
-                var spot = max((cos_theta - lighting.spot[i].y) * lighting.spot[i].z, 0.0001);
-                spot = clamp(pow(spot, lighting.spot[i].x), 0.0, 1.0);
+                let cos_theta = dot(material.lighting.direction[i].xyz, -l);
+                var spot = max((cos_theta - material.lighting.spot[i].y) * material.lighting.spot[i].z, 0.0001);
+                spot = clamp(pow(spot, material.lighting.spot[i].x), 0.0, 1.0);
                 atten *= spot;
             }
         }
         var cosine = dot(n, l);
-        if lighting.params.z > 0.5 {
+        if material.lighting.params.z > 0.5 {
             let h = cosine * 0.5 + 0.5;
             cosine = h * h;
         } else {
             cosine = max(cosine, 0.0);
         }
-        sum += lighting.color[i].xyz * cosine * atten;
+        sum += material.lighting.color[i].xyz * cosine * atten;
     }
     return sum;
 }
 // Direct world-space beam data for the origin-based viewmodel camera.
-struct ViewmodelLight {
-    world_to_beam: mat4x4<f32>,
-    origin_linear: vec4<f32>,
-    limits: vec4<f32>,
-}
-@group(#{MATERIAL_BIND_GROUP}) @binding(20) var<uniform> viewmodel_flashlight: ViewmodelLight;
+
 // Shared cookie, Lambert and distance calculation for world and viewmodel fragments.
 // xyz is added diffuse light; w carries attenuation for the world's shadow blend.
 fn flashlight_base(to: vec3<f32>, n: vec3<f32>, projected: vec3<f32>, near: f32, far: f32, linear: f32) -> vec4<f32> {
@@ -139,13 +118,13 @@ fn flashlight_base(to: vec3<f32>, n: vec3<f32>, projected: vec3<f32>, near: f32,
     return vec4(cookie * atten * lambert * fade, atten);
 }
 fn viewmodel_flashlight_color(position: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
-    if viewmodel_flashlight.limits.z < 0.5 { return vec3(0.0); }
-    let p = lighting.basis * vec4(position, 1.0);
-    let n = normalize((lighting.basis * vec4(normal, 0.0)).xyz);
-    return flashlight_base(p.xyz - viewmodel_flashlight.origin_linear.xyz, n,
-        (viewmodel_flashlight.world_to_beam * p).xyz,
-        viewmodel_flashlight.limits.x, viewmodel_flashlight.limits.y,
-        viewmodel_flashlight.origin_linear.w).rgb;
+    if material.viewmodel_flashlight.limits.z < 0.5 { return vec3(0.0); }
+    let p = material.lighting.basis * vec4(position, 1.0);
+    let n = normalize((material.lighting.basis * vec4(normal, 0.0)).xyz);
+    return flashlight_base(p.xyz - material.viewmodel_flashlight.origin_linear.xyz, n,
+        (material.viewmodel_flashlight.world_to_beam * p).xyz,
+        material.viewmodel_flashlight.limits.x, material.viewmodel_flashlight.limits.y,
+        material.viewmodel_flashlight.origin_linear.w).rgb;
 }
 // Eight-sample Poisson footprint (SDK shader's sampling data), independently applied to
 // Bevy's reverse-Z spotlight map. The engine-generated noise/jitter stream is not installed;
@@ -215,50 +194,50 @@ fn flashlight(world_position: vec4<f32>, n: vec3<f32>, frag_coord: vec2<f32>) ->
 fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     var base = textureSample(base_texture, base_sampler, mesh.uv);
     let base_alpha = base.a;
-    if parameters.w > 0.5 {
+    if material.parameters.w > 0.5 {
         let iris = textureSample(iris_texture, iris_sampler, mesh.uv_b);
         base = vec4(mix(base.rgb, iris.rgb, iris.a), base.a);
     }
-    base.a = select(base.a, 1.0, parameters.y > 0.5);
+    base.a = select(base.a, 1.0, material.parameters.y > 0.5);
     var vertex_color = mesh.color;
-    let lit = lighting.params.x > 0.5;
+    let lit = material.lighting.params.x > 0.5;
     if lit { vertex_color = vec4(1.0, 1.0, 1.0, vertex_color.a); }
-    if parameters.w < -0.5 {
-        let uv = (secondary_uv * vec3(mesh.uv, 1.0)).xy;
+    if material.parameters.w < -0.5 {
+        let uv = (material.secondary_uv * vec3(mesh.uv, 1.0)).xy;
         base = vec4(base.rgb * textureSample(iris_texture, iris_sampler, uv).rgb, base.a);
-        if parameters.w > -1.5 || parameters.w < -2.5 { vertex_color = vec4(1.0); }
+        if material.parameters.w > -1.5 || material.parameters.w < -2.5 { vertex_color = vec4(1.0); }
         // SDK UnlitTwoTexture returns alpha 1; distance fade lives in the VTF frames.
-        if parameters.w < -2.5 { base.a = 1.0; }
+        if material.parameters.w < -2.5 { base.a = 1.0; }
     }
     // Static-prop vertex colour is baked illumination, not emissive albedo.
     let material_albedo = base.rgb;
-    base *= tint * vertex_color;
-    if base.a < parameters.x { discard; }
-    let baked = select(textureSample(lightmap_texture, lightmap_sampler, mesh.uv_b).rgb, vec3(1.0), parameters.w > 0.5);
+    base *= material.tint * vertex_color;
+    if base.a < material.parameters.x { discard; }
+    let baked = select(textureSample(lightmap_texture, lightmap_sampler, mesh.uv_b).rgb, vec3(1.0), material.parameters.w > 0.5);
     // Lightmaps are linear and unclamped (Source HDR path); white fallbacks are 1.0.
     // Procedural camera images are sampled through an sRGB view and are already linear.
-    var rgb = select(srgb_to_linear(base.rgb) * baked, base.rgb, parameters.w < -0.5);
+    var rgb = select(srgb_to_linear(base.rgb) * baked, base.rgb, material.parameters.w < -0.5);
     if lit {
-        let p = (lighting.basis * vec4(mesh.world_position.xyz, 1.0)).xyz;
-        let n = normalize((lighting.basis * vec4(mesh.world_normal, 0.0)).xyz);
+        let p = (material.lighting.basis * vec4(mesh.world_position.xyz, 1.0)).xyz;
+        let n = normalize((material.lighting.basis * vec4(mesh.world_normal, 0.0)).xyz);
         rgb = srgb_to_linear(base.rgb) * model_light(p, n);
     }
-    if lighting.params.w > 1.5 && parameters.z < 0.5 && parameters.w > -0.5 {
+    if material.lighting.params.w > 1.5 && material.parameters.z < 0.5 && material.parameters.w > -0.5 {
         rgb += srgb_to_linear(base.rgb) * viewmodel_flashlight_color(mesh.world_position.xyz, mesh.world_normal);
-    } else if lighting.params.w < 0.5 {
+    } else if material.lighting.params.w < 0.5 {
         rgb += srgb_to_linear(base.rgb) * flashlight(mesh.world_position, normalize(mesh.world_normal), mesh.position.xy);
     }
-    // SDK $selfillum: diffuse = lerp(diffuse, tint * albedo, base alpha), before specular.
-    if self_illum.w > 0.5 {
-        rgb = mix(rgb, self_illum.xyz * srgb_to_linear(material_albedo * tint.rgb), base_alpha);
+    // SDK $selfillum: diffuse = lerp(diffuse, material.tint * albedo, base alpha), before specular.
+    if material.self_illum.w > 0.5 {
+        rgb = mix(rgb, material.self_illum.xyz * srgb_to_linear(material_albedo * material.tint.rgb), base_alpha);
     }
-    if envmap_tint.w > 0.5 {
+    if material.envmap_tint.w > 0.5 {
         rgb += envmap_specular(mesh, base_alpha);
     }
     // Source FinalOutput TONEMAP_SCALE_LINEAR: the camera's exposure is the tonemap scale.
     rgb *= view.exposure;
     // Bevy Add uses a premultiplied pipeline. Alpha zero retains all of the
     // destination while premultiplying RGB implements Source SrcAlpha/One.
-    if parameters.z > 0.5 { return vec4(rgb * base.a, 0.0); }
+    if material.parameters.z > 0.5 { return vec4(rgb * base.a, 0.0); }
     return vec4(rgb, base.a);
 }

@@ -1,5 +1,29 @@
 # Design
 
+## Viewmodel animation motion blur (2026-10-26)
+
+Owner-requested Advanced mode in the Motion blur dropdown. Disabled and Enabled retain
+retail behavior; Advanced adds animation blur. Keep the existing persisted boolean and
+a new false-by-default viewmodel flag, so old saves remain camera-only; the retail cvar
+selects retail off/on. Reuse an installed localized Advanced token.
+
+Implementation: use current/previous GPU-skinned weapon poses in the viewmodel camera, including crowbar swings. Keep the world camera
+blur independent. Reuse Bevy motion-vector prepass and the existing cached frame-copy
+pass, with a bounded seven-tap half-frame shutter reconstruction. Preserve MSAA and
+alpha-tested silhouettes. No history from hidden weapons, map changes, pause or disabled
+settings; warm history before blurring. No weapon prepass/resources in Disabled or
+retail Enabled. The extension also gates on a visible GPU-skinned weapon and holster state, and resets on lens/map changes.
+
+Pack SourceMaterial uniforms into one shared shader layout: the previous separate
+buffers exhausted Metal vertex bindings once previous skinning was enabled. Preserve
+all field semantics and validate flashlight, alpha-tested shadows and emissive materials.
+
+Validate component lifecycle and owning math, then packaged stationary-camera swings
+with blur on/off, still poses, weapon switches, pause and MSAA. Inspect captures and
+measure packaged frame time against the preserved package. Record remaining limitations
+(screen-space edge coverage, transparent effects, CPU-skinning diagnostic mode), keeping
+README unchanged. Commit the validated checkpoint.
+
 ## Platform availability and development hints (2026-10-26)
 
 Owner request: hide controls unavailable on the running platform, and mark unfinished

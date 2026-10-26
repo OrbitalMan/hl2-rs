@@ -68,6 +68,7 @@ pub(super) fn mat_motion_blur_enabled_value(console: &Console) -> Option<String>
 
 pub(super) fn set_mat_motion_blur_enabled(console: &mut Console, arg: &str) -> Result<(), Invalid> {
     console.config.video.advanced.motion_blur = flag(arg)?;
+    console.config.video.advanced.motion_blur_viewmodel = false;
     Ok(())
 }
 
