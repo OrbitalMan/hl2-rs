@@ -1,5 +1,14 @@
 # Local validation — 2026-10-05
 
+## Lighting follow-up: direction report (2026-10-26)
+
+`cargo test -p hl2-simulation shadows --locked`: all 15 pass. Exact installed-client
+registrar/callback/setter reviewed with hash-checked provenance against SDK; the command
+selects a fixed downward vector or stored global direction according to RTT mode.
+The owned canal map's authored control is recorded in docs/lighting.md. Architecture and
+repository isolation checks pass for the documentation checkpoint. Native visual play,
+per-entity overrides and live control inputs are **not tested**; no runtime rebuild needed.
+
 ## Flashlight on the weapon (2026-10-25, macOS Apple Silicon)
 
 Local checks: `scripts/checks/validate.sh` (1,103 Rust tests passed, 89 ignored; 3 Python

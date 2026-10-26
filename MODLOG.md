@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-26 Checkpoint: ordinary shadow direction report
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Added the bounded four-item lighting follow-up plan and docs/lighting.md's
+shadow-direction report. No runtime change; README unchanged.
+
+**Why:** Owner asks whether ordinary shadows should follow local emitters. SDK
+`game/client/clientshadowmgr.cpp` and `c_baseentity.cpp` use downward simple shadows and
+one map-wide render-to-texture direction, with optional per-entity overrides. Exact
+installed-client command registrar/callback/setter agree on the downward/global selection
+and normalized map vector. Native exports/provenance remain private.
+
+**Tested how:** Reviewed exact owned-client bodies against SDK and the current policy;
+15 shadow policy unit tests (`cargo test -p hl2-simulation shadows --locked`), architecture and repository isolation checks. No game rebuild
+needed for this documentation checkpoint.
+
+**Result:** The reported global/vertical direction matches the ordinary HL2 contract.
+It is not necessarily sunlight. Local baked lamp positions do not automatically redirect
+these shadows; High's flashlight depth shadows are a separate projection.
+
+**Still broken or not tested:** Native side-by-side scene comparison, special entity
+shadow-direction overrides and live shadow-control inputs. Floor overlay shadows, visible
+lamp emission and flashlight availability are the following independent checkpoints.
+
+**Next:** Reproduce/fix the canal corridor's floor overlay shadow compositing.
+
 ## 2026-10-25 The flashlight illuminates the viewmodel
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

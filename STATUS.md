@@ -2,6 +2,17 @@
  
  Checkpoint: 2026-10-25 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. The flashlight power HUD and High depth shadows are implemented and validated. Diffuse viewmodel flashlight lighting is also implemented; native shader/shadow parity remains unverified. Sections below are newest first.
 
+## Lighting bug follow-up: direction report checkpoint (2026-10-26)
+
+- Ordinary shadows: Low points down; Medium/High use the map's shadow-control vector,
+  independent of nearby baked lamps. SDK and exact installed `r_shadowdir` callback/setter
+  agree on that contract. High's flashlight depth shadow is separate. No nearest-lamp
+  direction change is appropriate from this evidence. Details: docs/lighting.md.
+- Entity-specific direction overrides and dynamic shadow-control inputs remain unverified.
+  Native side-by-side play is **not tested** for this checkpoint; runtime code unchanged.
+- Next checkpoints: floor overlays in the canal start corridor, lamp/tube emissive material
+  rules, then flashlight availability and authored enable/disable integration. Plan: DESIGN.
+
 ## Flashlight on the weapon (2026-10-25)
 
 - Implemented: the placed beam illuminates the viewmodel through its existing world-lighting

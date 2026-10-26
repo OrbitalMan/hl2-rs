@@ -1,5 +1,30 @@
 # Design
 
+## Lighting bug follow-up (2026-10-26)
+
+Owner scope, separate checkpoint commits:
+
+1. Check ordinary shadow direction against SDK and bounded installed-client evidence.
+   Report map-controlled/vertical behavior and any unimplemented entity override; do not
+   replace it with nearest-light shadows without retail evidence.
+2. Reproduce shadows over floor overlays in the start corridor of `d1_canals_01` with
+   installed materials and a controlled caster. Check geometry depth and transparent draw
+   order; fix the receiver/compositing cause, not individual paper materials. Unit-test
+   ordering/offset policy and assert packaged Low/Medium/flashlight captures. Measure
+   before/after frame and shadow-update time with completed scripts and a useful window.
+3. Inspect the actual lamp/tube VMT/VTF data in the reported area. Follow its installed
+   self-illumination/unlit/mask rules through decoding and shading; add owning tests and
+   captures of the lit fixture, preserving non-emissive materials. Measure any runtime
+   cost and keep worker-time asset loading.
+4. Audit flashlight availability from spawn, suit pickup/removal, death, map transitions,
+   batteries and authored Enable/Disable inputs. Compare SDK with exact installed server
+   functions; fix missing gameplay integration in the simulation/registered input path,
+   keeping the host as an adapter. Test unit transitions and packaged pre/post-suit and
+   authored enable/disable cases, without claiming an ordinary campaign playthrough.
+
+Keep README unchanged. Record failures, exact commands, captures and costs in validation,
+performance, STATUS and MODLOG; commit each independently reviewable checkpoint.
+
 ## Shadow detail and the flashlight (2026-10-25)
 
 Goal (owner): Options > Video > Advanced > Shadow detail at all three levels, and the flashlight that High
