@@ -19,6 +19,8 @@ pub enum Effect {
     },
     Setang(glam::Vec3),
     Map(String),
+    /// Start an installed chapter in its selected game.
+    ChapterMap(GameMap),
     Fire {
         target: String,
         input: String,

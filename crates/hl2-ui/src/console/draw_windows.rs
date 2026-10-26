@@ -1,0 +1,94 @@
+//! Window composition shared with chapter selection.
+use super::{Console, Window};
+use glam::Vec2;
+use source_ui::{canvas::Rect, widgets::Painter, windows::Layer};
+
+impl Console {
+    pub(super) fn draw_windows(&self, time: f64) {
+        let confirm_box_to_draw = self
+            .confirm_box
+            .as_ref()
+            .or(self.closing_confirm_box.as_ref());
+        let quit_bounds = confirm_box_to_draw.map(|(confirm, _)| {
+            let (origin, scale, layout) = self.quit_geometry(confirm);
+            Rect::new(
+                origin.x,
+                origin.y,
+                layout.size.x * scale,
+                layout.size.y * scale,
+            )
+        });
+
+        let active_windows: Vec<Window> = self.shell.windows.order().collect();
+        for (idx, &window) in active_windows.iter().enumerate() {
+            let mut occluders = Vec::new();
+            if let Some(qb) = quit_bounds {
+                occluders.push(qb);
+            }
+            for &above in &active_windows[idx + 1..] {
+                match above {
+                    Window::Console => occluders.push(self.window_bounds(Window::Console)),
+                    Window::Options | Window::NewGame => occluders.push(self.window_bounds(above)),
+                    _ => {}
+                }
+            }
+
+            match window {
+                Window::NewGame => self.draw_chapters(time, &occluders),
+                Window::Options => {
+                    let theme = self.window_theme(window, time);
+                    let alpha = self
+                        .shell
+                        .windows
+                        .window_composite_alpha(Window::Options, time);
+                    let old_alpha = self.canvas.set_alpha_multiplier(alpha);
+                    let options_focused =
+                        self.shell.windows.focus() == Layer::Window(Window::Options);
+                    self.options.draw_with_occluders(
+                        &Painter {
+                            theme: &theme,
+                            ..self.painter(Vec2::ZERO, 1.)
+                        },
+                        &occluders,
+                        Some(time),
+                        Some(options_focused),
+                    );
+                    self.canvas.set_alpha_multiplier(old_alpha);
+                }
+                Window::Console => {
+                    let alpha = self
+                        .shell
+                        .windows
+                        .window_composite_alpha(Window::Console, time);
+                    let old_alpha = self.canvas.set_alpha_multiplier(alpha);
+                    self.draw_console_with_occluders(time, &occluders);
+                    self.canvas.set_alpha_multiplier(old_alpha);
+                }
+                Window::SubDialog | Window::Confirmation => {}
+            }
+        }
+        // The confirmation box is modal over every window.
+        if let Some((confirm, _)) = confirm_box_to_draw {
+            let (origin, scale, layout) = self.quit_geometry(confirm);
+            let painter = self.painter(origin, scale);
+            let theme = self.window_theme(Window::Confirmation, time);
+            let alpha = self
+                .shell
+                .windows
+                .window_composite_alpha(Window::Confirmation, time);
+            let old_alpha = self.canvas.set_alpha_multiplier(alpha);
+            confirm.draw(
+                &Painter {
+                    theme: &theme,
+                    ..painter
+                },
+                &layout,
+            );
+            self.canvas.set_alpha_multiplier(old_alpha);
+        }
+        if let Some(loading) = &self.loading_dialog {
+            let scale = crate::proportional::dialog_scale(self.canvas_size());
+            loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
+        }
+    }
+}

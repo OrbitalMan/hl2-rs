@@ -186,7 +186,6 @@
   "crates/hl2-simulation/src/projectiles.rs": 1219,
   "crates/hl2-simulation/src/sounds.rs": 1208,
   "crates/hl2-ui/src/closecaption.rs": 1182,
-  "crates/hl2-ui/src/console.rs": 1073,
   "crates/hl2-ui/src/gameui/options.rs": 2694,
   "crates/hl2-ui/src/hud.rs": 2075,
   "crates/source-assets/src/models.rs": 1426,
@@ -267,7 +266,7 @@
    106
   ],
   "crates/hl2-bevy/src/simulation.rs::console_effects": [
-   131
+   129
   ],
   "crates/hl2-bevy/src/simulation.rs::step": [
    244
@@ -438,7 +437,7 @@
    123
   ],
   "crates/hl2-ui/src/console.rs::draw": [
-   376
+   293
   ],
   "crates/hl2-ui/src/console.rs::load": [
    208
@@ -466,9 +465,6 @@
   ],
   "crates/hl2-ui/src/gameui/resources.rs::fallback_game_menu": [
    165
-  ],
-  "crates/hl2-ui/src/gameui/resources.rs::load": [
-   139
   ],
   "crates/hl2-ui/src/gameui/settings.rs::select": [
    113
@@ -530,7 +526,7 @@
  },
  "test_files": {
   "crates/hl2-simulation/src/entities/tests.rs": 2178,
-  "crates/hl2-ui/src/console/tests.rs": 4908,
+  "crates/hl2-ui/src/console/tests.rs": 4718,
   "crates/hl2-ui/src/gameui/options/tests.rs": 3043
  }
 }

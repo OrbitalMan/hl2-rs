@@ -51,7 +51,7 @@ such a change.
 
 ### Expansion Background Maps
 
-- Game assets are the source of truth, no map tables: the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`); each game's menu background is chapter 1 of its own `scripts/chapterbackgrounds.txt` and its New Game map comes from its own `cfg/chapter1.cfg`, both read through that game's own mount (`resources::read_game_text`), never through the mount of whatever map is loaded (the startup mount follows the saved background, so an Episode Two background made Half-Life 2 resolve to `ep2_background01`).
+- Game assets are the source of truth, no map tables: the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`); each game's menu background is chapter 1 of its own `scripts/chapterbackgrounds.txt` and New Game opens its own `cfg/chapter*.cfg` browser, both read through that game's own mount, never through the mount of whatever map is loaded (the startup mount follows the saved background, so an Episode Two background made Half-Life 2 resolve to `ep2_background01`).
 - Entering an expansion's submenu (Half-Life 2, Episode One, Episode Two, Lost Coast) updates the background map to that expansion's initial chapter background and triggers an asynchronous 3D scene swap.
 - Background map load failures only log a warning to console and `campaign.failures`; they must never crash the game, terminate the process, or dismiss the menu.
 - Navigating Back or pressing Escape preserves the current expansion background map; it must not revert to base Half-Life 2 until another expansion is explicitly chosen.
@@ -141,7 +141,7 @@ Deficiencies found in the baseline, each tied to a requirement:
 
 | Area | Baseline defect | Decision |
 |---|---|---|
-| Main menu | Four hard-coded entries; no HL2/Episode One/Episode Two categories, spacers, Extras or Quit confirmation; New Game hard-coded `d1_trainstation_02` | Model built from `GameMenu.res` (file order out of game, `InGameOrder` in game); New Game map from `cfg/chapter1.cfg`; Quit opens a confirmation dialog |
+| Main menu | Four hard-coded entries; no HL2/Episode One/Episode Two categories, spacers, Extras or Quit confirmation; New Game hard-coded `d1_trainstation_02` | Model built from `GameMenu.res` (file order out of game, `InGameOrder` in game); New Game browser from the selected game's own `cfg/chapter*.cfg`; Quit opens a confirmation dialog |
 | Pause menu | Separate hard-coded list (Resume/Options/Developer console/Quit) | Same `GameMenu.res` model with `OnlyInGame` entries; the console stays on tilde |
 | Localization | Ad-hoc lookups of a few tokens in `gameui_english.txt` per module, hard-coded English defaults otherwise | One merged `Localization` table (all GameUI files, first file wins) with the key-name fallback |
 | Options layout | Hand-placed rectangles in a 952-line module mixing state, input and drawing | Control rectangles/labels/enabled flags from `OptionsSub*.res`; dialog size 512x406 and title from retail `GameUI.dll`; widget state separated from drawing |
@@ -170,8 +170,8 @@ overlay and list voice packs; the VFS search path itself is unchanged.
 | Options pages | `resource/optionssub{difficulty,keyboard,mouse,gamepad,audio,video}.res`, `optionssubvideogammadlg.res`, `optionssub{audio,video}thirdpartydlg.res` |
 | Key actions / defaults | `scripts/kb_act.lst`, `cfg/config_default.cfg` |
 | Gamma test image | `materials/vgui/gamma.vtf` (ImagePanel `image "gamma"`) |
-| Background map | Each game's own `scripts/chapterbackgrounds.txt` (chapter 1; `hl2` -> `background01`), read through that game's mount; the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`, `read_game_text`) |
-| New Game map | Each game's own `cfg/chapter1.cfg`, read the same way |
+| Background map | Each game's own `scripts/chapterbackgrounds.txt` (chapter 1; `hl2` -> `background01`), read through that game's mount; the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`, `GameUiResources::load_campaigns`) |
+| New Game chapters | Each game's own nonempty `cfg/chapter*.cfg`, numeric/suffix order; Start New Game loads the selected config's map |
 | Game of a map | Explicit where known: a submenu loads `(game, map)` (`Effect::MainMenuMap(GameMap)`), the saved background keeps `gameplay.background_game`, level transitions stay in the running game. A bare name (`map`, `map_background`, `--map`, `--background-map`, respawn, a background saved without its game) belongs to the game whose own folder ships `maps/<name>.bsp`, loose or in its own VPKs, searching `hl2` first, then the other `gameinfo.txt` folders (`source_assets::install::game_for_map`); names typed in a session (`map`, `map_background`, respawn) search the running game before `hl2`, command-line names do not. The map is then read through that game's mount (`Vfs::mount_game`), whose order is the `SearchPaths` block of the game's own `gameinfo.txt` (`vpk::search_paths`: custom folders, own VPKs, inherited VPKs, then loose folders). Loading a gameplay map saves the background of its chapter as the menu background (section 13); Return to main menu and the next launch show it. Pre-blurred `materials/console/<map>[_widescreen].vtf` images are keyed by `(game, map)`, so Half-Life 2's and Lost Coast's `background01` need no alias |
 | Spoken languages | `hl2/hl2_sound_vo_<language>_dir.vpk` present in the install |
 
@@ -212,7 +212,7 @@ What exists:
     running behind the main menu;
   - `--position`, `--yaw`, `--pitch`, `--fly`, `--movement-script`, `--capture-live`,
     `--capture-burst` and `--capture-monitor` without a loadable `--map` exit with an error.
-- New Game in the HALF-LIFE 2 category loads chapter 1 as gameplay. Escape on a background level
+- New Game in a game category opens its chapter browser; Start New Game loads the selected chapter as gameplay. Escape on a background level
   closes the quit box or returns from a category, but never resumes the background into gameplay.
 
 Placeholders (shown disabled; activating logs to the console): Load Game, Achievements, Workshop.
@@ -1888,3 +1888,13 @@ a bounded stack buffer rather than allocating for the new visibility queries.
 This status describes whether a setting affects its intended feature; it is not a claim
 of complete native engine or campaign parity. Owned-resource/unit and packaged evidence,
 rejected fixtures and timing limits are recorded in validation/performance docs.
+
+## Chapter selection (2026-10-27)
+
+New Game opens a non-modal three-card chapter browser for the selected game.
+Installed chapter configs, localization tokens, dialog layouts, scheme colors and
+material thumbnails supply its content. Start New Game submits the selected
+chapter's first map with explicit game identity to the asynchronous loader.
+Cancel/Escape preserve the menu category/background. All discovered chapters are
+selectable; progress locking, commentary and intro movies are unfinished. Detailed
+evidence, resource precedence, controls and limitations: [chapter-selection.md](chapter-selection.md).

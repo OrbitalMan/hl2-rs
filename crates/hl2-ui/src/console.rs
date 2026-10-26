@@ -1,6 +1,8 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
+mod chapter_dialog;
 pub mod commands;
 pub mod complete;
+mod draw_windows;
 mod effect;
 mod focus;
 mod loading;
@@ -19,7 +21,7 @@ use glam::{vec2, Vec2};
 use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
 use source_ui::{
-    canvas::{Canvas, Color, Rect, Texture2D, WHITE},
+    canvas::{Canvas, Color, Texture2D, WHITE},
     console::panel::Style as ConsoleStyle,
     font::{FontFace, TextOutline},
     message_box::MessageBox,
@@ -34,6 +36,7 @@ use std::sync::Arc;
 /// A dialog window over the base layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 pub enum Window {
+    NewGame,
     Options,
     Console,
     /// A sub-dialog over a parent dialog (e.g. Video Advanced, Keyboard Advanced, Gamma, Credits).
@@ -58,6 +61,7 @@ pub enum Mode {
     Pause,
     Console,
     MainMenu,
+    NewGame,
     Options,
 }
 
@@ -126,6 +130,8 @@ pub struct Console {
     pub menu_tracker: ButtonTracker<usize>,
     last_menu_hover: Option<usize>,
     pub options: OptionsDialog,
+    chapter_dialogs: BTreeMap<String, crate::gameui::new_game::Dialog>,
+    chapter_game: Option<String>,
 
     /// `(game, image)` -> pre-blurred background (see `GameUiResources::background_images`).
     pub background_textures: BTreeMap<(String, String), Texture2D>,
@@ -294,6 +300,8 @@ impl Default for Console {
             menu_tracker: ButtonTracker::new(),
             last_menu_hover: None,
             options: OptionsDialog::default(),
+            chapter_dialogs: BTreeMap::new(),
+            chapter_game: None,
             background_textures: BTreeMap::new(),
             config,
             chapter_index: Default::default(),
@@ -541,6 +549,7 @@ impl Console {
                 Texture2D::from_rgba8(img.width, img.height, &img.rgba),
             );
         }
+        self.prepare_chapters(&resources);
         self.gameui = Arc::new(resources);
         self.options.set_resources(self.gameui.clone());
     }
@@ -967,90 +976,7 @@ impl Console {
                 );
             }
         }
-        let confirm_box_to_draw = self
-            .confirm_box
-            .as_ref()
-            .or(self.closing_confirm_box.as_ref());
-        let quit_bounds = confirm_box_to_draw.map(|(confirm, _)| {
-            let (origin, scale, layout) = self.quit_geometry(confirm);
-            Rect::new(
-                origin.x,
-                origin.y,
-                layout.size.x * scale,
-                layout.size.y * scale,
-            )
-        });
-
-        let active_windows: Vec<Window> = self.shell.windows.order().collect();
-        for (idx, &window) in active_windows.iter().enumerate() {
-            let mut occluders = Vec::new();
-            if let Some(qb) = quit_bounds {
-                occluders.push(qb);
-            }
-            for &above in &active_windows[idx + 1..] {
-                match above {
-                    Window::Console => occluders.push(self.window_bounds(Window::Console)),
-                    Window::Options => occluders.push(self.window_bounds(Window::Options)),
-                    _ => {}
-                }
-            }
-
-            match window {
-                Window::Options => {
-                    let theme = self.window_theme(window, time);
-                    let alpha = self
-                        .shell
-                        .windows
-                        .window_composite_alpha(Window::Options, time);
-                    let old_alpha = self.canvas.set_alpha_multiplier(alpha);
-                    let options_focused =
-                        self.shell.windows.focus() == Layer::Window(Window::Options);
-                    self.options.draw_with_occluders(
-                        &Painter {
-                            theme: &theme,
-                            ..self.painter(Vec2::ZERO, 1.)
-                        },
-                        &occluders,
-                        Some(time),
-                        Some(options_focused),
-                    );
-                    self.canvas.set_alpha_multiplier(old_alpha);
-                }
-                Window::Console => {
-                    let alpha = self
-                        .shell
-                        .windows
-                        .window_composite_alpha(Window::Console, time);
-                    let old_alpha = self.canvas.set_alpha_multiplier(alpha);
-                    self.draw_console_with_occluders(time, &occluders);
-                    self.canvas.set_alpha_multiplier(old_alpha);
-                }
-                Window::SubDialog | Window::Confirmation => {}
-            }
-        }
-        // The confirmation box is modal over every window.
-        if let Some((confirm, _)) = confirm_box_to_draw {
-            let (origin, scale, layout) = self.quit_geometry(confirm);
-            let painter = self.painter(origin, scale);
-            let theme = self.window_theme(Window::Confirmation, time);
-            let alpha = self
-                .shell
-                .windows
-                .window_composite_alpha(Window::Confirmation, time);
-            let old_alpha = self.canvas.set_alpha_multiplier(alpha);
-            confirm.draw(
-                &Painter {
-                    theme: &theme,
-                    ..painter
-                },
-                &layout,
-            );
-            self.canvas.set_alpha_multiplier(old_alpha);
-        }
-        if let Some(loading) = &self.loading_dialog {
-            let scale = crate::proportional::dialog_scale(self.canvas_size());
-            loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
-        }
+        self.draw_windows(time);
     }
 }
 

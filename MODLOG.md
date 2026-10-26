@@ -1,5 +1,38 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: resource-driven chapter browser implementation
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** New Game opens a non-modal chapter browser with installed configs, localized
+names/buttons, layouts, scheme colors and thumbnail materials. Shared focus, key release,
+pointer capture, placement and window composition support selection, paging, cancellation
+and explicit game/map requests through the existing asynchronous loader. Chapter discovery
+and reads use MOD-owned content, excluding inherited/embedded configs. Textures/ellipsized
+labels are cached; closed dialogs add no rendering work. Extracted window composition and
+chapter-related tests to keep touched files below their previous size; tightened baseline.
+
+**Why:** Selecting an expansion must expose its chapters without launching chapter 1, and
+must preserve the selected game's identity even when another game supplied the menu map.
+
+**Tested how:** validate.sh passes 1,133 Rust tests/93 ignored and 13 Python tests, strict
+Clippy/fmt/architecture. Windows-target strict Clippy passes. Owned catalog test passes all
+four games with complete title/thumbnail coverage. First release replay round passes
+submenus, chapter-return backgrounds, chapter selection/load for all games and non-modal
+Options (4 checks, 305 s). SDK-confirmed native thumbnail cropping has a canvas regression.
+
+**Result:** All four selected chapter maps load with the correct game identity. Initial
+thumbnail capture is rejected because full padded textures were stretched; corrected
+native-size sampling is built. Final pointer/cancel replays, corrected captures and frame
+timing are running for the next evidence checkpoint. Package was built with build-bevy.sh.
+
+**Still broken or not tested:** Native Windows/Linux execution and retail pixel parity are
+not tested. All discovered launchable chapters are exposed; progress locking, commentary,
+intro movies and the retail scroll animation are unfinished. No frame-time claim yet.
+
+**Next:** Inspect the corrected packaged captures, finish pointer/cancel/load assertions,
+measure idle/browser frame time against the prior package, and commit that evidence.
+
 ## 2026-10-27 Checkpoint: chapter selection research and plan
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

@@ -320,6 +320,17 @@ impl Simulation {
             "native_convex_shapes": self.physics.native_shape_count, "native_shape_fallbacks": self.physics.native_shape_fallbacks,
             "skipped_colliders": self.physics.skipped, "dynamic_props": self.physics.dynamic.len()})
     }
+    fn request_gameplay_map(
+        &mut self,
+        ui: &mut crate::ui_host::Console,
+        map: String,
+        game: Option<String>,
+    ) {
+        ui.map_request = Some(map);
+        ui.map_request_game = game;
+        ui.background_request = false;
+        self.loading = true;
+    }
     pub(crate) fn set_fly(&mut self, fly: bool) {
         if self.fly != fly {
             self.fly = fly;
@@ -402,12 +413,10 @@ impl Simulation {
                         self.yaw.to_degrees()
                     ));
                 }
-                Effect::Map(map) => {
-                    ui.map_request = Some(map);
-                    ui.map_request_game = None;
-                    ui.background_request = false;
-                    self.loading = true;
+                Effect::ChapterMap(target) => {
+                    self.request_gameplay_map(ui, target.map, Some(target.game))
                 }
+                Effect::Map(map) => self.request_gameplay_map(ui, map, None),
                 Effect::MainMenuMap(background) => {
                     if self.loading && !ui.background_request {
                         ui.source

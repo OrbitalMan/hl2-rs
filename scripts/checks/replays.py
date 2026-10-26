@@ -191,6 +191,46 @@ def check_chapter_menu():
                                     "hl2/d3_c17_10a", "hl2/background06"])
 
 
+def check_chapter_selection():
+    """Installed chapter browser and explicit game/map loading in every expansion."""
+    for game_name, count, key, map_name in [
+        ("hl2", 15, "2", "d1_trainstation_05"),
+        ("episodic", 5, "2", "ep1_citadel_03"),
+        ("ep2", 7, "2", "ep2_outland_02"),
+        ("lostcoast", 1, "1", "d2_lostcoast"),
+    ]:
+        args = (*MENU[:-2], "--frames", "1800", "--movement-script")
+        preview = game(f"chapters_{game_name}_preview", *args,
+                       f"test-inputs/bevy-chapters-{game_name}-preview.json")
+        cancelled = preview.sample("cancelled")["console"]
+        expect(f"{game_name}: Cancel returns to menu", cancelled["mode"], "MainMenu")
+        expect(f"{game_name}: Cancel closes browser", cancelled["chapters"], None)
+        holds(f"{game_name}: Cancel retains background", cancelled["background_level"])
+        browser = preview.sample("browser-settled")["console"]
+        expect(f"{game_name}: browser mode", browser["mode"], "NewGame")
+        chapters = browser["chapters"]
+        expect(f"{game_name}: chapter count", len(chapters["entries"]), count)
+        expect(f"{game_name}: thumbnail count", chapters["thumbnails"], count)
+        expect(f"{game_name}: chapter game", chapters["game"], game_name)
+        holds(f"{game_name}: localized names", all("_chapter" not in e["title"].lower()
+              for e in chapters["entries"]), chapters["entries"])
+        holds(f"{game_name}: opening does not load gameplay", browser["background_level"])
+        run = game(f"chapters_{game_name}", *args,
+                   f"test-inputs/bevy-chapters-{game_name}.json", timeout=300)
+        selected = run.sample("selected-chapter")["console"]["chapters"]
+        expect(f"{game_name}: selected key", selected["entries"][selected["selected"]]["key"], key)
+        pointer = run.sample("pointer-selected")["console"]["chapters"]
+        expect(f"{game_name}: pointer-selected key", pointer["entries"][pointer["selected"]]["key"], key)
+        if game_name == "hl2":
+            fractional = run.sample("chapter9a")["console"]["chapters"]
+            expect("HL2 fractional chapter", fractional["entries"][fractional["selected"]]["key"], "9a")
+        expect(f"{game_name}: completed chapter load", run.campaign()["loaded_map"], map_name)
+        expect(f"{game_name}: game identity", run.campaign()["loaded_game"], game_name)
+        expect(f"{game_name}: gameplay", run.console()["mode"], "Gameplay")
+        holds(f"{game_name}: not a background", not run.console()["background_level"])
+        expect(f"{game_name}: no loader failures", run.campaign()["failures"], [])
+
+
 def check_menu_options():
     """Options is not modal: the menu beside it works, the menu under it gets nothing."""
     run = game("menu_options", *MENU[:-2], "--frames", "800",
@@ -1001,7 +1041,8 @@ GAMEPLAY_MAPS = {**{f: "d1_trainstation_01" for f in STATION_01},
                  **{f: "d1_trainstation_02" for f in STATION_02},
                  **{f: "d1_trainstation_04" for f in STATION_04}}
 # Fixtures used by the UI checks above (by file name stem).
-UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-return",
+UI_FIXTURES = tuple(f"bevy-chapters-{game}{suffix}" for game in ("hl2", "episodic", "ep2", "lostcoast")
+                    for suffix in ("", "-preview")) + ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-return",
                "bevy-menu-options-nonmodal", "bevy-menu-options-list",
                "bevy-menu-resolution-change", "bevy-options-keyboard-apply-resolution", "bevy-save-config",
                "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud",
@@ -1536,6 +1577,7 @@ CHECKS = [
     Check("submenus", check_submenus, "shared"),
     Check("return_menu", check_return_menu, "shared"),
     Check("chapter_menu", check_chapter_menu, "shared"),
+    Check("chapter_selection", check_chapter_selection, "shared"),
     Check("chapter_quit", check_chapter_quit, "shared"),
     Check("menu_options", check_menu_options, "shared"),
     Check("options", check_options, "shared"),

@@ -1,14 +1,18 @@
 # STATUS
 
-## Chapter selection in progress (2026-10-27)
+## Chapter selection implementation (2026-10-27)
 
-- Research/design checkpoint committed separately from implementation: owned MOD chapter
-  configs, localization, layouts and materials plus identity-pinned retail GameUI evidence.
-  Details: docs/chapter-selection.md and docs/DESIGN.md.
-- Browser implementation is under validation. Initial packaged capture revealed stretched
-  padded thumbnails; rejected. SDK ImagePanel confirms native-size clipping is needed.
-- Next: fix thumbnail sampling, commit the validated implementation, then complete packaged
-  expansion chapter-load/capture checks and frame-time comparison. Native UI parity is not tested.
+- New Game opens a resource-driven, non-modal three-card browser. Clicking selects; Start
+  New Game or focused-card Enter launches the chapter with explicit game/map identity.
+  Installed MOD configs, localization, layouts, scheme colors and materials take priority.
+- validate.sh: 1,133 Rust tests/93 ignored +13 Python; strict Clippy/fmt/architecture and
+  Windows-target strict Clippy pass. Owned catalogs verify all four games and thumbnails.
+- First packaged round: submenus, chapter-return backgrounds, all four chapter loads and
+  non-modal Options pass (4 checks, 305 s). Initial stretched-thumbnail capture rejected;
+  SDK ImagePanel confirms native-size crop, now fixed and covered by a canvas regression.
+- Corrected package and final pointer/cancel replays/captures are under validation. Next:
+  inspect accepted images, measure frame time and commit evidence. Native UI comparison,
+  Windows/Linux runtime, progress locking/commentary/intro movies remain not tested/unfinished.
 
 
  Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. PR readiness maintenance findings are fixed; runtime behavior is unchanged. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.

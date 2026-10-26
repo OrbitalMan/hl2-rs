@@ -8,6 +8,7 @@ pub mod display;
 pub mod loading;
 pub mod localize;
 pub mod menu;
+pub mod new_game;
 pub mod options;
 pub mod recommendation;
 pub mod resources;

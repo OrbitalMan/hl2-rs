@@ -5,7 +5,11 @@
 Installed content is authoritative. The desktop layouts are
 `hl2/resource/newgamedialog.res` (600 x 296; Prev, Next, Play, Cancel and two
 separators) and `hl2/resource/newgamechapterpanel.res` (chapter heading/name,
-152 x 86 picture in a 168 x 106 border). The selected game's VFS resolves
+152 x 86 picture in a 168 x 106 border). SDK `vgui2/vgui_controls/ImagePanel.cpp`
+paints unscaled images at native size and clips them to the panel. The chapter
+textures contain power-of-two padding: sample their top-left 152 x 86 region
+before proportional UI scaling; stretching the entire texture makes the picture
+small inside a black padded area and is rejected. The selected game's VFS resolves
 `materials/vgui/chapters/chapter<key>.vmt` and its `$basetexture`, rather than
 assuming a texture name or using replacement artwork. Scheme colors resolve
 `NewGame.TextColor`, `NewGame.FillColor` and `NewGame.SelectionColor`.

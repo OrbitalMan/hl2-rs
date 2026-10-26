@@ -93,7 +93,7 @@ impl Console {
     pub fn dim_overlay_alpha(&self, time: f64) -> f32 {
         let menu_open = matches!(
             self.mode,
-            Mode::MainMenu | Mode::Pause | Mode::Options | Mode::Console
+            Mode::MainMenu | Mode::Pause | Mode::Options | Mode::NewGame | Mode::Console
         );
         let is_mid_gameplay =
             !self.background_level && matches!(self.base, Mode::Pause | Mode::Gameplay);
@@ -509,14 +509,7 @@ impl Console {
                 self.quit_placement.reset();
                 self.confirm_box = Some((crate::gameui::menu::quit_box(loc), ConfirmKind::Quit));
             }
-            // Starting a game closes the windows (Options without applying).
-            MenuOutcome::NewGame(map) => {
-                self.shell.windows.clear();
-                self.sync_mode();
-                self.clear_menu_hover();
-                self.start_loading(&map);
-                return vec![Effect::Map(map)];
-            }
+            MenuOutcome::NewGame(game) => self.open_chapters(&game),
             MenuOutcome::ReturnToMainMenu => {
                 self.reset_menu_interaction();
                 self.quit_placement.reset();

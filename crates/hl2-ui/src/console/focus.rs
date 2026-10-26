@@ -33,6 +33,9 @@ impl Console {
     /// every window.
     pub fn set_mode(&mut self, mode: Mode) {
         match mode {
+            Mode::NewGame => {
+                self.shell.windows.open(Window::NewGame);
+            }
             Mode::Options => {
                 if !self.background_level && self.base == Mode::Gameplay {
                     self.base = Mode::Pause;
@@ -58,6 +61,7 @@ impl Console {
         self.mode = match self.shell.windows.focus() {
             Layer::Window(Window::Options | Window::SubDialog) => Mode::Options,
             Layer::Window(Window::Console) => Mode::Console,
+            Layer::Window(Window::NewGame) => Mode::NewGame,
             Layer::Window(Window::Confirmation) => {
                 if self.options_open() {
                     Mode::Options
@@ -174,6 +178,9 @@ impl Console {
         let canvas = vec2(self.canvas.width(), self.canvas.height());
         match window {
             Window::Options => self.options.frame_bounds(canvas),
+            Window::NewGame => self
+                .chapter_dialog()
+                .map_or(Rect::default(), |d| d.bounds(canvas)),
             Window::Console => {
                 let layout = self.shell.panel.dialog_layout(&self.canvas);
                 Rect::new(
@@ -335,7 +342,7 @@ impl Host for Console {
             // a click that closes the modal layer is not read as a new menu press.
             self.menu_tracker.occlude(input.click || input.held);
         }
-        if let Some(loading) = &self.loading_dialog {
+        if let Some(loading) = self.loading_dialog.as_ref().filter(|l| !l.is_background()) {
             if loading.is_failed() && (input.pressed(Key::Enter) || input.click) {
                 self.loading_dialog = None;
                 self.set_mode(Mode::MainMenu);
@@ -396,6 +403,7 @@ impl Host for Console {
         input: &Input,
     ) -> Vec<Effect> {
         match window {
+            Window::NewGame => self.chapters_input(share),
             Window::Options | Window::SubDialog => {
                 if window == *active_options_window {
                     self.options_input(share)
@@ -433,12 +441,16 @@ impl Host for Console {
     }
 
     fn escape_blocked(&self) -> bool {
-        self.loading_dialog.is_some() || self.quit_placement.active()
+        self.loading_dialog
+            .as_ref()
+            .is_some_and(|l| !l.is_background())
+            || self.quit_placement.active()
     }
 
     fn escape_closes(&self, window: Window) -> bool {
         match window {
             Window::Options | Window::SubDialog => self.options.escape_closes(),
+            Window::NewGame => self.chapter_dialog().is_some_and(|d| !d.placement.active()),
             Window::Confirmation => {
                 if self.confirm_box.is_some() {
                     !self.quit_placement.active()
@@ -453,6 +465,9 @@ impl Host for Console {
 
     fn hold_escape(&mut self, top: Option<Window>) {
         self.options.escape_held = matches!(top, Some(Window::Options | Window::SubDialog));
+        if let Some(d) = self.chapter_dialog_mut() {
+            d.escape_held = top == Some(Window::NewGame);
+        }
         let is_confirm = top == Some(Window::Confirmation);
         if let Some((box_, _)) = &mut self.confirm_box {
             box_.escape_held = is_confirm;
@@ -462,6 +477,9 @@ impl Host for Console {
 
     fn release_escape(&mut self) {
         self.options.escape_held = false;
+        if let Some(d) = self.chapter_dialog_mut() {
+            d.escape_held = false;
+        }
         if let Some((box_, _)) = &mut self.confirm_box {
             box_.escape_held = false;
         }
@@ -470,10 +488,13 @@ impl Host for Console {
 
     fn cancel_drag(&mut self) -> bool {
         self.quit_placement.cancel()
+            || self
+                .chapter_dialog_mut()
+                .is_some_and(|d| d.placement.cancel())
     }
 
     fn escape_modal(&mut self) -> bool {
-        if let Some(loading) = &self.loading_dialog {
+        if let Some(loading) = self.loading_dialog.as_ref().filter(|l| !l.is_background()) {
             if loading.is_failed() {
                 self.loading_dialog = None;
                 self.set_mode(Mode::MainMenu);
@@ -498,6 +519,7 @@ impl Host for Console {
 
     fn escape_window(&mut self, window: Window) {
         match window {
+            Window::NewGame => shell::close_window(self, Window::NewGame),
             Window::Confirmation => {
                 if !self.options.escape_closes() {
                     self.options.escape();
@@ -543,7 +565,7 @@ impl Host for Console {
                 }
             }
             // Windows are never the base.
-            window @ (Mode::Console | Mode::Options) => window,
+            window @ (Mode::Console | Mode::Options | Mode::NewGame) => window,
         };
         self.set_mode(base);
     }
