@@ -1,5 +1,15 @@
 # STATUS
 
+## Native first-map route/audio and immediate grab velocity (2026-10-26)
+
+New private BF controlled-input traversal reaches storage after train exit, customs, the security pen and Barney's room: 79 player snapshots, 60 motion files/5976 samples and 53 serialized requests. Raw integrity checks pass 54574 read occurrences/17597584 bytes. The owned native process exits 0 with installed settings unchanged; both Frida sessions are closed. Three process-specific audio segments and a native demo are retained privately. Waveforms are not proof of dialogue identity or 1:1 mixing.
+
+Two expanded traces hit REA's fixed 16 MiB session cap; that approach stopped after the second failure. Their retained windows remain partial. The strongest security window contains 1993 events/930 closed pairs/53 complete sampled pause groups and 31 recognized outputs, with raw source/generation checks passing; overall trace continuity acceptance stays false. An offline generation-registry bug was caught and corrected before loading the expanded observer. A fresh never-attached matching control was not run.
+
+BH is separately sealed at 73 files: 16 new/15 reused exact bodies, 15 rooted graphs/3984 bytes/1278 starts, 38 anchors. The held-grab callback selects an instantaneous linear-velocity setter, writes active linear terms and clears pending linear terms; its angular pointer is null. The pending setter is a separate method. Actual solver order and measured performance remain unobserved. Keep optimization tied to profiling, membership/rebuild flags and behavior preservation.
+
+Private checkpoint: work/publishing/research-followup-continuation-20261026bi.md. Usage reached 99% at closeout. No Rust edits/builds, branch switch or memory update. First_map_finished:false; original 16 gaps/four missing scene-index entries and full audiovisual/animation/camera/transfer/Rust parity remain open. Next validate a logging backend on an owned fixture before another long scene capture; do not repeat either capped capture unchanged.
+
 ## Pending-vector consumer sealed; live REA 6.8 verified (2026-10-26)
 
 The restarted built-in REA connection now reports package/server 6.8.0, the rea-6.8.0 launcher, 229 tools and skill 49, with aligned identity expectations. The earlier Ghidra and disposable x86 Frida validation receipts remain private; they do not verify all 229 operations. No reinstall or repeated decompilation was needed in this closeout.

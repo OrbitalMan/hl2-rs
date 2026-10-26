@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-26: native first-map AV evidence and controller consumption phase
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material subagents firstmap_gap_audit (gap/harness/raw-trace/audio audit) and physics_phase_static (exact controller/setter research), same exposed family; exact identifiers unavailable. Claude owns Rust implementation.
+
+**Changed / Why:** Continued toward the owner's near-98% usage target in parallel native scene and cross-map physics lanes. New controlled ordinary-input route reaches storage with screenshots, raw state, native demo and process-specific audio. Static BH distinguishes immediate grab velocity writes from pending force/torque and preserves profiling boundaries. No native bodies/assets/tools enter Git.
+
+**Tested how / Result:** Python3.10 `-B` BF/verify.py passes 79 snapshots/60 motion files/5976 samples/54574 raw reads; BH/verify_seal.py passes 73 files/16 new+15 reused exact bodies/38 anchors. BI/verify_inventory.py passes 23 audit files/15 dependencies. Nineteen offline observer controls pass after a rejected generation-refresh draft. Two long REA captures hit the fixed 16 MiB cap; preserved bounded windows pass source/pair checks but continuity acceptance remains false. Audio files have finalized headers/nonzero stereo waveforms; one sample in segment3 reaches full scale. Native exits 0/settings unchanged, observers detached, no owned game/recorder remains.
+
+**Still broken or not tested / Next:** No Rust/parity or complete scene/AV/animation/particle/camera/transfer validation. No fresh never-attached matching control. Stop the capped logging approach after two failures and validate bounded per-scene or file-backed capture on a disposable owned fixture. Physics runtime order/performance still needs measurement. Original16 gaps/four missing scene bodies and first_map_finished:false remain. Latest private handoff research-followup-continuation-20261026bi.md. Usage reached99%; reviewed documentation is committed for a clean Claude checkout.
+
 ## 2026-10-26: pending-vector consumer closeout and live REA 6.8 connection
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.

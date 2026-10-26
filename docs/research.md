@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Native scene AV windows and motion-controller phases (2026-10-26)
+
+Private BF retains a controlled normal-input train-to-storage route, three PID-specific audio segments and a native demo. No forced scene inputs, teleport or synthetic actor setup drove progression. The accepted fresh opening window binds G-Man OnStart/Trigger1/Trigger2/Completion and passenger endline OnStart. Later capped captures retain finite scene/event/output groups, including security03 Trigger3 and Completion, but do not establish a continuous scene timeline. REA6.8's cumulative Frida message cap is fixed at16MiB; both attempts hit it and the approach stopped. Raw failures and the pre-load observer-generation fix remain retained.
+
+BH's exact table/controller binding shows held grab uses the instantaneous setter for its nonnull linear/null angular call: active linear is written and pending linear cleared. Separate pending-setter and gravity-consumer paths remain distinct. Conditional controller-to-integration flow is static evidence, not actual runtime order, full solver recovery or a performance benchmark. The new 73-file BH seal supplements unchanged historical roots. BF/BE/BI are inventoried, not sealed. Private checkpoint: research-followup-continuation-20261026bi.md. First_map_finished:false; full audiovisual/animation/camera/effects/transfer and Rust parity remain open.
+
 ## Pending-vector consumer and scheduler construction (2026-10-26)
 
 Private BC binds an exact consumer through the environment stepping interface, scheduler constructor and default event callback. The 149-byte/27-instruction body adds pending angular/linear terms to the corresponding base terms, then clears six pending words. Four sums use x87 and two use SSE; floating-point control state, exceptional values and full getter equivalence remain unproved. Thirteen new exact baseline/original bodies, two reused exact bodies and 15 rooted byte graphs retain private provenance. The rooted graphs cover 5300 bytes/1575 starts under call-return assumptions; they are not complete indexed function extents.

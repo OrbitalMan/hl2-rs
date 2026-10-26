@@ -1,5 +1,13 @@
 # Local validation — 2026-10-05
 
+## Controlled first-map route and partial capture audits (2026-10-26)
+
+`C:/Python310/python.exe -B ../../work/hl2-decompiled/firstmap-natural-progression-20261026bf/verify.py` passes 79 player snapshots,60 motion files/5976 samples,54574 raw reads/17597584 bytes,53 serialized requests, storage threshold(-3360.154,-29.031,-31.969), finalized demo/audio headers and native exit0/settings unchanged. It explicitly returns frida_trace_complete:false, fresh_never_attached_control:false, first_map_finished:false and rust_parity_tested:false. This validates bounded raw/route/cleanup integrity, not entire-map fidelity.
+
+Independent BI checks the finite security suffix seq2558..4550:1993 events/930 closed pairs/53 complete sampled PauseThink groups,19 observed entry prefixes,28877 raw reads and2350 generation checks. Overall acceptance remains false for provider truncation/missing prefix. Two excluded boundary events and the failed broader captures remain unchanged. Three actual audio files are599.98/179.98/179.99s,stereo44100Hz; the third has one full-scale left sample. No dialogue identification, listening comparison or mix-fidelity claim follows. Demo806.8s/39542 gameframes is recording metadata, not an FPS guarantee.
+
+`C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-controller-consumption-20261026bh/verify_seal.py` passes73files/16new+15reused exact bodies/38anchors. `C:/Python310/python.exe -B ../../work/hl2-decompiled/firstmap-trace-audit-20261026bi/verify_inventory.py` passes23files/15dependencies without promoting partial traces. No Rust tests/build apply to these research documentation changes; document diff/whitelist/staged-set checks apply.
+
 ## Corrected probes and retained failures (2026-10-24)
 
 Read-only verify_seal.py passes new private AT24, AU581, AV27, AW46, AX615, AY9, AZ24, BA26 and BB18 retained-file sets. AU acceptance means intact failed-diagnostic evidence: an owned crash before a window collision, two retained failed reader occurrences, unchanged settings and session closed after exit. It is not damage validation. AW checks a compiled x86 prefix, three sentinel controls and two instrumentation lifecycles. AY checks five loaded-script receipts/29 sites across 18 roots and identifies four incorrect interior call listeners; old roots remain unchanged.
