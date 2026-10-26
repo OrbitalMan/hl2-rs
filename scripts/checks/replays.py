@@ -752,6 +752,31 @@ def check_flashlight_viewmodel():
     holds("off has no weapon light", changes["changed"] < 10, changes)
 
 
+def check_lamp_emission():
+    """The installed tube mask emits independently of its baked static-prop lighting."""
+    settings(video={"width": 1920, "height": 1080, "hdr": "none", "hdr_migrated": True})
+    args = ("--map", "d1_canals_01", "--width", "1920", "--height", "1080",
+            "--movement-script", "test-inputs/bevy-canals-lamp.json")
+    normal = game("canals_lamp", *args)
+    holds("completed", normal.report["render"]["simulation"]["script_finished"])
+    shader = GAME / "bevy-assets/shaders/source.wgsl"
+    original = shader.read_text(encoding="utf-8")
+    marker = "srgb_to_linear(material_albedo * tint.rgb), base_alpha"
+    holds("emissive albedo control exists", marker in original)
+    try:
+        shader.write_text(original.replace(marker, "srgb_to_linear(base.rgb), base_alpha"),
+                          encoding="utf-8")
+        control = game("canals_lamp_baked_control", *args)
+    finally:
+        shader.write_text(original, encoding="utf-8")
+    expect("fixed dimensions", png_size(normal.capture), [1920, 1080])
+    changes = pixel_changes(control.capture, normal.capture, threshold=8, region=(630, 500, 1290, 580))
+    holds("tubes emit without baked-light dimming", changes["brighter"] > 10000
+          and changes["darker"] < 10, changes)
+    wall = pixel_changes(control.capture, normal.capture, threshold=2, region=(0, 0, 1920, 490))
+    holds("unmasked wall remains unchanged", wall["changed"] < 10, wall)
+
+
 def check_hud_aspect():
     """Options > Video > HUD Aspect Ratio: the HUD panels sit inside a centered frame of the chosen
     aspect (report `hud.frame` = [x, width] and `hud.panels` = health, suit, ammo, secondary ammo
@@ -834,7 +859,7 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape",
                "bevy-console-open", "bevy-flashlight-hud-on", "bevy-flashlight-hud-recharged",
                "bevy-flashlight-depth-actor", "bevy-flashlight-depth-fence",
-               "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg")
+               "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg", "bevy-canals-lamp")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1380,6 +1405,7 @@ CHECKS = [
     Check("hud_aspect", check_hud_aspect, "shared"),
     Check("power_hud", check_power_hud, "shared"),
     Check("flashlight_shadows", check_flashlight_shadows, "shared"),
+    Check("lamp_emission", check_lamp_emission, "shared"),
     Check("flashlight_viewmodel", check_flashlight_viewmodel, "shared"),
     Check("window", check_window, "windowed"),
     Check("window_place", check_window_place, "macos"),

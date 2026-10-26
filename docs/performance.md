@@ -1,5 +1,22 @@
 # Performance measurements - 2026-10-05
 
+## Fluorescent self-illumination (2026-10-26)
+
+Packaged Metal, Apple M1 Pro, 1920x1080 HDR None, canal fixture camera recorded in
+`test-inputs/bevy-canals-lamp.json`. Prior package `e3713d0`, corrected shader atop
+`02e6546`. Three alternating runs per package, no concurrent builds/replays; tick 900,
+2,000-frame safety cap, completed scripts. Each measured 561-607 frames after 120 warm-up
+frames (11.10-11.21 seconds). Prior/new means: **18.875/18.921 ms** (+0.045 ms).
+Pairs: 18.420/18.473, 18.485/18.511, 19.721/19.778 ms. The third pair slowed in both
+packages; this does not isolate GPU shader cost or establish an FPS guarantee.
+
+No CPU loop, allocation, file read, light or render pass was added. The change preserves
+unlit emissive albedo before baked modulation and uses it only in the selfillum branch.
+Evidence: `artifacts/lighting-bugs/lamp-summary.json`, each package's `*-timing-*.json`
+and logs. Reproduce each package three alternating times with `--background --no-setup
+--mute --map d1_canals_01 --width 1920 --height 1080 --frames 2000 --movement-script
+artifacts/lighting-bugs/lamp-benchmark.json --report artifacts/lighting-bugs/reproduce.json`.
+
 ## Flashlight on the weapon (2026-10-25)
 
 Packaged Metal, Apple M1 Pro, `d1_trainstation_02`, 1920x1080, HDR Full, Medium shadows.

@@ -230,6 +230,8 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
         // SDK UnlitTwoTexture returns alpha 1; distance fade lives in the VTF frames.
         if parameters.w < -2.5 { base.a = 1.0; }
     }
+    // Static-prop vertex colour is baked illumination, not emissive albedo.
+    let material_albedo = base.rgb;
     base *= tint * vertex_color;
     if base.a < parameters.x { discard; }
     let baked = select(textureSample(lightmap_texture, lightmap_sampler, mesh.uv_b).rgb, vec3(1.0), parameters.w > 0.5);
@@ -248,7 +250,7 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     }
     // SDK $selfillum: diffuse = lerp(diffuse, tint * albedo, base alpha), before specular.
     if self_illum.w > 0.5 {
-        rgb = mix(rgb, self_illum.xyz * srgb_to_linear(base.rgb), base_alpha);
+        rgb = mix(rgb, self_illum.xyz * srgb_to_linear(material_albedo * tint.rgb), base_alpha);
     }
     if envmap_tint.w > 0.5 {
         rgb += envmap_specular(mesh, base_alpha);

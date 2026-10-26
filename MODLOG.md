@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-26 Checkpoint: fluorescent tubes use unlit emissive albedo
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Source shader retains texture/material albedo separately from static-prop
+baked illumination for the installed selfillum mask. Added canal lamp fixture and a
+packaged control restoring the previous dimmed expression; README unchanged.
+
+**Why:** The corridor fluorescent VMT already requests selfillum. Baked vertex colour was
+incorrectly dimming its emissive contribution. No replacement asset or artificial light.
+
+**Tested how:** validate.sh, Windows-target check, release package; packaged lamp_emission,
+flashlight_viewmodel and coverage pass. Front-on images inspected: 25,737 brighter tube
+pixels above 8, zero darker; zero upper-wall changes above 2. One earlier edge-on capture
+was rejected; retained with successful evidence. Installed VMT/VTF and bounded shader
+parameter export reviewed; native shader pixel parity not inferred from parameter names.
+
+**Result:** Tubes visibly shine using their installed alpha mask. No new pass, light,
+CPU loop or frame asset access. Three alternating timing pairs: prior/new 18.875/18.921 ms
+mean (+0.045 ms); 561-607 measured frames/run. Third pair slowed in both packages;
+docs/performance.md records ranges and limits.
+
+**Still broken or not tested:** Native image comparison, all lamp materials, bloom,
+Windows runtime and ordinary playthroughs.
+
+**Next:** Connect authored flashlight inputs, death and player/map state lifetime.
+
 ## 2026-10-26 Checkpoint: canal paper receiver policy and regression
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

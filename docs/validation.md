@@ -1,5 +1,18 @@
 # Local validation — 2026-10-05
 
+## Fluorescent self-illumination (2026-10-26)
+
+`scripts/checks/validate.sh` and `scripts/checks/check_windows.sh` pass. Package built with
+`scripts/build-bevy.sh`. `NO_BUILD=1 ONLY='lamp_emission flashlight_viewmodel coverage'
+python3 scripts/checks/replays.py`: all three groups pass. The new fixture uses installed
+canal model/material data and fixed 1920x1080 HDR None. It requires over 10,000 brighter
+tube pixels above threshold 8 versus the old emissive expression, fewer than 10 darker,
+and fewer than 10 changed upper-wall pixels above threshold 2. The control runs in the
+disposable package and restores its shader in `finally`. Both accepted captures inspected.
+Rejected angled lamp capture retained in `artifacts/lighting-bugs/baseline-lamp.png`;
+accepted front-on probe and packaged images are retained. Native comparison and Windows
+runtime are **not tested**. Performance evidence: docs/performance.md.
+
 ## Canal paper receivers (2026-10-26)
 
 `cargo test -p hl2-bevy canal_papers --locked -- --ignored --nocapture`: owned-map test passes.

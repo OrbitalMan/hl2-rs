@@ -28,6 +28,10 @@ shadows at Medium/High: SDK deliberately excludes this receiver combination. An 
 regression checks exclusion and positive NPC-style reception, so no runtime policy change
 is appropriate. The overlay-depth hypothesis was not the cause of these sheets.
 
+Checkpoint 3 corrects emissive albedo before baked static-prop illumination. The installed
+alpha mask and material tint remain; packaged old-expression control proves tube-only
+brightness, and alternating timing pairs measure the shader change.
+
 Keep README unchanged. Record failures, exact commands, captures and costs in validation,
 performance, STATUS and MODLOG; commit each independently reviewable checkpoint.
 

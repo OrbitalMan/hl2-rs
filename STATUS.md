@@ -2,6 +2,18 @@
  
  Checkpoint: 2026-10-25 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. The flashlight power HUD and High depth shadows are implemented and validated. Diffuse viewmodel flashlight lighting is also implemented; native shader/shadow parity remains unverified. Sections below are newest first.
 
+## Lighting follow-up: fluorescent emission fixed (2026-10-26)
+
+- Static-prop baked vertex illumination no longer dims the installed selfillum albedo.
+  Texture alpha still masks emission, material tint remains, no extra light/pass.
+- Validation and Windows-target checks pass; packaged lamp_emission, flashlight_viewmodel
+  and coverage pass. Accepted images inspected: 25,737 brighter tube pixels above 8,
+  zero darker; zero changed upper-wall pixels above 2. Rejected angled fixture retained.
+- Three alternating packaged timing pairs: prior/new mean 18.875/18.921 ms, +0.045 ms;
+  561-607 measured frames/run. Both packages slow together in the third pair. Details in
+  validation/performance docs. Native image parity, all fixtures, bloom and Windows runtime
+  are **not tested**. README unchanged. Next: flashlight availability integration.
+
 ## Lighting follow-up: canal paper receiver checkpoint (2026-10-26)
 
 - The inspected corridor sheets are static model geometry, not BSP overlays. SDK excludes

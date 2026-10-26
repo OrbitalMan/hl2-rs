@@ -27,7 +27,7 @@ are **not tested**. SDK references: `GetShadowDirection`, `SetShadowDirection` a
 
 HL2-RS already follows this ordinary direction policy in `hl2-simulation::shadows` and
 `hl2-bevy::shadows`. No nearest-local-light direction change is made. Visible emitter
-brightness and shadows over paper overlays are separate defects under investigation.
+brightness is addressed independently below; paper receiver policy is described next.
 
 The owned `d1_canals_01` map supplies direction approximately
 (-0.1677313, 0.0449435, -0.9848077), colour (128,128,128) and cast distance 75.
@@ -55,3 +55,25 @@ these papers has not been reproduced visually, and a native visual comparison is
 correctly: their depth offset was an initial hypothesis, not the cause of these sheets.
 The owner confirmed a physics object at Medium/High: this is the SDK-excluded ordinary
 prop-to-static-prop case, so no receiver-policy change is made.
+
+## Fluorescent fixture emission
+
+The corridor model `models/props_interiors/lights_florescent01a.mdl` selects its installed
+`FlorescentLight01a_on` material. Its VMT requests `$selfillum 1`; the base texture's alpha
+is the emissive mask. The material was decoded correctly. Our shader multiplied its
+emissive albedo by the static prop's baked vertex illumination, making the lit tubes dark.
+The corrected path uses texture and material tint independently of baked illumination,
+then applies the installed alpha mask. Unmasked fixture/wall pixels retain their lighting.
+No replacement asset, extra light, glow sprite or render pass is introduced.
+
+Source SDK `materialsystem/stdshaders/vertexlitgeneric_dx9_helper.cpp` selects the
+self-illumination shader combination separately from vertex lighting. A bounded exact
+installed shader export confirms an alternate envmap-alpha mask parameter; that parameter
+is absent from this fluorescent VMT. This is parameter evidence, not native pixel-output
+parity. The packaged regression compares the corrected shader with the previous baked-
+albedo expression in a disposable copy and restores the shader in `finally`.
+
+Accepted front-on camera: eye 607.53,-8173.45,-25.545, yaw/pitch 0. The earlier angled
+capture viewed the edge/inside of the wall and was rejected as emission proof; retained
+alongside the accepted captures. Native side-by-side, every lamp material, bloom and
+Windows runtime remain **not tested**.
