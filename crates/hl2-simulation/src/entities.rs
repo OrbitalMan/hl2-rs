@@ -2940,6 +2940,19 @@ impl Scene {
                     self.transition = Some((map.into(), e.get("landmark").unwrap_or("").into()));
                 }
             }
+            // InputSetHealth lowers health through TakeDamage(DMG_GENERIC): to zero or
+            // below, the NPC dies like any other damage (Event_Killed, ragdoll).
+            "sethealth" if class.starts_with("npc_") && value <= 0. => {
+                let origin = self.states[id].origin;
+                self.entity_damage.push(crate::projectiles::Damage {
+                    target: crate::projectiles::DamageTarget::Entity(id),
+                    amount: 1e9,
+                    kind: 0,
+                    dissolve: false,
+                    direction: Vec3::ZERO,
+                    origin,
+                });
+            }
             "sethealth" if class.starts_with("npc_") => self.states[id].value = value,
             "setdefaultanimation" if class.starts_with("prop_dynamic") => {
                 // CDynamicProp stores the name without restarting or validating the active clip.
