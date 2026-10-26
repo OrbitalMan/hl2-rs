@@ -128,7 +128,7 @@
         "action": "input",
         "input": {
           "pointer": [
-            350,
+            510,
             370
           ],
           "click": true,
@@ -144,7 +144,7 @@
         "action": "input",
         "input": {
           "pointer": [
-            350,
+            510,
             370
           ],
           "released": true
@@ -160,7 +160,7 @@
         "action": "input",
         "input": {
           "pointer": [
-            640,
+            480,
             508
           ],
           "click": true,
@@ -176,7 +176,7 @@
         "action": "input",
         "input": {
           "pointer": [
-            640,
+            480,
             508
           ],
           "released": true

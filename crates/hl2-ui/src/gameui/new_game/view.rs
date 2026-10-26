@@ -32,7 +32,10 @@ impl Dialog {
         for name in ["divider", "Div"] {
             if let Some(c) = self.catalog.dialog.get(name) {
                 let (x, y, w, h) = c.rect((frame.size.x, frame.size.y));
-                p.sunken(Rect::new(x, y, w, h));
+                // Some installed single-chapter layouts retain the wide dialog's divider.
+                // Size decorative rules to the available interior using the authored inset.
+                let wide = w.min((frame.size.x - 2. * x).max(0.));
+                p.sunken(Rect::new(x, y, wide, h));
             }
         }
         for (target, rect) in self.targets() {

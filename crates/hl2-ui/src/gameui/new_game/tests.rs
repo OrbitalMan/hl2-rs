@@ -252,3 +252,42 @@ fn padded_chapter_texture_is_clipped_at_native_size_before_ui_scaling() {
     assert_eq!(quad.destination.w, (152. * scale).round());
     assert_eq!(quad.destination.h, (86. * scale).round());
 }
+
+#[test]
+fn single_chapter_layout_centers_the_card_and_sizes_decorative_rules_to_the_frame() {
+    use source_ui::{
+        canvas::Canvas,
+        widgets::{Fonts, Painter, Theme},
+    };
+    let mut dialog = fixture(1);
+    dialog.catalog.dialog = Layout::parse(
+        br#""dialog" {
+        "NewGameDialog" { "ControlName" "CNewGameDialog" "wide" "300" "tall" "296" }
+        "divider" { "ControlName" "Divider" "xpos" "24" "ypos" "34" "wide" "548" "tall" "2" }
+        "Play" { "ControlName" "Button" "xpos" "63" "ypos" "252" "wide" "124" "tall" "24" }
+        "Cancel" { "ControlName" "Button" "xpos" "200" "ypos" "252" "wide" "72" "tall" "24" }
+    }"#,
+    )
+    .unwrap();
+    assert_eq!(dialog.panel_rect(0).x, 64.);
+    let canvas = Canvas::default();
+    let theme = Theme::default();
+    let fonts = Fonts::default();
+    let size = vec2(1024., 768.);
+    dialog.draw(
+        &Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        },
+        size,
+    );
+    let bounds = dialog.bounds(size);
+    for q in canvas.drain() {
+        assert!(q.destination.x >= bounds.x && q.destination.y >= bounds.y);
+        assert!(q.destination.x + q.destination.w <= bounds.x + bounds.w + 1.);
+        assert!(q.destination.y + q.destination.h <= bounds.y + bounds.h + 1.);
+    }
+}

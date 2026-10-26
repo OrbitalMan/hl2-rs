@@ -10,7 +10,11 @@
 - First packaged round: submenus, chapter-return backgrounds, all four chapter loads and
   non-modal Options pass (4 checks, 305 s). Initial stretched-thumbnail capture rejected;
   SDK ImagePanel confirms native-size crop, now fixed and covered by a canvas regression.
-- Corrected package and final pointer/cancel replays/captures are under validation. Next:
+- Final pointer/cancel checks pass base/Episode One/Episode Two. Lost Coast fixture used
+  wide-dialog coordinates and clicked Cancel; corrected to its installed 300-unit layout.
+  Its separators overflowed the frame; size them to the authored interior and center the
+  single card. Focused canvas containment test passes; failure/capture retained.
+- Corrected package and final Lost Coast replay/capture are under validation. Next:
   inspect accepted images, measure frame time and commit evidence. Native UI comparison,
   Windows/Linux runtime, progress locking/commentary/intro movies remain not tested/unfinished.
 

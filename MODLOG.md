@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: single-chapter layout containment
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Center a single chapter card in the installed frame; size decorative separators
+within the frame using their authored inset. Correct Lost Coast replay pointer coordinates
+for its own 300-unit dialog rather than the other games' 600-unit layout.
+
+**Why:** Lost Coast's owned resource retains 548-unit separators inside a 300-unit frame.
+Visual inspection caught their overflow; the final pointer replay clicked Cancel instead of
+Start because its fixture reused the wide dialog coordinates.
+
+**Tested how:** Eight focused tests pass, one owned test ignored in that command. The new
+canvas regression checks the single-card center and every drawn quad's frame containment.
+Architecture passes. Base/Episode One/Episode Two final pointer/cancel checks pass; the Lost
+Coast failure and rejected capture/logs are retained under artifacts/chapter-menu.
+
+**Result:** Source fix and corrected fixture are ready; release rebuild and final replay/
+performance evidence remain in progress. This is a layout/fixture correction, not a loader
+failure: the earlier keyboard replay loaded Lost Coast correctly.
+
+**Still broken or not tested:** Corrected Lost Coast packaged capture/pointer replay and
+frame-time comparison pending. Native Windows/Linux runtime and retail pixel parity not tested.
+
+**Next:** Finish corrected packaged checks and isolated timing, then commit evidence.
+
 ## 2026-10-27 Checkpoint: resource-driven chapter browser implementation
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

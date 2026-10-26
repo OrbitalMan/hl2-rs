@@ -220,6 +220,9 @@ impl Dialog {
             .iter()
             .map(|c| c.wide)
             .fold(172., f32::max);
+        if self.catalog.entries.len() == 1 {
+            return Rect::new((self.size().x - wide) * 0.5, 44., wide, 146.);
+        }
         let left = self.control("Prev", Rect::new(24., 200., 72., 24.)).x;
         let right = self.control("Next", Rect::new(500., 200., 72., 24.));
         let gap = ((right.x + right.w - left) - wide * 3.) / 2.;

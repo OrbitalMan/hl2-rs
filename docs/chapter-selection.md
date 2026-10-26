@@ -4,7 +4,7 @@
 
 Installed content is authoritative. The desktop layouts are
 `hl2/resource/newgamedialog.res` (600 x 296; Prev, Next, Play, Cancel and two
-separators) and `hl2/resource/newgamechapterpanel.res` (chapter heading/name,
+separators; Lost Coast overrides the frame width to 300) and `hl2/resource/newgamechapterpanel.res` (chapter heading/name,
 152 x 86 picture in a 168 x 106 border). SDK `vgui2/vgui_controls/ImagePanel.cpp`
 paints unscaled images at native size and clips them to the panel. The chapter
 textures contain power-of-two padding: sample their top-left 152 x 86 region
@@ -27,7 +27,9 @@ Text is installed localization: `#GameUI_NewGame`, `#GameUI_Chapter`, the
 layouts' button `labelText`, and `#<game>_Chapter<key>_Title`. Expansion names
 come from `resource/episodic_english.txt`, `resource/ep2_english.txt` and
 `resource/lostcoast_english.txt`, loaded with the same decoding/localization
-boundary as existing GameUI resources. No new English strings or localization
+boundary as existing GameUI resources. Lost Coast retains the wider separator dimensions in its override; decorative rules
+are sized to the frame interior using the authored left inset, and its single
+chapter card is centered. No new English strings or localization
 placeholders are needed. The current resource loader uses English, like the
 other GameUI screens; alternate UI-language selection is not implemented here.
 
