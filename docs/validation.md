@@ -1,5 +1,15 @@
 # Local validation — 2026-10-05
 
+## Canal paper receivers (2026-10-26)
+
+`cargo test -p hl2-bevy canal_papers --locked -- --ignored --nocapture`: owned-map test passes.
+The actual corridor paper model is static, and its baked world triangles keep that identity.
+With ordinary reception disabled the isolated paper receives no triangles; NPC-style RTT
+reception produces 17. This tests geometry/policy, not native image parity. Baseline floor
+capture inspected at eye 765,-8180,-64, yaw151.4/pitch-25. Initial material diagnostic compile
+failure and corrected output are retained. Full local and Windows-target checks pass for
+the checkpoint. Native visual and packaged NPC-over-paper comparison are **not tested**.
+
 ## Lighting follow-up: direction report (2026-10-26)
 
 `cargo test -p hl2-simulation shadows --locked`: all 15 pass. Exact installed-client

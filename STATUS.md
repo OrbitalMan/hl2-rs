@@ -2,6 +2,19 @@
  
  Checkpoint: 2026-10-25 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. The flashlight power HUD and High depth shadows are implemented and validated. Diffuse viewmodel flashlight lighting is also implemented; native shader/shadow parity remains unverified. Sections below are newest first.
 
+## Lighting follow-up: canal paper receiver checkpoint (2026-10-26)
+
+- The inspected corridor sheets are static model geometry, not BSP overlays. SDK excludes
+  ordinary prop/blob shadows on static props and allows NPC/player RTT and flashlight
+  projections. New owned regression on the real paper mesh: ordinary path empty; NPC-style
+  path produces 17 receiver triangles. Runtime policy unchanged; docs/lighting.md.
+- Baseline floor capture: `artifacts/lighting-bugs/baseline-floor.png`. The owner
+  confirmed a physics object at Medium/High, matching the excluded SDK case. A visual NPC
+  Medium/High failure is not reported/reproduced.
+  Native scene comparison and all BSP-overlay compositing remain **not tested**.
+- Next: fluorescent lamp emission. Its installed VMT already requests self-illumination;
+  baked static-prop vertex colour is currently multiplied into the emissive albedo.
+
 ## Lighting bug follow-up: direction report checkpoint (2026-10-26)
 
 - Ordinary shadows: Low points down; Medium/High use the map's shadow-control vector,

@@ -22,6 +22,12 @@ Owner scope, separate checkpoint commits:
    keeping the host as an adapter. Test unit transitions and packaged pre/post-suit and
    authored enable/disable cases, without claiming an ordinary campaign playthrough.
 
+Checkpoint 1 reports the verified downward/global direction contract. Checkpoint 2 found
+that the reported sheets are static prop meshes. The owner confirmed physics-object
+shadows at Medium/High: SDK deliberately excludes this receiver combination. An owned
+regression checks exclusion and positive NPC-style reception, so no runtime policy change
+is appropriate. The overlay-depth hypothesis was not the cause of these sheets.
+
 Keep README unchanged. Record failures, exact commands, captures and costs in validation,
 performance, STATUS and MODLOG; commit each independently reviewable checkpoint.
 

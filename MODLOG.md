@@ -1,5 +1,34 @@
 # MODLOG
 
+## 2026-10-26 Checkpoint: canal paper receiver policy and regression
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Added an owned-map regression for the canal corridor's actual paper/junk
+static-prop triangles and documented the SDK receiver policy. No runtime policy change;
+README unchanged.
+
+**Why:** Owner reports shadows missing on newspaper/junk. The owned map/capture identifies
+these sheets as a static model, rather than BSP overlays. Source SDK
+`game/client/clientshadowmgr.cpp` `AddShadowToReceiver` excludes ordinary prop/blob shadows
+on static props, allows NPC/player RTT shadows and separately allows flashlights.
+
+**Tested how:** Owned-map regression (`cargo test -p hl2-bevy canal_papers --locked --
+--ignored --nocapture`), existing 15 simulation shadow tests, validate.sh and Windows-target
+checks. Packaged baseline floor image inspected; captures/probes retained in
+`artifacts/lighting-bugs`. Early diagnostic compilation needed decode_text's Result unwrapped;
+failed and corrected logs retained. No gameplay rebuild required for test/report changes.
+
+**Result:** Real paper geometry retains static-prop identity. Ordinary reception is empty;
+NPC-style reception produces 17 triangles. The global/vertical and non-NPC paper behavior
+is expected by the SDK policy. No visual NPC failure is claimed fixed.
+
+**Still broken or not tested:** The owner confirmed physics object/Medium-High, the excluded
+SDK case. Native visual comparison, a packaged NPC-over-paper comparison and all BSP-overlay
+compositing are not tested. Equal overlay/shadow offsets were an initial hypothesis; these papers are models.
+
+**Next:** Correct emissive lamp albedo independently of baked vertex illumination.
+
 ## 2026-10-26 Checkpoint: ordinary shadow direction report
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

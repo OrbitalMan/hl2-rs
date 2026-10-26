@@ -33,3 +33,25 @@ The owned `d1_canals_01` map supplies direction approximately
 (-0.1677313, 0.0449435, -0.9848077), colour (128,128,128) and cast distance 75.
 This is authored map direction, not a nearest-lamp query. The 15 existing shadow-policy
 unit tests pass; no runtime code is changed by this report checkpoint.
+
+## Paper and junk at the canal corridor
+
+The sheets inspected near the start corridor are the static model
+`models/props_junk/garbage256_composite002b.mdl` (origin approximately 631,-8107,-124),
+using the garbage002a/garbage003a materials. They are not BSP overlays. The baseline
+packaged capture shows these sheets; the owned-map test verifies their baked static-prop
+receiver identity.
+
+SDK `game/client/clientshadowmgr.cpp` `AddShadowToReceiver`, static-prop branch:
+ordinary prop/blob shadows are excluded. Render-to-texture shadows may reach static props
+when cast by an NPC/player; flashlight projections have a separate path. HL2-RS follows
+this policy. Its new owned regression projects onto the actual paper geometry: no
+ordinary-prop receiver triangles, 17 receiver triangles with NPC-style reception enabled.
+A faint flashlight shadow affects only the added beam, preserving the baked illumination.
+
+No nearest-light or static-prop receiver policy is changed. An NPC Medium/High failure on
+these papers has not been reproduced visually, and a native visual comparison is
+**not tested**. This result does not establish that all BSP decals/overlays composite
+correctly: their depth offset was an initial hypothesis, not the cause of these sheets.
+The owner confirmed a physics object at Medium/High: this is the SDK-excluded ordinary
+prop-to-static-prop case, so no receiver-policy change is made.

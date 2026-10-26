@@ -18,6 +18,8 @@
 mod caster;
 mod draw;
 pub mod material;
+#[cfg(test)]
+mod owned_tests;
 mod texture;
 
 use crate::{
