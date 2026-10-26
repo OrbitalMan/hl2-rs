@@ -1729,19 +1729,25 @@ behavior. `motion_blur` keeps its existing persisted boolean; `motion_blur_viewm
 defaults false, so old saves retain retail behavior. Advanced selects both flags. The
 retail `mat_motion_blur_enabled 0/1` command selects retail modes and clears the extension.
 
-Advanced enables a motion-vector prepass only on the viewmodel camera, using Bevy's
-current/previous GPU skinning and alpha-tested Source silhouettes. The existing cached
-frame-copy pass reconstructs seven colour samples over a half-frame shutter, capped at
-4% of the screen. Stationary pixels return their original colour, unrelated sample
-velocities are rejected, and multisampled vectors are averaged. Reconstruction runs
-before bloom, colour correction and HUD; world camera blur remains independent.
+Advanced enables motion-vector and depth prepasses only on the viewmodel camera,
+using current/previous GPU skinning and alpha-tested Source silhouettes. The weapon
+renderer snapshots the already-rendered world before drawing the weapon. Motion is
+reduced in 4x4 then 8x8 blocks to 32-pixel tiles, then dilated at tile resolution over the
+bounded shutter footprint. The final pass gathers 16-96 samples according to streak
+length, with a 1.25-frame exposure (formerly 0.5), capped at 12% of screen UV distance
+(formerly 4%). Weapon depth supplies coverage, allowing the silhouette itself to spread
+onto the preserved background; stationary hand detail stays sharp. There is no previous
+colour-frame accumulation or persistent trail. Reconstruction precedes bloom/HUD and
+retail world-camera blur remains independent.
 
 History warms for two rendered frames after activation, weapon changes, map changes,
 pause, holstering, lens/framing changes or discontinuous time. Disabled/retail Enabled,
 background levels and absent GPU-skinned weapon draws keep no weapon prepass/pass state.
-The diagnostic CPU-skinning path and transparent effects are excluded. Screen-space
-reconstruction softens detail inside the current silhouette; it does not reconstruct
-new coverage outside its edge. This is an owner-requested extension, not native parity.
+GPU textures, pipelines, uniform buffers and bind groups are cached across steady frames.
+The diagnostic CPU-skinning path and transparent effects are excluded. Coarse dominant
+motion and current-frame straight-line reconstruction approximate curved motion and
+cannot recover occluded/offscreen weapon detail. This is an owner-requested extension,
+not native parity.
 
 SourceMaterial shares one packed uniform buffer between colour/depth shaders. Separate
 small uniform bindings plus previous-pose skinning exceeded Metal's vertex-stage buffer

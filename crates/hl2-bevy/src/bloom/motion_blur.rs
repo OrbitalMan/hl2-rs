@@ -26,8 +26,6 @@ pub struct SourceMotionBlur {
     pub values: Vec4,
     /// The longest blur vector, as a fraction of the screen (`mat_motion_blur_percent_of_screen_max`).
     pub max: f32,
-    /// Animation vectors from the viewmodel prepass rather than camera movement.
-    pub animation: bool,
 }
 
 #[derive(Resource, Default)]
@@ -89,7 +87,6 @@ pub fn update(
     let blur = SourceMotionBlur {
         values: Vec4::from_array(values),
         max: settings.percent_of_screen_max / 100.,
-        animation: false,
     };
     match current {
         Some(mut current) => {

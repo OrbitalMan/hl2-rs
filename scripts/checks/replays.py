@@ -722,9 +722,9 @@ def check_motion_blur_options():
 def check_viewmodel_motion_blur():
     """A still world view has animated weapon vectors, with MSAA and the option lifecycle."""
     script = json.loads((REPO / "test-inputs/bevy-viewmodel-motion-blur.json").read_text())
-    shader = GAME / "bevy-assets/shaders/motion_blur.wgsl"
+    shader = GAME / "bevy-assets/shaders/weapon_blur.wgsl"
     original = shader.read_text(encoding="utf-8")
-    hook = "if dot(pixels, pixels) < 1.0 { return base; }"
+    hook = "if alpha == 0.0 { return select(world,base,own.z < 0.5); }"
     holds("animation reconstruction hook", hook in original)
 
     def run(name, aa="none", enabled=True, state="swing", advanced=True):
@@ -764,7 +764,7 @@ def check_viewmodel_motion_blur():
 
     normal = run("viewmodel_blur_swing")
     try:
-        shader.write_text(original.replace("let motion = velocity(in.uv) * blur.params.z;", "let motion = vec2(0.0);"), encoding="utf-8")
+        shader.write_text(original.replace("if pixel_motion < 1.0 || data.params.x == 0.0", "if true"), encoding="utf-8")
         control = run("viewmodel_blur_sharp")
         changes = pixel_changes(control.capture, normal.capture, threshold=2, region=(180, 430, 1000, 768))
         holds("reconstruction changes the moving weapon", changes["changed"] > 100, changes)
@@ -776,6 +776,9 @@ def check_viewmodel_motion_blur():
         for aa in ("none", "x4"):
             result = run("viewmodel_vectors_" + aa, aa=aa)
             holds("animated pixels", moving_pixels(result) > 100)
+        shader.write_text(original.replace(hook, hook + "\n    if own.z < 0.01 && alpha > 0.01 { return vec4(1.0,0.0,1.0,1.0); }\n    return base;"), encoding="utf-8")
+        holds("blur extends outside the current silhouette", moving_pixels(run("viewmodel_silhouette_trail")) > 100)
+        shader.write_text(original.replace(hook, hook + "\n    return vec4(1.0,0.0,1.0,1.0);"), encoding="utf-8")
         for state in ("still", "paused", "switch"):
             expect(state + " has no stale motion", moving_pixels(run("viewmodel_vectors_" + state, state=state), burst=state != "switch"), 0)
         expect("disabled has no motion pass", moving_pixels(run("viewmodel_vectors_off", enabled=False)), 0)

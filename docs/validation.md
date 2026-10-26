@@ -1,5 +1,42 @@
 # Local validation — 2026-10-05
 
+## Stronger Advanced weapon blur (2026-10-26)
+
+`scripts/checks/validate.sh`: 1,122 Rust tests pass, 92 ignored; three Python image-reader
+checks, strict Clippy, formatting and architecture pass. `scripts/checks/check_windows.sh`
+passes. `scripts/build-bevy.sh` refreshes the package; eleven executable/shader hashes are
+verified. The gameplay-resource cleanup regression now also asserts depth prepass removal.
+
+`NO_BUILD=1 ONLY='viewmodel_motion_blur coverage' python3 scripts/checks/replays.py` passes.
+The updated sharp control bypasses only reconstruction. Accepted comparison: 19,226 changed
+weapon-region pixels above threshold 2, zero upper-world changes. A new GPU diagnostic,
+using actual weapon depth and nonzero integrated coverage, colours only blurred pixels
+outside the current silhouette: 13,316 pixels. This prevents an interior-only filter from
+passing. No-AA/4x-AA motion, settled/pause/switch/Disabled/retail Enabled and zero pose
+mismatch assertions pass. Copied-package shader hooks are restored in finally blocks.
+
+Prior cbe521b and current packages also run the same live fixture ending at tick 102 with
+`--capture-live --capture-burst 12`. Their first four burst scene times match exactly:
+1.545, 1.575, 1.590, 1.605 seconds. Captures show a continuous streak rather than a sharp
+outline during the fast section, and clear as the weapon leaves view/settles. These are
+controlled authored inputs, not an ordinary playthrough or native comparison.
+
+Evidence: artifacts/viewmodel-blur-strength/live.py, live.input.json, live-times.json,
+prior/current live PNGs/logs/reports, retained normal/sharp/coverage captures and timing data.
+The first live burst had no info-level timestamp logs; timestamped reruns supersede it.
+Two rejected image-analysis assumptions expected a stationary upper crop and at least six
+changing weapon frames. The fast weapon can cross that crop and leave the view after four
+visible transitions; those assumptions are invalid. Matched-time visual inspection and
+controlled same-pose coverage diagnostics provide the accepted evidence instead. Details
+are retained in rejected-live-assumptions.json. A timing round that overlapped that image
+analysis is rejected and replaced; see docs/performance.md.
+
+Initial private helper visibility and a 104-line function failed checks; the helper scope
+and pipeline factory were corrected before validation. Windows/Linux runtime, every weapon/
+reload, all frame rates/resolutions, native visual comparison, transparent effects and
+diagnostic CPU-skinned blur remain **not tested**. Straight-line current-frame reconstruction
+approximates curved movement and cannot reconstruct hidden/offscreen geometry.
+
 ## Motion blur Advanced / viewmodel animation (2026-10-26)
 
 `scripts/checks/validate.sh`: 1,122 Rust tests pass, 92 ignored; three Python image-reader

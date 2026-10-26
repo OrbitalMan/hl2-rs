@@ -1,6 +1,37 @@
 # STATUS
  
- Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. Motion blur Advanced adds opt-in weapon animation blur; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
+ Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
+
+## Stronger Advanced weapon blur (2026-10-26)
+
+- Owner rejected the initial effect as barely visible, with sparse sharp afterimages.
+  Advanced now reconstructs silhouette coverage over a preserved pre-weapon background,
+  rather than filtering only inside the current outline. Exposure is 1.25 frames instead
+  of 0.5, maximum UV reach 12% instead of 4%, and sampling adapts from 16 to 96 taps.
+  Coarse GPU motion reductions/dilation find trails outside the current silhouette.
+- Retail Disabled/Enabled and saved settings are unchanged. Weapon-only depth/motion
+  prepasses, two full-size cached colour copies and three small motion textures exist
+  only in Advanced. Cached groups/uniforms avoid steady-frame allocation. Pause, switch,
+  absent gameplay and holstering remove weapon pass state, including depth prepass.
+- Verified: validate.sh 1,122 Rust tests/92 ignored +3 Python, strict Clippy/fmt/architecture,
+  Windows-target check, release package/eleven hashes. Packaged viewmodel_motion_blur and
+  coverage pass: no AA/4x AA, still/pause/switch/off/retail, zero stale posed bounds.
+  Sharp control changes 19,226 weapon-region pixels above threshold 2; upper still-world
+  comparison changes zero. Coverage diagnostic finds 13,316 pixels outside the current
+  silhouette. Normal and live swing captures visually inspected; matched scene times
+  1.545/1.575/1.590/1.605 s are recorded for prior/current bursts. README unchanged.
+- Three isolated runs/build/mode: Enabled prior/new 19.770/19.797 ms; Advanced prior/new
+  19.744/19.751 ms. Ranges overlap; no isolated GPU timing or FPS guarantee. Three motion
+  field draws plus reconstruction have measured CPU encoding spans; docs/performance.md.
+- Rejected: initial helper visibility/function size; initial live capture lacked timing
+  logs; live image assertions incorrectly assumed six changing frames and a stationary
+  upper crop even when the fast weapon crosses it/leaves view. Replaced by matched-time
+  visual inspection and controlled coverage tests. A third timing round overlapped image
+  analysis; retained and replaced with isolated measurements. Evidence: docs/validation.md.
+- Not tested: Windows/Linux runtime, every weapon/reload, all frame rates/resolutions or
+  native comparison. Current-frame straight-line blur approximates curved motion and
+  cannot recover hidden/offscreen detail; transparent and diagnostic CPU-skinned draws
+  remain excluded. No previous-colour accumulation persists after a swing.
 
 ## Motion blur Advanced / viewmodel animation (2026-10-26)
 

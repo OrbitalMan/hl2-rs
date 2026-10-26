@@ -1,6 +1,20 @@
 # Design
 
-## Viewmodel animation motion blur (2026-10-26)
+## Stronger Advanced weapon blur (2026-10-26)
+
+Owner reports sparse sharp afterimages during fast crowbar swings. Replace the interior-only
+seven-tap filter with silhouette reconstruction over a longer exposure. Snapshot the world
+before the weapon camera, retain weapon depth as coverage, and build a coarse dominant-motion
+field with bounded reductions/dilation. Gather dense, pixel-length-dependent samples and
+composite foreground coverage over the preserved background. Keep retail modes unchanged,
+no weapon resources/work when disabled, cached GPU state and no CPU vertex history.
+
+Validate actual live swing bursts against the preserved package, including new pixels outside
+the current silhouette, smooth coverage, stationary world/HUD, MSAA and history cleanup.
+Measure frame time and pass encoding before/after; run standard validation and Windows
+checks, update evidence and commit the checkpoint. No README feature-log edits.
+
+## Initial viewmodel animation motion blur (2026-10-26; superseded above)
 
 Owner-requested Advanced mode in the Motion blur dropdown. Disabled and Enabled retain
 retail behavior; Advanced adds animation blur. Keep the existing persisted boolean and

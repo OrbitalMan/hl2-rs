@@ -1,5 +1,43 @@
 # MODLOG
 
+## 2026-10-26 Checkpoint: stronger, continuous Advanced weapon blur
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Replaced the seven-tap interior-only filter with weapon silhouette reconstruction.
+Advanced snapshots the world before the weapon draw, uses weapon depth for coverage, reduces
+motion to 32-pixel tiles and dilates it over the bounded footprint. The final gather adapts
+from 16 to 96 samples, with 1.25-frame exposure (previously 0.5) and 12% UV reach (previously
+4%). Compositing over the preserved world creates a continuous streak beyond the current
+outline. GPU textures/groups/pipelines are cached; no colour history or CPU vertex history.
+Retail modes and UI/settings remain unchanged. README unchanged.
+
+**Why:** The owner reported barely visible blur and sharp afterimages in fast crowbar swings.
+Rejecting background samples and preserving a sharp silhouette caused that limitation;
+raising strength alone would not fix it. Dense coverage reconstruction addresses both.
+
+**Tested how:** validate.sh 1,122 tests/92 ignored +3 Python, strict Clippy/fmt/architecture;
+Windows-target check; release/eleven hashes. Packaged viewmodel_motion_blur/coverage pass,
+including no AA/4x AA, outside-silhouette coverage and still/pause/switch/off/retail behavior.
+Normal and twelve-frame live bursts inspected; prior/current scene times match for the
+first four burst frames. Recorded sharp-control comparison and actual depth-based trail.
+
+**Result:** 19,226 weapon-region pixels change above threshold 2; the upper still-world
+control changes zero. 13,316 diagnostic pixels lie outside the current silhouette.
+Three isolated runs/build/mode: prior/new Enabled 19.770/19.797 ms, Advanced 19.744/19.751 ms.
+Ranges overlap; no FPS guarantee or isolated GPU timing. Per-pass CPU encoding evidence,
+measurement windows and rejected overlapping timing round: docs/performance.md.
+
+**Still broken or not tested:** Curved motion is approximated with current-frame linear
+vectors; hidden/offscreen detail cannot be recovered. Transparent and diagnostic CPU-skinned
+meshes are excluded. Windows/Linux runtime, every weapon/reload, all frame rates/resolutions
+and native comparison are not tested. Rejected helper visibility/size, untimed live capture,
+invalid live-crop/visibility assumptions and overlapping timing measurements are retained;
+validated evidence and rationale are in docs/validation.md.
+
+**Next:** Owner visual review of the stronger packaged effect; broader weapon/platform checks
+remain separate work.
+
 ## 2026-10-26 Checkpoint: opt-in Advanced motion blur for viewmodel animation
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

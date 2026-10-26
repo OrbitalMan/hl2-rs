@@ -1,10 +1,10 @@
 //! Owner-requested animation blur, independent of the retail world-camera blur.
-use super::motion_blur::SourceMotionBlur;
+use super::weapon_blur::WeaponBlur;
 use crate::{
     camera::ViewmodelCamera, gameplay::Gameplay, simulation::Simulation, ui_host::Console,
 };
 use bevy::{
-    core_pipeline::prepass::MotionVectorPrepass,
+    core_pipeline::prepass::{DepthPrepass, MotionVectorPrepass},
     mesh::skinning::SkinnedMesh,
     prelude::{Commands, Entity, Local, Projection, Query, Res, Transform, Vec4, Visibility, With},
 };
@@ -40,10 +40,7 @@ pub(super) fn update(
     game: Option<Res<Gameplay>>,
     sim: Option<Res<Simulation>>,
     mut history: Local<History>,
-    cameras: Query<
-        (Entity, &Transform, &Projection, Option<&SourceMotionBlur>),
-        With<ViewmodelCamera>,
-    >,
+    cameras: Query<(Entity, &Transform, &Projection, Option<&WeaponBlur>), With<ViewmodelCamera>>,
     draws: Query<(&crate::rendering::WeaponMesh, &Visibility), With<SkinnedMesh>>,
 ) {
     let active = game.as_ref().map_or("", |g| g.inventory.active.as_str());
@@ -74,17 +71,17 @@ pub(super) fn update(
             if current.is_some() {
                 commands
                     .entity(entity)
-                    .remove::<(SourceMotionBlur, MotionVectorPrepass)>();
+                    .remove::<(WeaponBlur, MotionVectorPrepass, DepthPrepass)>();
             }
             continue;
         }
-        let blur = SourceMotionBlur {
-            values: Vec4::ZERO,
-            max: if ready { 0.04 } else { 0. },
-            animation: true,
+        let blur = WeaponBlur {
+            max: if ready { 0.12 } else { 0. },
         };
         if current != Some(&blur) {
-            commands.entity(entity).insert((blur, MotionVectorPrepass));
+            commands
+                .entity(entity)
+                .insert((blur, MotionVectorPrepass, DepthPrepass));
         }
     }
 }
@@ -95,8 +92,11 @@ mod tests {
 
     #[test]
     fn losing_gameplay_removes_existing_weapon_blur_and_prepass() {
-        use super::{SourceMotionBlur, ViewmodelCamera, update};
-        use bevy::{core_pipeline::prepass::MotionVectorPrepass, prelude::*};
+        use super::{ViewmodelCamera, WeaponBlur, update};
+        use bevy::{
+            core_pipeline::prepass::{DepthPrepass, MotionVectorPrepass},
+            prelude::*,
+        };
         let mut app = App::new();
         app.add_systems(Update, update);
         let camera = app
@@ -105,17 +105,15 @@ mod tests {
                 ViewmodelCamera,
                 Transform::IDENTITY,
                 Projection::default(),
-                SourceMotionBlur {
-                    values: Vec4::ZERO,
-                    max: 0.04,
-                    animation: true,
-                },
+                WeaponBlur { max: 0.12 },
                 MotionVectorPrepass,
+                DepthPrepass,
             ))
             .id();
         app.update();
-        assert!(app.world().get::<SourceMotionBlur>(camera).is_none());
+        assert!(app.world().get::<WeaponBlur>(camera).is_none());
         assert!(app.world().get::<MotionVectorPrepass>(camera).is_none());
+        assert!(app.world().get::<DepthPrepass>(camera).is_none());
     }
 
     #[test]

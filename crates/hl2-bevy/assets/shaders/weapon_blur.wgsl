@@ -1,0 +1,134 @@
+// Advanced-only silhouette reconstruction. Reductions choose dominant motion; the gather
+// integrates weapon coverage over the preserved world rather than clamping to its outline.
+#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
+
+#ifdef REDUCE_RAW
+#ifdef MULTISAMPLED
+@group(0) @binding(0) var raw: texture_multisampled_2d<f32>;
+#else
+@group(0) @binding(0) var raw: texture_2d<f32>;
+#endif
+fn raw_motion(p: vec2<i32>) -> vec2<f32> {
+#ifdef MULTISAMPLED
+    var best = vec2(0.0);
+    for (var i = 0u; i < textureNumSamples(raw); i++) {
+        let v = textureLoad(raw, p, i32(i)).xy;
+        if dot(v,v) > dot(best,best) { best = v; }
+    }
+    return best;
+#else
+    return textureLoad(raw, p, 0).xy;
+#endif
+}
+@fragment
+fn reduce_raw(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let start = vec2<i32>(in.position.xy) * 4;
+    let size = vec2<i32>(textureDimensions(raw));
+    var best = vec2(0.0);
+    for (var y = 0; y < 4; y++) { for (var x = 0; x < 4; x++) {
+        let p = start + vec2(x,y);
+        if any(p >= size) { continue; }
+        let v = raw_motion(p);
+        if dot(v,v) > dot(best,best) { best = v; }
+    }}
+    return vec4(best, 0.0, 0.0);
+}
+#else
+struct Data { params: vec4<f32> }
+#ifdef REDUCE_FIELD
+@group(0) @binding(0) var field: texture_2d<f32>;
+@group(0) @binding(1) var<uniform> data: Data;
+@fragment
+fn reduce_tiles(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let start = vec2<i32>(in.position.xy) * 8;
+    let size = vec2<i32>(textureDimensions(field));
+    var best = vec2(0.0);
+    for (var y = 0; y < 8; y++) { for (var x = 0; x < 8; x++) {
+        let p = start + vec2(x,y);
+        if any(p >= size) { continue; }
+        let v = textureLoad(field,p,0).xy;
+        if dot(v,v) > dot(best,best) { best = v; }
+    }}
+    return vec4(best,0.0,0.0);
+}
+@fragment
+fn dilate(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let center = vec2<i32>(in.position.xy);
+    let size = vec2<i32>(textureDimensions(field));
+    let radius = i32(ceil(data.params.x * max(data.params.z, data.params.w) * 0.5 / 32.0)) + 1;
+    var best = vec2(0.0);
+    for (var y = -radius; y <= radius; y++) { for (var x = -radius; x <= radius; x++) {
+        let p = clamp(center + vec2(x,y),vec2(0),size-vec2(1));
+        let v = textureLoad(field,p,0).xy;
+        if dot(v,v) > dot(best,best) { best = v; }
+    }}
+    return vec4(best,0.0,0.0);
+}
+#else
+@group(0) @binding(0) var frame: texture_2d<f32>;
+@group(0) @binding(1) var linear_sampler: sampler;
+@group(0) @binding(2) var<uniform> data: Data;
+@group(0) @binding(3) var background: texture_2d<f32>;
+#ifdef MULTISAMPLED
+@group(0) @binding(4) var motion: texture_multisampled_2d<f32>;
+@group(0) @binding(5) var depth: texture_depth_multisampled_2d;
+#else
+@group(0) @binding(4) var motion: texture_2d<f32>;
+@group(0) @binding(5) var depth: texture_depth_2d;
+#endif
+@group(0) @binding(6) var tiles: texture_2d<f32>;
+fn weapon(uv: vec2<f32>) -> vec3<f32> {
+    let p = clamp(vec2<i32>(uv * data.params.zw),vec2(0),vec2<i32>(data.params.zw)-vec2(1));
+#ifdef MULTISAMPLED
+    var velocity = vec2(0.0);
+    var coverage = 0.0;
+    let count = textureNumSamples(motion);
+    for (var i = 0u; i < count; i++) {
+        if textureLoad(depth,p,i32(i)) > 0.0 {
+            velocity += textureLoad(motion,p,i32(i)).xy;
+            coverage += 1.0;
+        }
+    }
+    return vec3(velocity / max(coverage,1.0),coverage / f32(count));
+#else
+    return vec3(textureLoad(motion,p,0).xy, select(0.0,1.0,textureLoad(depth,p,0)>0.0));
+#endif
+}
+@fragment
+fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let base = textureSampleLevel(frame,linear_sampler,in.uv,0.0);
+    let own = weapon(in.uv);
+    let tile_size = vec2<i32>(textureDimensions(tiles));
+    let tile = clamp(vec2<i32>(in.uv * vec2<f32>(tile_size)),vec2(0),tile_size-vec2(1));
+    let dominant = textureLoad(tiles,tile,0).xy;
+    let velocity = select(dominant,own.xy,own.z > 0.5 && length(own.xy * data.params.zw) >= 1.0) * data.params.y;
+    let pixel_motion = length(velocity * data.params.zw);
+    if pixel_motion < 1.0 || data.params.x == 0.0 { return base; }
+    // Stationary weapon details remain sharp even beside the swinging tip.
+    if own.z > 0.99 && length(own.xy * data.params.zw) < 0.5 { return base; }
+    let vector = velocity * min(1.0,data.params.x / max(length(velocity),0.00001));
+    let count = i32(clamp(ceil(length(vector * data.params.zw)),16.0,96.0));
+    let world = textureSampleLevel(background,linear_sampler,in.uv,0.0);
+    var sum = vec3(0.0);
+    var coverage = 0.0;
+    for (var i = 0; i < count; i++) {
+        let offset = vector * ((f32(i)+0.5)/f32(count)-0.5);
+        let uv = in.uv + offset;
+        if any(uv < vec2(0.0)) || any(uv > vec2(1.0)) { continue; }
+        let sample = weapon(uv);
+        let exposure = sample.xy * data.params.y;
+        let distance = length(offset * data.params.zw);
+        let reach = length(exposure * data.params.zw) * 0.5;
+        if sample.z == 0.0 || reach < distance { continue; }
+        // Reject motion perpendicular to this gather ray, including unrelated hand detail.
+        let alignment = abs(dot(normalize(exposure+vec2(1e-12)),normalize(vector)));
+        let weight = sample.z * smoothstep(0.5,0.9,alignment);
+        sum += textureSampleLevel(frame,linear_sampler,uv,0.0).rgb * weight;
+        coverage += weight;
+    }
+    let alpha = min(coverage/f32(count),1.0);
+    if alpha == 0.0 { return select(world,base,own.z < 0.5); }
+    return vec4(sum/f32(count) + world.rgb * (1.0-alpha),base.a);
+}
+#endif
+#endif

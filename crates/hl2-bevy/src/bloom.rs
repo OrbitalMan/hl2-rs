@@ -27,6 +27,7 @@ mod correction_pass;
 pub mod motion_blur;
 mod motion_blur_pass;
 mod viewmodel_blur;
+mod weapon_blur;
 
 /// Bloom amount on the last 3D camera of the main view, and the image that receives the
 /// pre-bloom frame for auto exposure.
@@ -45,16 +46,19 @@ impl Plugin for SourceBloomPlugin {
         >::default())
             .init_resource::<color_correction::Lookups>()
             .add_systems(Update, color_correction::update);
-        app.add_plugins(motion_blur_pass::MotionBlurPlugin)
-            .init_resource::<motion_blur::MotionBlurState>()
-            .add_systems(Update, motion_blur::update)
-            .add_systems(
-                PostUpdate,
-                viewmodel_blur::update
-                    .after(crate::rendering::present_weapons)
-                    .after(crate::rendering::present_entities)
-                    .before(TransformSystems::Propagate),
-            );
+        app.add_plugins((
+            motion_blur_pass::MotionBlurPlugin,
+            weapon_blur::WeaponBlurPlugin,
+        ))
+        .init_resource::<motion_blur::MotionBlurState>()
+        .add_systems(Update, motion_blur::update)
+        .add_systems(
+            PostUpdate,
+            viewmodel_blur::update
+                .after(crate::rendering::present_weapons)
+                .after(crate::rendering::present_entities)
+                .before(TransformSystems::Propagate),
+        );
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };

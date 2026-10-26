@@ -12,49 +12,8 @@ struct Blur {
 }
 @group(0) @binding(2) var<uniform> blur: Blur;
 
-#ifdef ANIMATION
-#ifdef ANIMATION_MSAA
-@group(0) @binding(3) var vectors: texture_multisampled_2d<f32>;
-#else
-@group(0) @binding(3) var vectors: texture_2d<f32>;
-#endif
-fn velocity(uv: vec2<f32>) -> vec2<f32> {
-    let size = vec2<i32>(textureDimensions(vectors));
-    let pixel = clamp(vec2<i32>(uv * vec2<f32>(size)), vec2(0), size - vec2(1));
-#ifdef ANIMATION_MSAA
-    var sum = vec2(0.0);
-    let count = textureNumSamples(vectors);
-    for (var i = 0u; i < count; i++) { sum += textureLoad(vectors, pixel, i32(i)).xy; }
-    return sum / f32(count);
-#else
-    return textureLoad(vectors, pixel, 0).xy;
-#endif
-}
-#endif
 @fragment
 fn motion_blur(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-#ifdef ANIMATION
-    let base = textureSampleLevel(source, linear_sampler, in.uv, 0.0);
-    let motion = velocity(in.uv) * blur.params.z;
-    let pixels = motion * vec2<f32>(textureDimensions(source));
-    if dot(pixels, pixels) < 1.0 { return base; }
-    let vector = motion * min(1.0, blur.params.x / max(length(motion), 0.00001));
-    var sum = base;
-    var weight = 1.0;
-    for (var i = 0; i < 7; i++) {
-        if i == 3 { continue; } // The centre sample is already in sum.
-        let offset = vector * (f32(i) / 6.0 - 0.5);
-        let uv = in.uv + offset;
-        if any(uv < vec2(0.0)) || any(uv > vec2(1.0)) { continue; }
-        // Reject unrelated foreground/background velocities rather than smearing them
-        // into the weapon. Stationary background pixels return unchanged above.
-        let sample_motion = velocity(uv) * blur.params.z;
-        if length(sample_motion - motion) > max(length(motion) * 0.5, 0.001) { continue; }
-        sum += textureSampleLevel(source, linear_sampler, uv, 0.0);
-        weight += 1.0;
-    }
-    return sum / weight;
-#else
     var falling = in.uv * 2.0 - 1.0;
     // cross(float3(falling, 0), float3(0, 0, 1)).xy
     var roll = vec2(falling.y, -falling.x);
@@ -75,5 +34,4 @@ fn motion_blur(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
     let alpha = textureSampleLevel(source, linear_sampler, in.uv, 0.0).a;
     return vec4(color / f32(count), alpha);
-#endif
 }

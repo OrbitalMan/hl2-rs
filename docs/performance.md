@@ -1,5 +1,39 @@
 # Performance measurements - 2026-10-05
 
+## Stronger Advanced weapon silhouette blur (2026-10-26)
+
+Packaged Metal / Apple M1 Pro, 1024x768, HDR None, MSAA off, VSync off, muted background
+`hl2/d1_trainstation_02`. Baseline cbe521b and current package, fixed player view, repeated
+crowbar swings every 40 ticks, 900-tick fixture and 2,000-frame cap. Three isolated runs
+per build/mode, reversed order for the middle round. Accepted runs measure 552-559 frames
+after 120 warm-up frames over 10.922-11.052 seconds; all scripts complete.
+
+| Mode | Prior mean frame | Current mean frame | Prior range | Current range |
+| --- | ---: | ---: | ---: | ---: |
+| Enabled (retail) | 19.770 ms | 19.797 ms | 19.721-19.808 ms | 19.736-19.882 ms |
+| Advanced | 19.744 ms | 19.751 ms | 19.691-19.786 ms | 19.729-19.791 ms |
+
+Advanced differs by +0.008 ms; the unchanged retail control differs by +0.027 ms. Ranges
+overlap and these scene totals do not isolate GPU cost or establish an FPS guarantee.
+CPU encoding spans average 0.000554 ms (4x reduction), 0.000347 ms (32-pixel tile reduction),
+0.000249 ms (tile dilation), and 0.000320 ms (reconstruction). They exclude colour copies
+and the prepass; GPU timestamps are unavailable. These are command encoding timings, not
+GPU execution times.
+
+Compared with the old filter, Advanced adds one pre-weapon colour snapshot, depth coverage,
+and three small motion-field passes. Two full-size colour textures and 1/4 plus two 1/32
+resolution motion textures are cached. Tile dilation avoids a full-resolution neighbourhood
+search. The adaptive gather runs 16-96 samples only in moving neighbourhoods; stationary
+hand detail returns unchanged. No new resources/passes are owned by Disabled/retail Enabled
+or absent visible GPU-skinned weapon views. No steady-frame CPU allocation, file access or
+vertex-history copies are introduced. Warm-up frames skip snapshots/reconstruction.
+
+The initial third round overlapped CPU image analysis and is retained as rejected-overlap-*
+reports/logs. All four third-round runs were replaced, with no concurrent builds, replays
+or image analysis. Accepted aggregate contains the original first two rounds and isolated
+third-round replacements only. Evidence: artifacts/viewmodel-blur-strength/benchmark.py,
+benchmark-third-round.py, timing-summary.json, timing-aggregate.json and individual logs.
+
 ## Motion blur Advanced / weapon animation (2026-10-26)
 
 Packaged Metal, Apple M1 Pro, 1024x768, HDR None, MSAA off, VSync off, muted background
