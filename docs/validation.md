@@ -1,5 +1,57 @@
 # Local validation — 2026-10-05
 
+## PR readiness and automatic target maintenance (2026-10-26)
+
+Runtime baseline 4405064: `NO_BUILD=1 JOBS=2 python3 -u scripts/checks/replays.py`
+passes all 102 default background/muted checks (30 UI/rendering, 72 gameplay/coverage),
+zero failures in 1,730 seconds on macOS/Metal. All eleven original-package and tested-copy
+executable/shader hashes match afterward. Portrait Options and orange/cyan stacked tooltip
+captures were inspected without clipping or incorrect panel spacing. An earlier interrupted
+run stopped after two passing checks and is not counted as a full-suite pass.
+
+`python3 -m unittest discover -s scripts/checks -p 'test_*.py'` passes 13 checks: three image
+helpers, four cache/launcher cases and six locking cases. Cache fixtures cover workspace-only
+incremental/dependency deletion, profile retention and dry-run bytes. Stubbed POSIX launches
+cover default cleanup, --no-clean, rebuild/debug and --no-build, including game arguments.
+The original regression fixture reproduced missing dependency-cache bytes; its initial
+launcher marker leaked between subtests and was corrected before accepting results.
+
+An isolated real Cargo 1.99 project proves both directions of exclusion. Cargo reports
+waiting for a file lock while cleanup holds profile locks. After release its build script
+signals readiness and waits for a test gate; stale cleanup skips without deleting candidate
+bytes while Cargo holds its lock. After Cargo exits, cleanup removes only the old workspace
+fixture. Other tests cover shared debug/release lock contention, partial-lock release,
+exceptions during pruning, missing locking support and network/unknown filesystems.
+No actual project Cargo cache is pruned. The POSIX-specific cases are skipped on Windows.
+
+The lock contract was checked against [Cargo's profile layout](https://doc.rust-lang.org/stable/nightly-rustc/cargo/compiler/layout/index.html)
+and [its compatibility-lock implementation](https://doc.rust-lang.org/stable/nightly-rustc/src/cargo/compiler/layout.rs.html).
+Exclusive .cargo-lock guards coordinate with the installed Cargo build. Cargo can omit
+locks on network mounts, so pruning is restricted to recognized local filesystems.
+Rejected probes: BSD stat format strings returned file metadata; disk-management services
+were unavailable; Python statvfs exposed no local-mount flag. Native Darwin statfs, using
+its verified 64-bit record, identifies the tested filesystem as APFS without those services.
+The first filesystem guard rejected APFS and failed four tests; the corrected native probe
+passes the complete suite. Linux uses its filesystem-type probe but lock integration there
+is not tested in this session.
+
+The first full validation attempt failed `installed_maps_list_every_games_loose_maps_once`:
+an unexpected `test` map from another fixture appeared. Timestamp-only directory names can
+collide between parallel tests. Installation fixtures now reserve paths with exclusive
+create_dir and retry suffixes. A deterministic identical-nonce test checks independent bytes
+and drop lifetimes. This changes only test code; production asset loading is untouched.
+The subsequent full suite passes; the failed log is retained alongside the final run.
+
+`scripts/checks/validate.sh` passes: 1,123 Rust tests, 92 ignored, 13 Python helper tests,
+architecture, strict Clippy and formatting. `scripts/checks/check_windows.sh` passes.
+`bash -n launch-bevy.sh scripts/clean-target.sh scripts/checks/validate.sh` and
+`git diff --check upstream/main` pass. CI runs the Python helper suite as well.
+README describes default auto-clean, --no-clean and safe skipping; other capability claims
+were corrected in place without a feature history. No game/shader payload changed, so no
+additional gameplay rebuild/replay or frame-time comparison was run. Windows PR CI remains
+a merge gate. Evidence: artifacts/pr-readiness (helper/validation/Windows logs, full runtime
+replay log and pre/post package hashes).
+
 ## Stronger Advanced weapon blur (2026-10-26)
 
 `scripts/checks/validate.sh`: 1,122 Rust tests pass, 92 ignored; three Python image-reader

@@ -1,6 +1,31 @@
 # STATUS
- 
- Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
+
+ Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. PR readiness maintenance findings are fixed; runtime behavior is unchanged. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
+
+## PR readiness maintenance fixes (2026-10-26)
+
+- Resolved both P2 findings: incremental candidates are workspace-only; stale pruning holds
+  exclusive Cargo compatibility locks for debug/release throughout scanning and deletion.
+  Auto-clean remains the POSIX pre-build default; --no-clean skips it and is consumed by
+  the launcher. Fresh launches and --no-build do not clean. Busy, unsupported or network
+  targets skip pruning; locks release before Cargo starts. Target environment is honored.
+- Verified: validate.sh 1,123 Rust tests/92 ignored +13 Python, architecture, strict Clippy/fmt;
+  Windows-target check, POSIX shell syntax and complete branch whitespace checks pass.
+  Temporary fixtures test cache retention, dry-run, launcher flags and locking/error paths.
+  An isolated real Cargo 1.99 build waits behind cleaner locks; cleanup skips during its
+  build and prunes after exit. No actual project cache is cleaned.
+- Validation exposed timestamp-colliding installation fixtures. Atomic directory reservation
+  and a forced-nonce test fix isolation; the complete suite now passes.
+- README claims corrected in place without a feature history; whitespace warnings removed.
+  Runtime unchanged: package 4405064 passed all 102 default background checks, zero failures
+  in 1,730 s; all eleven package/test-copy hashes match afterward. No gameplay rebuild or
+  frame-time comparison is needed for these script/documentation changes.
+- Rejected filesystem probes: BSD stat formatting returned file metadata, disk-management
+  services were unavailable, and statvfs exposed no local-mount flag. Switched to the native
+  Darwin statfs record; APFS is verified. Unknown/network filesystems fail closed. Initial
+  subtest marker leakage was isolated and rechecked. Details: docs/validation.md.
+- Windows/Linux runtime, Linux lock integration and Windows PR CI remain not tested.
+  Next: post the upstream PR and require Windows CI before merge.
 
 ## Stronger Advanced weapon blur (2026-10-26)
 
@@ -307,7 +332,7 @@
   likewise promotes a stale configured low fixed size to the physical content area for a flexible
   frame, fixing the 640x480-to-Retina transition that broke subtitle/caption layout.
 - Focused portrait tuning and camera tests passed. After removing scale, `scripts/checks/validate.sh` passed: 376 `hl2-ui` and 103 `hl2-bevy` tests (20 owned/install tests ignored), strict workspace Clippy, and formatting; `scripts/checks/check_windows.sh` passed. Packaged high-DPI/portrait visual verification is not tested.
- 
+
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
 - **Hardware-aware Antialiasing capability detection and unsupported mode gating (`crates/hl2-ui`, `crates/hl2-bevy`):**
@@ -1482,7 +1507,7 @@ SDK vs owner-prompt differences (decide locally; "retail check needed"):
 - The crossbow bolt's SpriteTrail is commented out in the SDK, and the missile trail is a RocketTrail particle emitter, so `sprite_trail` was not needed for either.
 - Bolt water speed (1500) is unused: no player water level yet.
 
-Not done / known gaps: stuck bolts are recorded (`projectiles.stuck_bolts`, report) but **not drawn**; sparks event not drawn; charger/load sprites, laser beam and muzzle sprite are state only (no host drawing); viewmodel skin not applied; ragdoll pinning; sky surfaces are not distinguished (bolts stick to / missiles explode on sky brushes); Missile.Ignite is never stopped (game cues have no stop path); ViewPunch, SOUND_COMBAT/danger sounds (AI step 14); RPG lowered idle when out of ammo; ExplosionCreate's env_explosion origin adjustments (shared blast uses position + 1 up). 
+Not done / known gaps: stuck bolts are recorded (`projectiles.stuck_bolts`, report) but **not drawn**; sparks event not drawn; charger/load sprites, laser beam and muzzle sprite are state only (no host drawing); viewmodel skin not applied; ragdoll pinning; sky surfaces are not distinguished (bolts stick to / missiles explode on sky brushes); Missile.Ignite is never stopped (game cues have no stop path); ViewPunch, SOUND_COMBAT/danger sounds (AI step 14); RPG lowered idle when out of ammo; ExplosionCreate's env_explosion origin adjustments (shared blast uses position + 1 up).
 
 Tests (Linux, this branch, at ded5dcc): `cargo test -p hl2-simulation -p source-assets -p modkit-core -p hl2-ui --locked` -> hl2-simulation 190 passed / 18 ignored, plus the other crates unchanged (32/1, 52/0, 90/18 ignored as before); `cargo test -p hl2-bevy --locked` 37 passed / 2 ignored (system libs installed here); `cargo fmt --all --check`; `cargo clippy -p hl2-simulation -p hl2-bevy --all-targets --locked -- -D warnings` clean at ded5dcc (commits 8950572..b86dbaa did **not** pass strict Clippy: a colored-output grep hid the errors; fixed in ded5dcc). Windows/MSVC build **not tested** here.
 

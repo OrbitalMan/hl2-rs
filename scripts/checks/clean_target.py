@@ -6,8 +6,9 @@ Modes:
   --stale (default):
       Prunes superseded object files (.rcgu.o), old .rlib archives, stale test
       runner executables, and orphaned incremental compilation sessions for
-      workspace crates. Keeps active builds and all 3rd-party crates (Bevy, wgpu,
-      Rapier) intact for fast subsequent compilation.
+      workspace crates. Keeps third-party crate caches intact. Holds Cargo's
+      debug/release compatibility locks throughout pruning; skips cleanup
+      when the target is busy or compatible locking is unavailable.
   --workspace:
       Runs `cargo clean -p <workspace-packages>` to completely reset workspace
       crates while preserving all 3rd-party dependencies.
@@ -23,6 +24,8 @@ import re
 import shutil
 import subprocess
 import sys
+
+from target_lock import cargo_locks
 
 
 def find_repo_root():
@@ -77,18 +80,9 @@ def clean_workspace(repo_root, crates, dry_run=False):
     return result.returncode == 0
 
 
-def clean_stale(repo_root, target_dir, crates, keep_active_versions=2, dry_run=False):
-    """Prune stale builds and orphaned incremental caches for workspace crates."""
-    if not os.path.isdir(target_dir):
-        print(f"Target directory not found: {target_dir}")
-        return True
-
-    crate_underscores = [c.replace("-", "_") for c in crates]
-
+def incremental_candidates(target_dir, crate_underscores):
+    """Find superseded workspace caches; dependencies are never candidates."""
     dirs_to_remove = []
-    files_to_remove = []
-
-    # 1. Prune orphaned incremental compilation sessions
     inc_dir = os.path.join(target_dir, "debug", "incremental")
     if os.path.isdir(inc_dir):
         inc_pattern = re.compile(r"^([a-zA-Z0-9_]+)-([0-9a-zA-Z]+)$")
@@ -98,7 +92,7 @@ def clean_stale(repo_root, target_dir, crates, keep_active_versions=2, dry_run=F
             if not os.path.isdir(full_path):
                 continue
             m = inc_pattern.match(entry)
-            if m:
+            if m and m.group(1) in crate_underscores:
                 crate_name = m.group(1)
                 # Compute newest mtime in dir
                 mtime = os.path.getmtime(full_path)
@@ -114,7 +108,7 @@ def clean_stale(repo_root, target_dir, crates, keep_active_versions=2, dry_run=F
 
         for crate_name, dir_list in by_crate.items():
             dir_list.sort(key=lambda x: x[1], reverse=True)
-            # Keep newest session (or 2 if requested)
+            # Retain the newest workspace cache for each crate.
             for dpath, _ in dir_list[1:]:
                 try:
                     sz = sum(
@@ -125,6 +119,32 @@ def clean_stale(repo_root, target_dir, crates, keep_active_versions=2, dry_run=F
                 except OSError:
                     sz = 0
                 dirs_to_remove.append((dpath, sz, crate_name))
+
+    return dirs_to_remove
+
+
+def clean_stale(repo_root, target_dir, crates, keep_active_versions=2, dry_run=False):
+    """Prune only while holding Cargo-compatible locks; busy targets are skipped."""
+    if not os.path.isdir(target_dir):
+        print(f"Target directory not found: {target_dir}")
+        return True
+    with cargo_locks(target_dir) as acquired:
+        if not acquired:
+            return True
+        return _prune_stale(repo_root, target_dir, crates, keep_active_versions, dry_run)
+
+
+def _prune_stale(repo_root, target_dir, crates, keep_active_versions=2, dry_run=False):
+    """Prune workspace artifacts; the caller holds the target locks."""
+    if not os.path.isdir(target_dir):
+        print(f"Target directory not found: {target_dir}")
+        return True
+
+    crate_underscores = [c.replace("-", "_") for c in crates]
+
+    files_to_remove = []
+
+    dirs_to_remove = incremental_candidates(target_dir, crate_underscores)
 
     # 2. Prune stale deps artifacts (debug & release)
     file_pattern = re.compile(r"^(?:lib)?([a-zA-Z0-9_]+)-([0-9a-fA-F]{16})(?:\..*)?$")
@@ -165,7 +185,6 @@ def clean_stale(repo_root, target_dir, crates, keep_active_versions=2, dry_run=F
     total_inc_bytes = sum(x[1] for x in dirs_to_remove)
     total_deps_bytes = sum(x[1] for x in files_to_remove)
     total_bytes = total_inc_bytes + total_deps_bytes
-    total_items = len(dirs_to_remove) + len(files_to_remove)
 
     action_label = "Would clean" if dry_run else "Cleaning"
     print(f"==> {action_label} stale build artifacts for workspace crates:")
@@ -201,7 +220,7 @@ def clean_stale(repo_root, target_dir, crates, keep_active_versions=2, dry_run=F
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Clean target/ directory remnants for HL2RS without recompiling 3rd-party dependencies."
+        description="Workspace cache cleanup. Stale pruning holds Cargo-compatible locks and skips busy or unsupported targets."
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -231,7 +250,9 @@ def main():
 
     repo_root = find_repo_root()
     crates = get_workspace_crates(repo_root)
-    target_dir = args.target_dir or os.path.join(repo_root, "target")
+    target_dir = args.target_dir or os.environ.get("CARGO_TARGET_DIR") or os.path.join(repo_root, "target")
+    if args.target_dir is None and os.environ.get("CARGO_BUILD_TARGET"):
+        target_dir = os.path.join(target_dir, os.environ["CARGO_BUILD_TARGET"])
 
     if args.workspace:
         success = clean_workspace(repo_root, crates, dry_run=args.dry_run)

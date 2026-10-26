@@ -1,5 +1,45 @@
 # MODLOG
 
+## 2026-10-26 Checkpoint: PR readiness maintenance fixes
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Incremental-cache pruning now considers only declared workspace crates. Automatic
+pre-build cleanup remains the POSIX launcher default; --no-clean opts out and is not passed
+to the game. Fresh launches and --no-build do not clean. Before any stale scan/deletion, the
+cleaner acquires exclusive nonblocking Cargo compatibility locks for debug/release and holds
+them throughout pruning, releasing them before Cargo starts. Busy, unsupported and network
+targets skip pruning. Environment-selected target directories follow the build script.
+Made installation-test directory reservation atomic after validation exposed a clock-nonce
+collision; a forced-collision regression covers independent files and drop lifetimes.
+Added isolated cache/launcher/locking regressions to local validation and CI. Corrected
+existing README capability/limitation claims in place and removed the three whitespace
+warnings; no feature history added.
+
+**Why:** The review reproduced dependency-cache deletion and identified automatic pruning
+outside Cargo's lock. The owner requested keeping automatic maintenance with an opt-out.
+
+**Tested how:** validate.sh: 1,123 Rust tests pass, 92 ignored; 13 Python tests, strict Clippy,
+formatting and architecture pass. Windows-target strict Clippy, POSIX shell syntax and
+complete branch whitespace checks pass. Temporary cache fixtures cover workspace/dependency
+retention and dry-run bytes; executable launcher stubs cover default, rebuild, debug,
+--no-clean and --no-build argument forwarding. An isolated real Cargo 1.99 build blocks
+behind cleaner locks; cleaner pruning skips during that build and succeeds after it exits.
+Shared-lock contention in both profiles, exception release and unsupported/network targets
+are tested. No actual project target cache is pruned.
+
+**Result:** Both P2 findings and documentation/whitespace issues are addressed while preserving
+automatic cleanup. Runtime package 4405064 passed all 102 background checks, zero failures,
+in 1,730 seconds; these fixes change no game/shader code and need no new frame-time measure.
+Detailed evidence, including rejected filesystem probes: docs/validation.md.
+
+**Still broken or not tested:** Fresh Windows/Linux runtime and Windows PR CI are not tested;
+Linux cleanup locking is not exercised here. An initial validation run failed on the
+installation fixture collision; the corrected suite passes. Unsupported target filesystems skip cleanup.
+An initial launcher fixture leaked a marker between subtests; independent reset fixes it.
+
+**Next:** Open the upstream PR and require its Windows checks before merging.
+
 ## 2026-10-26 Checkpoint: stronger, continuous Advanced weapon blur
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
@@ -3627,7 +3667,7 @@ Also fixed: the check scripts' watchdog `sleep` outlived its subshell and kept t
 **Next:** Await owner review or testing.
 
 ## 2026-10-15 Authored pre-blurred background texture display and MainMenu.Backdrop overlay
- 
+
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
 
 **Changed:**

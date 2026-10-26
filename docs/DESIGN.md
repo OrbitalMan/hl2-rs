@@ -1,5 +1,19 @@
 # Design
 
+## PR readiness maintenance (2026-10-26)
+
+Owner keeps pre-build automatic stale cleanup by default, with --no-clean as a launcher-only
+opt-out. --no-build and fresh launches do not clean. Restrict candidates to workspace crates.
+Before any scan/deletion, acquire exclusive nonblocking Cargo compatibility locks for both
+local debug/release profiles, retain them throughout pruning, and never unlink lock files.
+Skip cleanup if busy or locking is unsupported; let the subsequent Cargo build coordinate
+normally. Release cleanup locks before invoking Cargo, avoiding self-deadlock.
+
+Validate workspace/dependency retention, dry-run behavior, launcher ordering/argument
+forwarding and both directions of exclusion with an isolated real Cargo build. No actual
+project caches are pruned during tests. Update README claims in place and run helper,
+workspace, Windows-target, shell and whitespace checks. Game/shader behavior is unchanged.
+
 ## Stronger Advanced weapon blur (2026-10-26)
 
 Owner reports sparse sharp afterimages during fast crowbar swings. Replace the interior-only

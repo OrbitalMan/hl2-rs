@@ -35,6 +35,7 @@ Options:
       --mute                          Silence all audio output for this run (Audio settings unchanged)
       --mute-ambient                  Mute looping ambient soundscapes and background environment audio
       --no-build                     Launch the existing binary without checking freshness or rebuilding
+      --no-clean                     Skip automatic stale target cleanup before rebuilding
       --no-focus                      Launch window without requesting input focus (for unattended test runs)
       --no-pvs                        Disable BSP potential visible set (PVS) occlusion culling
       --no-setup                      Fail with an error instead of opening setup if installation is missing
@@ -66,6 +67,7 @@ done
 FORCE_REBUILD=0
 DEBUG_BUILD=0
 NO_BUILD=0
+NO_CLEAN=0
 GAME_ARGS=()
 
 for arg in "$@"; do
@@ -75,6 +77,9 @@ for arg in "$@"; do
             ;;
         --debug|-d)
             DEBUG_BUILD=1
+            ;;
+        --no-clean)
+            NO_CLEAN=1
             ;;
         --no-build)
             NO_BUILD=1
@@ -176,7 +181,7 @@ fi
 
 if [[ "$NEEDS_BUILD" -eq 1 ]]; then
     echo "==> Build is out of date: $BUILD_REASON"
-    if [[ -x "$CLEANER_SCRIPT" ]]; then
+    if [[ "$NO_CLEAN" -eq 0 && -x "$CLEANER_SCRIPT" ]]; then
         echo "==> Cleaning stale target directory remnants before build..."
         "$CLEANER_SCRIPT" --stale || true
     fi

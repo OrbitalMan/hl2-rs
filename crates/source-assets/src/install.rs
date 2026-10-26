@@ -236,10 +236,21 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let root = std::env::temp_dir()
-                .join(format!("hl2-install-test-{}-{nonce}", std::process::id()));
-            std::fs::create_dir_all(&root).unwrap();
-            Self(root)
+            Self::with_nonce(nonce)
+        }
+        fn with_nonce(nonce: u128) -> Self {
+            for attempt in 0..128 {
+                let root = std::env::temp_dir().join(format!(
+                    "hl2-install-test-{}-{nonce}-{attempt}",
+                    std::process::id()
+                ));
+                match std::fs::create_dir(&root) {
+                    Ok(()) => return Self(root),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("reserve installation fixture: {error}"),
+                }
+            }
+            panic!("installation fixture collision limit reached")
         }
         fn put(&self, name: &str, bytes: &[u8]) {
             let path = self.0.join(name);
@@ -251,6 +262,18 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn fixtures_with_the_same_clock_nonce_keep_independent_files_and_lifetimes() {
+        let first = Fixture::with_nonce(0);
+        let second = Fixture::with_nonce(0);
+        assert_ne!(first.0, second.0);
+        first.put("marker", b"first");
+        second.put("marker", b"second");
+        assert_eq!(std::fs::read(first.0.join("marker")).unwrap(), b"first");
+        drop(first);
+        assert_eq!(std::fs::read(second.0.join("marker")).unwrap(), b"second");
     }
 
     #[test]
