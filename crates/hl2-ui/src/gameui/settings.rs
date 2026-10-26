@@ -5,6 +5,8 @@
 //! and draws. Retail ranges come from the installed `GameUI.dll` slider constants (see
 //! `docs/gameui.md` section 3).
 
+pub mod support;
+
 use super::{
     display::{self, AspectRatio, DisplayModes, Resolution},
     localize::Localization,
@@ -739,8 +741,13 @@ impl Panel {
 /// The binding of a control, by panel and `.res` field name.
 pub fn binding(panel: Panel, name: &str) -> Option<Binding> {
     use Binding::*;
-    let name = name.to_ascii_lowercase();
-    Some(match (panel, name.as_str()) {
+    // Every registered identifier fits here; unknown longer names cannot be bindings.
+    let mut key = [0u8; 64];
+    let normalized = key.get_mut(..name.len())?;
+    normalized.copy_from_slice(name.as_bytes());
+    normalized.make_ascii_lowercase();
+    let name = std::str::from_utf8(normalized).ok()?;
+    Some(match (panel, name) {
         (Panel::Gameplay, "skill1radio") => Skill(1),
         (Panel::Gameplay, "skill2radio") => Skill(2),
         (Panel::Gameplay, "skill3radio") => Skill(3),
@@ -825,10 +832,12 @@ fn advanced_choice(name: &str) -> Option<AdvancedChoice> {
 /// The binding of a button by its layout `Command`: dialog layouts close themselves with `OK` and
 /// `Close` (VGUI `Frame` commands).
 pub fn command_binding(command: &str) -> Option<Binding> {
-    match command.to_ascii_lowercase().as_str() {
-        "ok" | "apply" => Some(Binding::Command(Command::SubOk)),
-        "close" | "cancel" => Some(Binding::Command(Command::SubCancel)),
-        _ => None,
+    if command.eq_ignore_ascii_case("ok") || command.eq_ignore_ascii_case("apply") {
+        Some(Binding::Command(Command::SubOk))
+    } else if command.eq_ignore_ascii_case("close") || command.eq_ignore_ascii_case("cancel") {
+        Some(Binding::Command(Command::SubCancel))
+    } else {
+        None
     }
 }
 

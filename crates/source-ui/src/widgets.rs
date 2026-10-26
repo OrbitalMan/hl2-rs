@@ -10,6 +10,9 @@
 //! 1:1 screen pixels, which becomes unreadably small on high-resolution canvases (documented
 //! deviation).
 
+mod tooltips;
+pub use tooltips::{PreparedTooltip, TooltipSection, TOOLTIP_GAP};
+
 use std::borrow::Cow;
 
 use crate::canvas::{draw_texture_ex, Canvas, Color, DrawTextureParams, Rect, Texture2D, WHITE};
@@ -1689,39 +1692,6 @@ impl Painter<'_> {
                 ..Default::default()
             },
         );
-    }
-
-    /// Draws a tooltip box anchored at `pointer` in layout units, keeping it strictly inside `bounds`.
-    pub fn tooltip(&self, text: &str, pointer: Vec2, bounds: Rect) {
-        if text.trim().is_empty() {
-            return;
-        }
-        let max_text_width = 280.;
-        let lines = wrap(text, max_text_width, |s| self.text_width(s, false));
-        if lines.is_empty() {
-            return;
-        }
-        let mut max_line_w: f32 = 0.;
-        for line in &lines {
-            max_line_w = max_line_w.max(self.text_width(line, false));
-        }
-        let pad_x = 6.;
-        let pad_y = 4.;
-        let tip_w = max_line_w + pad_x * 2.;
-        let tip_h = lines.len() as f32 * FONT_TALL + pad_y * 2.;
-
-        let rect = tooltip_rect(pointer, vec2(tip_w, tip_h), bounds);
-        self.fill(rect, self.theme.tooltip_bg);
-        self.border(rect, self.theme.tooltip_border, self.theme.tooltip_border);
-        for (i, line) in lines.iter().enumerate() {
-            let line_y = rect.y + pad_y + i as f32 * FONT_TALL;
-            self.text(
-                line,
-                vec2(rect.x + pad_x, line_y),
-                self.theme.tooltip_text,
-                false,
-            );
-        }
     }
 
     /// A Source VGUI segmented progress bar: sunken cavity border, transparent background,

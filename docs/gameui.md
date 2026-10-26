@@ -1633,7 +1633,7 @@ observed retail behavior, so nothing is implemented).
 | Advanced: Texture detail `mat_picmip` | `advanced.texture_detail` | VTF mip skipping; map reload on change | complete |
 | Advanced: Shader detail `mat_reducefillrate` | `advanced.shader_detail` | nothing | placeholder |
 | Advanced: Water detail | `advanced.water_detail` | nothing: no reflection or refraction pass exists | placeholder |
-| Advanced: Shadow detail | `advanced.shadow_detail` | `hl2_simulation::shadows` (frames, receivers, decal clipping), `hl2-bevy` `shadows` (one decal mesh per caster, `ShadowMaterial`, `shadow.wgsl`): Low draws blob shadows; Medium and High render-to-texture shadows (High's flashlight shadows follow) | partial since 2026-10-25 (section 23e) |
+| Advanced: Shadow detail | `advanced.shadow_detail` | `hl2_simulation::shadows` (frames, receivers, decal clipping), `hl2-bevy` `shadows` (one decal mesh per caster, `ShadowMaterial`, `shadow.wgsl`): Low draws blob shadows; Medium and High render-to-texture shadows; High adds flashlight depth shadows | complete option paths: Low/Medium and High flashlight shadows implemented; exact native image parity remains unverified |
 | Advanced: Color correction `mat_colorcorrection` | `advanced.color_correction` | `hl2_simulation::color_correction` (entities, fades, weights), `hl2-bevy` `bloom::color_correction` (lookup volumes, per-frame weights), the bloom composite (`bloom.wgsl`) | complete since 2026-10-24 (section 23b); base HL2 and Lost Coast maps have no such entity, so it changes only Episode One and Two |
 | Advanced: Antialiasing | `advanced.antialiasing` | `video::sync_antialiasing` (MSAA, limited to the adapter) | complete |
 | Advanced: Filtering | `advanced.filtering` | `video::sync_filtering` (sampler anisotropy and mip filter) | complete |
@@ -1825,3 +1825,34 @@ The host presents the HUD after updating the flashlight.
 Scope: sprint and oxygen are not connected to auxiliary power yet. Flashlight lighting on
 the viewmodel remains unfinished; High's depth shadows are covered in section 23e. A native side-by-side
 and Windows runtime capture are **not tested**. Packaged validation: `docs/validation.md`.
+
+### Platform availability and development status hints (2026-10-26)
+
+`settings::support` is the central control policy: platform availability is distinct from
+implementation status. Aero's control and label are Windows-only; the macOS-disabled raw
+input and acceleration controls are hidden on macOS. Associated labels inherit policy,
+including conventional field-name labels when the installed associate is absent/invalid.
+Filtering happens before layout, input, tab order and footer sizing. Saved values remain
+untouched, including acceleration values stored on another platform. Cross-platform HDR
+and brightness support remains visible through its existing rules.
+
+Unfinished/partial settings have a small cyan corner mark and a specific localized status
+report on hover. The registry covers current missing/partial consumers; completed model,
+texture and shadow detail, HDR, colour correction, motion blur and other working controls
+have no development entry. Remove the registry entry when finishing a feature, and move
+its regression to the completed/unmarked cases. The generic fallback only covers commands
+still explicitly declared placeholders. Development text uses HL2RS_ placeholder tokens;
+the owned localization search found no matching development-report tokens.
+
+Orange retail help text is preserved. A cyan report sits below it with a two-layout-unit
+gap; without retail text only cyan is drawn. The whole stack clamps/flips together at screen
+edges while each panel retains its own measured width. source-ui owns the generic prepared
+coloured tooltip panels; hl2-ui supplies status and cyan fill (RGBA 110,220,255,240). Hover
+text/wrapping is reused while the control is unchanged. Disabled controls can explain their
+status; popup lists, confirmations, dragging, key capture and occluded windows suppress
+hints. Both main pages and subdialogs use the same path. Settings binding lookup now uses
+a bounded stack buffer rather than allocating for the new visibility queries.
+
+This status describes whether a setting affects its intended feature; it is not a claim
+of complete native engine or campaign parity. Owned-resource/unit and packaged evidence,
+rejected fixtures and timing limits are recorded in validation/performance docs.

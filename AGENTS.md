@@ -68,6 +68,7 @@ Read docs/gameui.md section 0 before UI work; in one line each:
 - Dialogs: frames through `Painter::frame_spec` (rounded, clipped, no outer 3D border); move and resize only through `Placement`; size fixed-content dialogs to their content, never clip or scroll them.
 - Background maps come from game files (`gamemenu.res`, `chapterbackgrounds.txt`, `cfg/chapter<n>.cfg`); a failed load only logs; Back and Escape keep the expansion's background; the pre-blurred image, backdrop and plaque show until the transition finishes or fails.
 - Options and the console are non-modal windows (`source_ui::windows`); only the quit/return box and game loading are modal; `Console::set_mode` is the only way to change the focused layer.
+- Options use `settings::support` for platform availability and cyan development status; remove the status when a feature is finished, preserve saved values and existing orange hints.
 - Menu titles and buttons draw `TextOutline::DEFAULT`; subtitles use the installed title fonts.
 
 ## Honesty

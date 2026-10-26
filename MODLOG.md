@@ -1,5 +1,46 @@
 # MODLOG
 
+## 2026-10-26 Checkpoint: platform-aware Options and development hints
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Central settings policy hides Windows-only Aero outside Windows and hides the
+macOS-unavailable raw-input/acceleration controls, including related labels. Stored values
+are preserved. Unfinished settings get cyan corner marks and localized feature-status hints;
+completed features have none. Existing orange retail help stays above cyan with a two-unit
+gap. Main pages and subdialogs share cached, prepared tooltip layout and whole-stack screen
+clamping. Added status maintenance rule. README unchanged.
+
+**Why:** Platform-inapplicable and unfinished controls should be distinguishable without
+suggesting that stored-only settings already affect the game. Current rendering completions,
+including High flashlight shadows, are excluded from development marks. Status text has no
+installed counterpart and uses HL2RS_ localization placeholders.
+
+**Tested how:** validate.sh (1,118 Rust tests, 91 ignored; 3 Python capture-reader tests,
+architecture/strict Clippy/fmt), Windows-target check, owned layout/localization inspection,
+release package/hash metadata. Existing packaged options/menu_options/coverage pass;
+final options_status/coverage pass. Mouse orange+cyan, Audio cyan-only and Advanced cyan
+captures inspected. Tests cover platform policy on Windows/macOS/Linux/Other, completed
+controls, disabled controls, cache reuse, popup/tab/click dismissal, and saved hidden values.
+
+**Result:** Visible, readable development status and correct platform filtering. Final
+captures contain 9,999/14,836/15,407 cyan pixels (Mouse/Audio/Advanced). The focused
+subdialog's hint uses its own alpha, restoring the parent's multiplier afterward. No new
+render pass or asset-loading path. Binding lookup avoids allocation; prepared hint text is
+not rewrapped each steady hover frame. Three paired runs/build/state: idle frame prior/new
+25.145/22.351 ms, hover 25.496/25.032 ms; HUD CPU idle 0.3783/0.3300 ms, hover 0.3988/0.3919 ms.
+No regression measured in this scene; slower first idle baseline and no general speedup
+claim. Measured windows, ranges and limits: docs/performance.md.
+
+**Still broken or not tested:** Windows/Linux runtime. Marked settings remain unfinished;
+this change reports them rather than implementing their consumers. Rejected evidence is
+retained: unsupported Escape fixture key, faded Advanced tooltip, initial compile/test
+adaptations and strict iterator warnings. One short hover timing control is replaced by
+a matching longer run; its original report/log are retained.
+
+**Next:** Implement marked features individually and remove their development entries as
+they are validated; capture platform UI on Windows/Linux.
+
 ## 2026-10-26 Checkpoint: flashlight availability and player lifetime
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

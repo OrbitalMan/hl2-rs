@@ -1,5 +1,42 @@
 # Performance measurements - 2026-10-05
 
+## Options platform filtering and development hints (2026-10-26)
+
+Packaged Metal, Apple M1 Pro, 1024x768, default settings, live `hl2/background01` menu,
+Mouse tab. Baseline is `2ca7c3d`; new package is this Options checkpoint atop it. Three
+runs per build/state, alternating with reversed order for the middle pair, with no concurrent
+builds or replays. Pointer idle outside the dialog versus hovering Aim-Assist: prior orange
+help alone, new orange help plus cyan status. Platform-hidden controls also change the UI
+workload. These numbers do not isolate a single cause or establish an FPS guarantee.
+
+| State | Prior mean frame | New mean frame | Prior HUD CPU | New HUD CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Idle | 25.145 ms | 22.351 ms | 0.3783 ms | 0.3300 ms |
+| Hint hover | 25.496 ms | 25.032 ms | 0.3988 ms | 0.3919 ms |
+
+Frame ranges: idle prior 24.007-27.250 / new 22.083-22.515 ms; hover prior 25.232-25.805 /
+new 24.950-25.119 ms. No frame regression was measured in this scene. The first idle baseline
+is noticeably slower; the lower new means do not prove a general speedup. The HUD column
+is the existing `cpu_stages.hud` mean, including the whole HUD/UI preparation; its profiler
+warm-up/history window differs from the frame benchmark. It is not an isolated hint CPU slice.
+
+Scripts finish at tick 900 idle / 1,500 hover with a 2,000-frame safety cap. All accepted
+reports confirm completion, Mouse tab and at least 300 measured frames after 120 warm-up
+frames: idle 341-466 (9.29-10.49 measured seconds), hover 725-768 (18.29-19.29 seconds).
+The first hover control still used the shorter 900-tick script while the hover window was
+being extended. Its report/log is retained as `rejected-short-hover.*`; a matching 1,500-tick
+control replaces it in the accepted aggregate. No short control is mixed into the hover mean.
+
+No new render pass or asset-loading path. Development text and wrapping are prepared on
+hover changes and reused while hovering the same control. Typed status lookup is constant
+policy; platform filtering and settings binding normalization add no heap allocation.
+Markers add one small quad per unfinished control, only while Options is drawn.
+
+Evidence: `artifacts/options-status/timing-summary.json`, `timing-aggregate.json`, each
+`timing-*.json`/log and retained package metadata. Reproduce with
+`python3 artifacts/options-status/benchmark.py` (own package copies, muted, default settings).
+Windows/Linux runtime and different UI sizes/scenes are **not tested**.
+
 ## Flashlight lifecycle (2026-10-26)
 
 Packaged Metal, Apple M1 Pro, canal fixture view, 1920x1080, HDR None, Medium shadows.

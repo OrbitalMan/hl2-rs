@@ -21,6 +21,10 @@
 //! slider or a combo box and switch tabs; Alt+Up/Down opens a combo box's list; Enter elsewhere
 //! presses the default button (docs/gameui.md section 6c).
 
+mod hints;
+use super::settings::support::{self, binding_for_control as control_binding};
+pub use hints::{ActiveTooltip, HintReport};
+
 use super::{
     display::DisplayModes,
     resources::{GameUiResources, Image},
@@ -124,6 +128,9 @@ pub struct OptionsReport {
     /// The placed dialog on the canvas, `[x, y, width, height]` in pixels (filled by the
     /// console, which knows the canvas).
     pub frame: Option<[f32; 4]>,
+    pub controls: Vec<String>,
+    pub development_controls: Vec<String>,
+    pub tooltip: Option<HintReport>,
 }
 
 /// What the owner of the dialog has to do after an input frame.
@@ -293,13 +300,6 @@ impl Widget<'_> {
             _ => self.rect,
         }
     }
-}
-
-/// Active tooltip overlay state.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ActiveTooltip {
-    pub text: String,
-    pub pointer: Vec2,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -525,13 +525,12 @@ fn drawn_controls(panel: Panel, layout: &source_ui::layout::Layout) -> Vec<&Cont
     layout
         .controls
         .iter()
-        .filter(|c| c.visible || settings::force_visible(panel, &c.name))
+        .filter(|c| {
+            (c.visible || settings::force_visible(panel, &c.name))
+                && support::available(panel, c, support::Platform::current())
+        })
         .filter(|c| !matches!(c.kind, ControlKind::Other(_)) && !is_frame_chrome(c))
         .collect()
-}
-
-fn control_binding(panel: Panel, control: &Control) -> Option<Binding> {
-    settings::binding(panel, &control.name).or_else(|| settings::command_binding(&control.command))
 }
 
 /// A dialog footer that overlaps content moves below it.
@@ -698,6 +697,7 @@ impl OptionsDialog {
         self.bink_texture = texture(&res.bink_image);
         self.res = res;
         self.keys = KeyList::default();
+        self.active_tooltip = None;
     }
 
     /// Resolutions offered on the Video page (from the host's monitor query).
@@ -891,44 +891,6 @@ impl OptionsDialog {
         false
     }
 
-    /// Returns the localized tooltip for `control_name` in `panel`, if the layout provides one.
-    pub fn tip_for_control(&self, panel: Panel, control_name: &str) -> Option<String> {
-        let layout = self.res.layout(panel.layout())?;
-        let control = layout.get(control_name)?;
-        if control.tooltip.trim().is_empty() {
-            return None;
-        }
-        let text = self.res.localization.localize(&control.tooltip);
-        if text.trim().is_empty() {
-            None
-        } else {
-            Some(text)
-        }
-    }
-
-    /// Returns the tooltip text that should be shown for the given pointer position on the active tab, if any.
-    pub fn tooltip_at(&self, canvas: Vec2, pointer: Vec2) -> Option<String> {
-        let panel = self.tab.panel()?;
-        let scale = crate::proportional::dialog_scale(canvas);
-        let origin = self.placement.place(&main_frame(canvas)).origin;
-        let dialog_pointer = (pointer - origin) / scale;
-        let page = page_rect();
-        if !page.contains(dialog_pointer) {
-            return None;
-        }
-        let widgets = layout_widgets(&self.res, panel, page, &self.draft, &self.applied);
-        let hovered = widgets
-            .iter()
-            .rev()
-            .find(|w| w.rect.contains(dialog_pointer))?;
-        self.tip_for_control(panel, &hovered.control.name)
-    }
-
-    /// Currently active tooltip overlay (if any).
-    pub fn active_tooltip(&self) -> Option<&ActiveTooltip> {
-        self.active_tooltip.as_ref()
-    }
-
     fn tab_label(&self, tab: Tab) -> String {
         self.res.localization.text(tab.token())
     }
@@ -1018,7 +980,6 @@ impl OptionsDialog {
             return OptionsOutcome::None;
         }
         if let Some(sub) = self.sub {
-            self.active_tooltip = None;
             let size = self.sub_frame_size(sub, |s| measure.text_width(s, false));
             if sub.is_credits()
                 && !self.credits_fits_window(sub, canvas, |s| measure.text_width(s, false))
@@ -1050,7 +1011,7 @@ impl OptionsDialog {
                 self.occlude(input);
                 return OptionsOutcome::None;
             }
-            return self.sub_input(sub, size, input, pointer);
+            return self.sub_input(sub, size, input, pointer, measure);
         }
         let main = main_frame(canvas);
         let pointer = local(self.placement.place(&main).origin);
@@ -1121,6 +1082,13 @@ impl OptionsDialog {
             capturing_key: self.keys.capture.is_some(),
             resolutions: self.resolution_labels(),
             frame: None,
+            controls: list.iter().map(|w| w.control.name.clone()).collect(),
+            development_controls: list
+                .iter()
+                .filter(|w| w.binding.and_then(support::development).is_some())
+                .map(|w| w.control.name.clone())
+                .collect(),
+            tooltip: self.active_tooltip.as_ref().map(HintReport::from),
         }
     }
 
@@ -1400,22 +1368,15 @@ impl OptionsDialog {
             }
         }
         let clicked = self.track(&list, &extra, pointer, input);
-        self.active_tooltip = if !input.click && !input.held {
-            pointer.and_then(|dialog_p| {
-                if !page.contains(dialog_p) {
-                    return None;
-                }
-                let panel = self.tab.panel()?;
-                let widget = list.iter().rev().find(|w| w.rect.contains(dialog_p))?;
-                let tip = self.tip_for_control(panel, &widget.control.name)?;
-                input.pointer.map(|canvas_p| ActiveTooltip {
-                    text: tip,
-                    pointer: canvas_p,
-                })
-            })
-        } else {
-            None
-        };
+        if let Some(panel) = self.tab.panel() {
+            self.update_tooltip(
+                panel,
+                &list,
+                pointer.filter(|p| page.contains(*p)),
+                input,
+                measure,
+            );
+        }
         match clicked {
             Some(Target::Tab(i)) => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
@@ -1924,8 +1885,10 @@ impl OptionsDialog {
         size: Vec2,
         input: &Input,
         pointer: Option<Vec2>,
+        measure: &Painter,
     ) -> OptionsOutcome {
         if sub.is_credits() {
+            self.active_tooltip = None;
             self.credits_input(size, input, pointer);
             return OptionsOutcome::None;
         }
@@ -1938,7 +1901,9 @@ impl OptionsDialog {
         }
         let close_rect = widgets::close_button_rect(size);
         let extra = [(Target::Close, close_rect)];
-        match self.track(&list, &extra, pointer, input) {
+        let clicked = self.track(&list, &extra, pointer, input);
+        self.update_tooltip(sub.panel(), &list, pointer, input, measure);
+        match clicked {
             Some(Target::Close) => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 self.command(Command::SubCancel)
@@ -2407,17 +2372,7 @@ impl OptionsDialog {
             confirm.draw(&cp, &layout);
             base.canvas.set_alpha_multiplier(old_alpha);
         }
-        if let Some(tip) = &self.active_tooltip {
-            let tip_painter = Painter {
-                canvas: base.canvas,
-                fonts: base.fonts,
-                theme: base.theme,
-                origin: Vec2::ZERO,
-                scale,
-            };
-            let screen_layout_bounds = Rect::new(0., 0., canvas.x / scale, canvas.y / scale);
-            tip_painter.tooltip(&tip.text, tip.pointer / scale, screen_layout_bounds);
-        }
+        self.draw_tooltip(base, canvas, scale);
     }
 
     /// The open combo list, over the layer (page or sub-dialog) that opened it.
@@ -2450,6 +2405,7 @@ impl OptionsDialog {
             ((armed, pressed), (focused, logical)),
             (parent_focused, time),
         );
+        self.mark_development(p, w);
         if !focused || !w.enabled {
             return;
         }

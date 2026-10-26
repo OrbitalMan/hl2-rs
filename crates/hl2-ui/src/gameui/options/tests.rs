@@ -317,17 +317,17 @@ fn tab_order_reads_left_to_right_top_to_bottom() {
             _ => unreachable!(),
         })
         .collect();
-    assert_eq!(
-        names,
-        [
-            "ReverseMouse",
-            "MouseFilter",
-            "Slider",
-            "SensitivityLabel",
-            "MouseRaw",
-            "Autoaim"
-        ]
-    );
+    let mut expected = vec![
+        "ReverseMouse",
+        "MouseFilter",
+        "Slider",
+        "SensitivityLabel",
+        "Autoaim",
+    ];
+    if !cfg!(target_os = "macos") {
+        expected.insert(4, "MouseRaw");
+    }
+    assert_eq!(names, expected);
 }
 
 #[test]
@@ -2438,84 +2438,6 @@ fn options_subdialog_close_button_cancels_and_restores() {
 }
 
 #[test]
-fn options_tooltips_lookup_and_missing_case() {
-    let mut h = Harness::new();
-    h.tab(Tab::Mouse);
-
-    // 1. Direct tip_for_control lookup:
-    // Present tooltip:
-    assert_eq!(
-        h.dialog.tip_for_control(Panel::Mouse, "ReverseMouse"),
-        Some("Reverse mouse up-down axis".to_string())
-    );
-    // Missing tooltip:
-    assert_eq!(h.dialog.tip_for_control(Panel::Mouse, "Slider"), None);
-    assert_eq!(
-        h.dialog.tip_for_control(Panel::Mouse, "SensitivityLabel"),
-        None
-    );
-    // Missing control:
-    assert_eq!(h.dialog.tip_for_control(Panel::Mouse, "NonExistent"), None);
-
-    // 2. Hover tip lookup via tooltip_at:
-    // ReverseMouse is at (28, 9, 150, 28) on page
-    let rev_ptr = page(35., 15.);
-    assert_eq!(
-        h.dialog.tooltip_at(vec2(1280., 720.), rev_ptr),
-        Some("Reverse mouse up-down axis".to_string())
-    );
-    // Slider is at (200, 40, 200, 40) on page (has no tooltip)
-    let slider_ptr = page(250., 50.);
-    assert_eq!(h.dialog.tooltip_at(vec2(1280., 720.), slider_ptr), None);
-    // Blank space on page
-    assert_eq!(h.dialog.tooltip_at(vec2(1280., 720.), page(10., 10.)), None);
-
-    // 3. Active tooltip lifecycle in frame input:
-    // Hovering ReverseMouse sets active_tooltip
-    h.frame(Input {
-        pointer: Some(rev_ptr),
-        ..Default::default()
-    });
-    assert_eq!(
-        h.dialog.active_tooltip(),
-        Some(&ActiveTooltip {
-            text: "Reverse mouse up-down axis".to_string(),
-            pointer: rev_ptr,
-        })
-    );
-
-    // Hovering Slider (missing tip) clears active_tooltip
-    h.frame(Input {
-        pointer: Some(slider_ptr),
-        ..Default::default()
-    });
-    assert_eq!(h.dialog.active_tooltip(), None);
-
-    // Hovering ReverseMouse again restores active_tooltip
-    h.frame(Input {
-        pointer: Some(rev_ptr),
-        ..Default::default()
-    });
-    assert!(h.dialog.active_tooltip().is_some());
-
-    // Mouse click dismisses active_tooltip
-    h.frame(Input {
-        pointer: Some(rev_ptr),
-        click: true,
-        held: true,
-        ..Default::default()
-    });
-    assert_eq!(h.dialog.active_tooltip(), None);
-
-    // Moving outside page clears active_tooltip
-    h.frame(Input {
-        pointer: Some(vec2(10., 10.)),
-        ..Default::default()
-    });
-    assert_eq!(h.dialog.active_tooltip(), None);
-}
-
-#[test]
 fn credits_subdialog_sizing_and_no_scrolling() {
     let mut h = Harness::new();
     let mut loc = Localization::default();
@@ -2718,72 +2640,6 @@ fn credits_dialog_reports_when_exceeding_window_at_small_resolutions() {
         "Expected report in log when content cannot fit window at small resolution, got: {:?}",
         log
     );
-}
-
-#[test]
-fn mouse_options_dynamic_enabling_and_draft_update() {
-    let layout = Layout::parse(
-            br##""Resource/OptionsSubMouse.res" {
-                "ReverseMouse" { "ControlName" "CCvarNegateCheckButton" "fieldName" "ReverseMouse"
-                    "xpos" "28" "ypos" "9" "wide" "150" "tall" "28" }
-                "MouseAccelerationCheckbox" { "ControlName" "CheckButton" "fieldName" "MouseAccelerationCheckbox"
-                    "xpos" "30" "ypos" "100" "wide" "150" "tall" "24" }
-                "MouseAccelerationSlider" { "ControlName" "CCvarSlider" "fieldName" "MouseAccelerationSlider"
-                    "xpos" "200" "ypos" "100" "wide" "200" "tall" "40" }
-                "MouseAccelerationLabel" { "ControlName" "TextEntry" "fieldName" "MouseAccelerationLabel"
-                    "xpos" "400" "ypos" "100" "wide" "50" "tall" "24" }
-                "Autoaim" { "ControlName" "ComboBox" "fieldName" "Autoaim"
-                    "xpos" "28" "ypos" "172" "wide" "175" "tall" "24" }
-                "AutoaimScaleLabel" { "ControlName" "Label" "fieldName" "AutoaimScaleLabel"
-                    "xpos" "28" "ypos" "221" "wide" "179" "tall" "24" "associate" "AutoaimScale" }
-                "AutoaimScale" { "ControlName" "CCvarSlider" "fieldName" "AutoaimScale"
-                    "xpos" "28" "ypos" "245" "wide" "200" "tall" "40" }
-            }"##,
-        )
-        .unwrap();
-
-    let mut res = (*resources()).clone();
-    res.layouts.insert("optionssubmouse".into(), layout);
-
-    // 1. Default config: acceleration is false, aim_assist is Off
-    let mut draft = Draft::new(Config::default());
-    assert!(!draft.config.mouse.acceleration);
-    assert_eq!(draft.config.mouse.aim_assist, AimAssist::Off);
-
-    let widgets = layout_widgets(&res, Panel::Mouse, page_rect(), &draft, &draft.config);
-    let is_enabled = |name: &str| {
-        widgets
-            .iter()
-            .find(|w| w.control.name == name)
-            .unwrap()
-            .enabled
-    };
-
-    assert!(is_enabled("ReverseMouse"));
-    assert!(is_enabled("MouseAccelerationCheckbox"));
-    assert!(!is_enabled("MouseAccelerationSlider"));
-    assert!(!is_enabled("MouseAccelerationLabel"));
-    assert!(is_enabled("Autoaim"));
-    assert!(!is_enabled("AutoaimScale"));
-    assert!(!is_enabled("AutoaimScaleLabel"));
-
-    // 2. Enable acceleration and aim assist
-    draft.config.mouse.acceleration = true;
-    draft.config.mouse.aim_assist = AimAssist::Basic;
-
-    let widgets = layout_widgets(&res, Panel::Mouse, page_rect(), &draft, &draft.config);
-    let is_enabled = |name: &str| {
-        widgets
-            .iter()
-            .find(|w| w.control.name == name)
-            .unwrap()
-            .enabled
-    };
-
-    assert!(is_enabled("MouseAccelerationSlider"));
-    assert!(is_enabled("MouseAccelerationLabel"));
-    assert!(is_enabled("AutoaimScale"));
-    assert!(is_enabled("AutoaimScaleLabel"));
 }
 
 #[test]
@@ -3183,3 +3039,5 @@ fn video_advanced_performance_benchmark_tracking_and_accordance() {
     assert!(impacts["water_all_vs_simple_ms"] > 0.0);
     assert!(impacts["multicore_cpu_gain_ms"] > 0.0);
 }
+
+mod hints;

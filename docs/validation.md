@@ -1,5 +1,35 @@
 # Local validation — 2026-10-05
 
+## Options platform visibility and development hints (2026-10-26)
+
+Owning checks: `cargo test -p hl2-ui --locked`, `cargo test -p source-ui --locked` and
+`cargo test -p hl2-ui owned_options_support_resources --locked -- --ignored --nocapture`.
+The owned-resource check inspects actual layout visibility, disabled controls, associations
+and help tokens, and searches installed localization resources for development-report text.
+No matching installed development text was found; new text uses HL2RS_ placeholders.
+
+`scripts/checks/validate.sh`: 1,118 Rust tests passed, 91 ignored; 3 Python capture-reader
+tests, architecture, strict Clippy/fmt pass. `scripts/checks/check_windows.sh` passes.
+`scripts/build-bevy.sh` refreshes the release executable, shaders and metadata; all nine
+package hashes match. Source-ui tests cover panel order/spacing and screen-edge clamping;
+HL2 tests cover cyan-only, retail-only and stacked hints, cached hover text, disabled
+subdialog controls, popups, tab changes and preservation of hidden stored values. Pure
+platform tests explicitly exercise Windows/macOS/Linux/Other, independent of the host.
+
+Packaged `NO_BUILD=1 ONLY='options_status options menu_options coverage' python3
+scripts/checks/replays.py`: existing Options and menu/popup occlusion groups pass. The new
+three captures assert unfinished status, completed controls unmarked, Mac-only hiding,
+Aero hiding outside Windows and popup/click dismissal. Cyan pixel checks prevent a status
+report alone from masquerading as visible rendering. Accepted final results: STATUS.
+
+Rejected evidence under `artifacts/options-status`: initial fixture used unsupported
+input-key `escape` (corrected to the UI Escape action); Advanced status then inherited the
+inactive parent's fade. The latter capture/report is retained as `rejected-parent-alpha.*`.
+The tooltip now takes the focused subdialog's alpha and restores the parent multiplier;
+a regression checks both. Early compilation/test adaptation and strict iterator warnings
+are retained with the subsequent passing checks. Native colour matching is not applicable
+to this owner-requested development overlay; Windows/Linux runtime remain **not tested**.
+
 ## Flashlight availability and lifetime (2026-10-26)
 
 `scripts/checks/validate.sh`: 1,111 Rust tests pass, 90 ignored; 3 Python capture-reader

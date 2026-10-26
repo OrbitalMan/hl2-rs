@@ -50,7 +50,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from images import pixel_changes
+from images import pixel_changes, png_rgb
 from typing import Callable, Optional
 
 REPO = Path(__file__).resolve().parents[2]
@@ -779,6 +779,45 @@ def check_flashlight_availability():
           and fresh["suit_power"]["power"] == 100, fresh)
 
 
+def check_options_status():
+    """Platform-only visibility, cyan development status and unchanged orange retail hints."""
+    for case, tab in (("mouse", "Mouse"), ("audio", "Audio"), ("advanced", "Video")):
+        if CONFIG.exists():
+            CONFIG.unlink()
+        run = game("options_status_" + case, *MENU,
+                   "--movement-script", f"test-inputs/bevy-options-status-{case}.json")
+        options = run.sample("status-final")["console"]["options"]
+        expect(case + " tab", options["tab"], tab)
+        holds(case + " development hint", bool(options["tooltip"]["development"]), options["tooltip"])
+        if case == "mouse":
+            holds("retail and development hints coexist", bool(options["tooltip"]["retail"]))
+            retail = run.sample("retail-only")["console"]["options"]["tooltip"]
+            holds("finished control keeps only retail hint", bool(retail["retail"]) and retail["development"] is None, retail)
+            for label in ("pressed-dismissed", "popup-occluded"):
+                expect(label, run.sample(label)["console"]["options"]["tooltip"], None)
+            holds("completed mouse controls unmarked", not {"ReverseMouse", "MouseFilter", "Slider"}
+                  .intersection(options["development_controls"]))
+            if SYSTEM == "Darwin":
+                holds("unavailable macOS controls hidden", not {"MouseRaw", "MouseAccelerationCheckbox",
+                      "MouseAccelerationSlider", "MouseAccelerationLabel"}.intersection(options["controls"]))
+        elif case == "audio":
+            expect("development-only cyan hint", options["tooltip"]["retail"], "")
+            holds("working volume/captions unmarked", not {"SFXSlider", "MusicSlider", "CloseCaptionCheck"}
+                  .intersection(options["development_controls"]))
+        else:
+            expect("Advanced subdialog", options["sub"], "VideoAdvanced")
+            holds("completed rendering controls unmarked", not {"ModelDetail", "TextureDetail", "ShadowDetail",
+                  "ColorCorrection", "MotionBlur", "AntialiasingMode", "FilteringMode", "VSync"}
+                  .intersection(options["development_controls"]))
+            expect("finished model has no tooltip", run.sample("completed-model")["console"]["options"]["tooltip"], None)
+            if SYSTEM != "Windows":
+                holds("Aero control and label hidden", not {"D3D9Ex", "D3D9ExLabel"}.intersection(options["controls"]))
+        # The status fill is deliberately light blue, visibly different from the orange retail fill.
+        _, _, rgb = png_rgb(run.capture)
+        pixels = sum(1 for r, g, b in zip(rgb[::3], rgb[1::3], rgb[2::3]) if b > 180 and g > 170 and r < 150)
+        holds(case + " cyan hint pixels", pixels > 1000, pixels)
+
+
 def check_lamp_emission():
     """The installed tube mask emits independently of its baked static-prop lighting."""
     settings(video={"width": 1920, "height": 1080, "hdr": "none", "hdr_migrated": True})
@@ -886,7 +925,8 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape",
                "bevy-console-open", "bevy-flashlight-hud-on", "bevy-flashlight-hud-recharged",
                "bevy-flashlight-depth-actor", "bevy-flashlight-depth-fence",
-               "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg", "bevy-canals-lamp", "bevy-flashlight-availability")
+               "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg", "bevy-canals-lamp", "bevy-flashlight-availability",
+               "bevy-options-status-mouse", "bevy-options-status-audio", "bevy-options-status-advanced")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1433,6 +1473,7 @@ CHECKS = [
     Check("power_hud", check_power_hud, "shared"),
     Check("flashlight_shadows", check_flashlight_shadows, "shared"),
     Check("flashlight_availability", check_flashlight_availability, "shared"),
+    Check("options_status", check_options_status, "shared"),
     Check("lamp_emission", check_lamp_emission, "shared"),
     Check("flashlight_viewmodel", check_flashlight_viewmodel, "shared"),
     Check("window", check_window, "windowed"),

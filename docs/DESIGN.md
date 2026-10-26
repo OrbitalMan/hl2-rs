@@ -1,5 +1,29 @@
 # Design
 
+## Platform availability and development hints (2026-10-26)
+
+Owner request: hide controls unavailable on the running platform, and mark unfinished
+settings with cyan hover status, stacked just below an existing orange retail hint.
+
+1. Keep platform availability and implementation status in one typed settings policy.
+   Filter unavailable controls and their associated labels before drawing, hit testing,
+   focus ordering or footer sizing. Preserve stored configuration. Test Windows/macOS/Linux
+   policy independently of the build target; keep cross-platform HDR/brightness support.
+2. Audit current setting consumers. Only unfinished/partial controls get a cyan corner mark
+   and specific localized status. Completed HDR, model/texture/shadow detail, colour
+   correction, motion blur and ordinary implemented controls have no development status.
+   Remove an entry from the policy when its feature is finished; test completed examples.
+3. Reuse source-ui tooltip wrapping/positioning with generic prepared coloured sections.
+   Clamp the whole stack together, keep the orange hint above cyan with a two-unit gap,
+   and cache text/layout while the hovered control is unchanged. Cover disabled controls,
+   associated labels, subdialogs, popup/confirmation occlusion, clicks and tab changes.
+   New development-only text uses HL2RS_ localization placeholders after checking resources.
+4. Run owning unit/owned-resource checks, validation and Windows-target checks. Build and
+   inspect muted packaged captures for cyan-only, orange-only, stacked and Advanced hints;
+   assert platform-hidden controls, completed controls and hint dismissal. Measure packaged
+   UI/frame time against the prior package. Record evidence in MODLOG/STATUS/validation/
+   performance; README remains unchanged. Commit the reviewed checkpoint.
+
 ## Lighting bug follow-up (2026-10-26)
 
 Owner scope, separate checkpoint commits:

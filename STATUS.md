@@ -1,6 +1,32 @@
 # STATUS
  
- Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. Flashlight HUD, High depth shadows and diffuse viewmodel lighting are implemented. Canal shadow direction/receiver reports are complete; fluorescent emission and flashlight availability/lifetime are corrected below. Native shader/shadow parity remains unverified. Sections below are newest first.
+ Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. Options now enforce platform availability and show cyan development markers/status hints while retaining orange retail help. Lighting/flashlight checkpoints below remain implemented; native shader/shadow parity remains unverified. Sections below are newest first.
+
+## Options platform availability and development status (2026-10-26)
+
+- Central `settings::support` policy filters controls and associated labels before drawing,
+  input, focus order and footer sizing. Aero is Windows-only; macOS raw-input/acceleration
+  controls are hidden. Stored settings are preserved; cross-platform HDR/brightness remain.
+- Unfinished/partial controls get small cyan corner marks and specific localized status.
+  Cyan hints appear alone or two layout units below existing orange retail hints. Completed
+  HDR/model/texture/shadow/colour-correction/motion-blur controls are unmarked. Shared
+  prepared tooltip geometry clamps the stack together and caches unchanged hover text.
+  Disabled controls and subdialogs work; popups and occluded layers suppress hints.
+- Verified: validate.sh 1,118 tests/91 ignored +3 Python, strict Clippy/fmt/architecture,
+  Windows-target check, owned layout/localization inspection, release package/nine hashes.
+  Packaged options, menu_options and coverage pass; final options_status/coverage pass.
+  Three inspected captures: Mouse retail+cyan, Audio cyan-only, Advanced cyan. Pixel counts:
+  9,999/14,836/15,407. Saved-value and explicit platform-policy regressions pass.
+- Rejected: first fixture used an unsupported Escape key enum; Advanced hint inherited the
+  inactive parent's fade. Corrected UI action and focused-subdialog alpha; regression also
+  checks alpha restoration. Initial compile/strict-test failures and rejected timing/capture
+  evidence retained in artifacts/options-status. Details: docs/validation.md.
+- Windows/Linux runtime remain **not tested**. Marked features still lack their consumers;
+  status is removed from the registry when a feature is finished (AGENTS maintenance rule).
+  Three paired runs/build/state: idle prior/new frame 25.145/22.351 ms; hover 25.496/25.032 ms.
+  HUD CPU idle 0.3783/0.3300 ms, hover 0.3988/0.3919 ms. No regression measured in this scene;
+  the first idle baseline is slower and no general speedup is established. Performance
+  evidence and rejected short hover control: docs/performance.md. README unchanged.
 
 ## Lighting follow-up: flashlight availability and lifetime (2026-10-26)
 
