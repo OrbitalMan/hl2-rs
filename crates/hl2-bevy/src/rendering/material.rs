@@ -196,6 +196,7 @@ pub(crate) fn make_material(
             ..Default::default()
         },
         flashlight: flashlight.clone(),
+        viewmodel_flashlight: Default::default(),
         envmap: black_cube.clone(),
         envmap_tint: Vec3::from_array(definition.envmap_tint).extend(0.),
         envmap_contrast: Vec3::from_array(definition.envmap_contrast)

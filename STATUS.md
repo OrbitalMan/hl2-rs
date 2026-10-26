@@ -1,6 +1,34 @@
 # STATUS
  
- Checkpoint: 2026-10-25 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. The flashlight power HUD and High depth shadows are implemented and validated. Viewmodel flashlight lighting remains unfinished. Sections below are newest first.
+ Checkpoint: 2026-10-25 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. The flashlight power HUD and High depth shadows are implemented and validated. Diffuse viewmodel flashlight lighting is also implemented; native shader/shadow parity remains unverified. Sections below are newest first.
+
+## Flashlight on the weapon (2026-10-25)
+
+- Implemented: the placed beam illuminates the viewmodel through its existing world-lighting
+  basis, with shared cookie/Lambert/near/far/attenuation math. It adds no light, pass or
+  shadow map. Off/dark clears the beam; the separate camera, FOV and framing remain.
+- Verified: validate.sh (1,103 Rust tests, 89 ignored; 3 capture-reader tests; architecture,
+  strict Clippy/fmt), Windows-target check, 6 flashlight tests including 3 owned-install
+  checks. Packaged `flashlight_viewmodel`, `flashlight_shadows`, `power_hud`, `hud`,
+  `fov_settings` and `coverage` pass across the accepted runs. Final weapon controls:
+  pistol/SMG/portrait 18,157/11,021/35,187 brighter pixels above threshold 8 in the weapon
+  region; zero changed upper-world pixels. Off has zero changed weapon pixels above 2.
+  The private shader control is restored in `finally`. Detailed commands: docs/validation.md.
+- Performance: paired 1920x1080 Metal means, three runs/state: prior/new off 19.484/19.490 ms,
+  on 19.525/19.328 ms. Model-light CPU on 0.02726/0.02864 ms (about +0.0014 ms). No frame
+  regression measured in this view; no speedup/FPS guarantee. Runs now measure 559-574
+  frames after warm-up; earlier 600-frame descriptions were safety caps not reached by
+  the script. The short earlier windows are corrected in docs/performance.md.
+- Rejected first comparison changed ammo-HUD pixels only. A diagnostic proved the weapon
+  lies outside the real beam in the open corridor; no artificial light was added. Two
+  eye-height probes and one beam-height probe failed their placement assumption. A final
+  clearance/projection-checked collision probe selected clear close-wall positions where
+  the actual beam reaches the weapon. All failures/captures are retained in
+  `artifacts/flashlight-viewmodel`, including `rejected-open-view`.
+- Next: native illumination comparison. Weapon self-shadowing, world-depth-map sampling
+  on the weapon, bump-normal flashlight shading, dedicated firing/additive-effect capture,
+  exact native intensity, Windows runtime and ordinary playthroughs are **not tested**.
+  README is unchanged.
 
 ## High flashlight shadows (2026-10-25)
 
@@ -27,7 +55,7 @@
   pixels above 2. A mistaken replay registration caused power-HUD/coverage failures;
   both passed after correction. The original alleged citizen camera showed mostly cops;
   the accepted crowd camera visibly contains three citizens.
-- Next: flashlight lighting on the viewmodel. Native side-by-side, exact engine-generated
+- Next at that checkpoint: viewmodel lighting (diffuse implemented above). Native side-by-side, exact engine-generated
   noise/jitter, native slope bias, per-entity shadow-disable inputs, Windows runtime and
   ordinary playthroughs are **not tested**. The current filter uses a stable procedural
   rotation and reverse-depth receiver bias 0.0005, without native slope bias 16.
@@ -54,7 +82,7 @@
 
 ## Options audit (2026-10-24)
 
-- Flashlight (in progress, MODLOG 2026-10-25): F / `impulse 100` toggles it on suit power (Episode Two: its own battery), its light is drawn with the installed cookie; power HUD completed in the continuation above; High depth shadows completed above; viewmodel lighting remains unfinished (original unshadowed corridor frame time: 18.40 / 18.40 / 18.39 ms previous / off / on). Handoff: docs/DESIGN.md "Shadow detail and the flashlight", section "Handoff".
+- Flashlight (in progress, MODLOG 2026-10-25): F / `impulse 100` toggles it on suit power (Episode Two: its own battery), its light is drawn with the installed cookie; power HUD completed in the continuation above; High depth shadows and diffuse viewmodel lighting completed above; native shader/shadow parity remains unverified (original unshadowed corridor frame time: 18.40 / 18.40 / 18.39 ms previous / off / on). Handoff: docs/DESIGN.md "Shadow detail and the flashlight", section "Handoff".
 - Shadow detail: Low draws blob shadows, Medium/High render-to-texture shadows with the engine's ranking and page allocator (docs/gameui.md 23e); High adds flashlight depth shadows (continuation above). Medium on the plaza: 19.69 ms vs Low 19.36 ms mean frame (3 rotating runs, spread about 1 ms), shadow update 0.52 ms CPU. Plaza view of `d1_trainstation_02` (1920x1080, 3 rotating runs each): off 18.86 ms, Low 19.03 ms mean frame (spread 18.68-19.17); the shadow update costs 0.021 ms CPU a frame (246 casters, 81 with geometry).
 - Model detail: entity models (props, NPCs) now switch levels of detail by distance with the retail metric (docs/gameui.md 23d). Plaza view of `d1_trainstation_02` at 1920x1080: visible triangles 126,141 -> 110,349, all model triangles 1,018,533 -> 892,782 at spawn; frame time 19.99 -> 20.03-20.06 ms (4 rotating runs, within noise; this view is CPU bound). Not tested: Windows; GPU-bound scenes where fewer triangles would show as frame time.
 - Motion blur implemented (docs/gameui.md 23c): packaged `d1_trainstation_02` turn capture shows the world blurred, the weapon and HUD sharp; frame time (6 rotating runs each, 1920x1080) previous commit 21.22 / off 21.66 / on 21.72 ms stop-start turning, 17.60 / 18.05 / 18.07 ms still: on vs off within noise, but off is about 0.45 ms slower than the previous commit for a reason not found (see MODLOG). Not tested: Windows, real mouse look (scripted turns step once per simulation tick), a retail comparison.

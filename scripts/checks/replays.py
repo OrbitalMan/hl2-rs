@@ -702,6 +702,56 @@ def check_flashlight_shadows():
     holds("alpha cutout holes transmit the flashlight", changes["brighter"] > 1000, changes)
 
 
+def check_flashlight_viewmodel():
+    """The same beam lights the weapon, including rotated views and portrait framing."""
+    def run(weapon: str, name: str, on: bool = True, portrait: bool = False):
+        width, height = (1080, 1920) if portrait else (1920, 1080)
+        settings(video={"width": width, "height": height, "hdr": "none", "hdr_migrated": True,
+                        "advanced": {"shadow_detail": "medium"}})
+        script = json.loads((REPO / f"test-inputs/bevy-flashlight-viewmodel-{weapon}.json").read_text())
+        if not on:
+            script[0]["ui"][1]["command"] = "sv_cheats 1; impulse 101"
+        fixture = OUT / f"{name}.input.json"
+        fixture.write_text(json.dumps(script))
+        result = game(name, "--map", "d1_trainstation_02", "--width", str(width), "--height", str(height),
+                      "--movement-script", str(fixture))
+        expect("fixed dimensions", png_size(result.capture), [width, height])
+        holds("completed", result.report["render"]["simulation"]["script_finished"])
+        inventory = result.sample(f"flashlight-viewmodel-{weapon}")["gameplay"]["inventory"]
+        expect("selected weapon", inventory["active"], "weapon_pistol" if weapon == "pistol" else "weapon_smg1")
+        expect("no stale posed bounds", result.report["render"]["presentation"]["pose_or_visibility_mismatches"], 0)
+        return result
+    shader = GAME / "bevy-assets/shaders/source.wgsl"
+    original = shader.read_text(encoding="utf-8")
+    marker = "if viewmodel_flashlight.limits.z < 0.5"
+    holds("control hook exists", marker in original)
+    for weapon, portrait in (("pistol", False), ("smg", False), ("pistol", True)):
+        label = f"flashlight_vm_{weapon}_{'portrait' if portrait else 'landscape'}"
+        normal = run(weapon, label, portrait=portrait)
+        try:
+            # Suppress only the weapon's beam contribution: world/HUD/baked lighting stay live.
+            shader.write_text(original.replace(marker, "if true"), encoding="utf-8")
+            control = run(weapon, label + "_control", portrait=portrait)
+        finally:
+            shader.write_text(original, encoding="utf-8")
+        width, height = png_size(normal.capture)
+        region = (int(width * 0.35), int(height * 0.4), int(width * 0.85), int(height * 0.87))
+        changes = pixel_changes(control.capture, normal.capture, threshold=8, region=region)
+        holds("beam illuminates weapon pixels above the HUD", changes["brighter"] > 500
+              and changes["darker"] < 50, changes)
+        world = pixel_changes(control.capture, normal.capture, threshold=2,
+                              region=(0, 0, width, int(height * 0.4)))
+        holds("weapon control preserves the world", world["changed"] < 10, world)
+    off = run("pistol", "flashlight_vm_off", on=False)
+    try:
+        shader.write_text(original.replace(marker, "if true"), encoding="utf-8")
+        control = run("pistol", "flashlight_vm_off_control", on=False)
+    finally:
+        shader.write_text(original, encoding="utf-8")
+    changes = pixel_changes(control.capture, off.capture, threshold=2, region=(672, 432, 1632, 939))
+    holds("off has no weapon light", changes["changed"] < 10, changes)
+
+
 def check_hud_aspect():
     """Options > Video > HUD Aspect Ratio: the HUD panels sit inside a centered frame of the chosen
     aspect (report `hud.frame` = [x, width] and `hud.panels` = health, suit, ammo, secondary ammo
@@ -783,7 +833,8 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-resolution-stress-windowed", "bevy-menu-video-portrait",
                "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape",
                "bevy-console-open", "bevy-flashlight-hud-on", "bevy-flashlight-hud-recharged",
-               "bevy-flashlight-depth-actor", "bevy-flashlight-depth-fence")
+               "bevy-flashlight-depth-actor", "bevy-flashlight-depth-fence",
+               "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1329,6 +1380,7 @@ CHECKS = [
     Check("hud_aspect", check_hud_aspect, "shared"),
     Check("power_hud", check_power_hud, "shared"),
     Check("flashlight_shadows", check_flashlight_shadows, "shared"),
+    Check("flashlight_viewmodel", check_flashlight_viewmodel, "shared"),
     Check("window", check_window, "windowed"),
     Check("window_place", check_window_place, "macos"),
     Check("no_border", check_no_border, "windows"),

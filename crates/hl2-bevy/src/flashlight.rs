@@ -6,6 +6,8 @@
 //! depth frustum matches the cookie; the circle-bounded cookie fits the spotlight cone. Episode Two keeps
 //! its own battery; HL2, Episode One and Lost Coast run the flashlight on suit power.
 mod depth;
+mod viewmodel;
+pub(crate) use viewmodel::ViewmodelLight;
 
 use crate::{
     FlyCamera, campaign::Campaign, gameplay::Gameplay, simulation::Simulation, ui_host::Console,
@@ -56,6 +58,10 @@ pub struct HostFlashlight {
 }
 
 impl HostFlashlight {
+    pub(crate) fn light(&self) -> Option<Light> {
+        self.light
+    }
+
     pub fn state(&self) -> Option<&Flashlight> {
         self.state.as_ref()
     }
@@ -192,7 +198,9 @@ impl bevy::app::Plugin for FlashlightPlugin {
         .init_resource::<HostFlashlight>()
         .add_systems(
             bevy::app::PostUpdate,
-            update.before(bevy::transform::TransformSystems::Propagate),
+            update
+                .before(crate::rendering::present_lighting)
+                .before(bevy::transform::TransformSystems::Propagate),
         );
     }
 }

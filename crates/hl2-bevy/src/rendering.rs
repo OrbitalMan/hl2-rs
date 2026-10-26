@@ -17,8 +17,10 @@ use bevy::{
 use modkit_core::Surface;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod lighting;
 pub(crate) mod lod;
 mod material;
+pub use lighting::present_lighting;
 mod model_cache;
 use material::{alpha_mode, cube_image_filtered, image_filtered, mip_image_filtered};
 pub(crate) use material::{black_cube, fallback_images, image, make_material, sampler_descriptor};
@@ -73,6 +75,8 @@ pub struct SourceMaterial {
     #[texture(18)]
     #[sampler(19)]
     pub(crate) flashlight: Handle<Image>,
+    #[uniform(20)]
+    pub(crate) viewmodel_flashlight: crate::flashlight::ViewmodelLight,
     pub(crate) alpha: AlphaMode,
     pub(crate) two_sided: bool,
 }
@@ -81,7 +85,7 @@ pub struct SourceMaterial {
 #[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
 pub struct ModelLighting {
     /// x = lit model, y = local light count, z = half-Lambert, w = 1 when the flashlight does not light
-    /// it (unlit, camera, additive and sky materials, the viewmodel).
+    /// it (unlit, camera, additive and sky materials); 2 for the viewmodel beam path.
     pub params: Vec4,
     /// Draw space to Bevy world space (Mat4 default is identity), except for the
     /// view model, which is drawn by a fixed camera at the origin.
@@ -648,97 +652,6 @@ pub fn present_entities(
             }
             animation.sampled = Some(sampled);
         }
-    }
-}
-/// Recompute each lit model's light state when its illumination origin moves
-/// (retail light cache at origin + rotation * illumposition * scale), and every frame
-/// while an entity light (muzzle elight) reaches it (ComputeDynamicLighting).
-pub fn present_lighting(
-    game: Res<crate::gameplay::Gameplay>,
-    sim: Res<crate::simulation::Simulation>,
-    effects: Option<Res<crate::effects::Effects>>,
-    mut draws: Query<(
-        &mut ModelLit,
-        &MeshMaterial3d<SourceMaterial>,
-        &InheritedVisibility,
-    )>,
-    mut materials: ResMut<Assets<SourceMaterial>>,
-    performance: Option<Res<crate::performance::Performance>>,
-) {
-    let _timing = crate::performance::scope(performance.as_deref(), "model lighting");
-    let Some(data) = game.world.lighting.as_deref() else {
-        return;
-    };
-    let elights = effects
-        .as_deref()
-        .map_or_else(Vec::new, |e| e.elights(data.dynamic_minlight));
-    let mut states =
-        BTreeMap::<Option<usize>, (glam::Vec3, modkit_core::lighting::LightState)>::new();
-    // The view model camera sits at the origin looking down +X; map that space onto the
-    // player's view so world-space lights and the ambient cube line up.
-    let (yaw, pitch) = sim.view_angles();
-    let view = Transform::from_translation(source_to_bevy(sim.view_origin()))
-        .looking_to(source_to_bevy(crate::source_direction(yaw, pitch)), Vec3::Y)
-        .to_matrix()
-        * Transform::IDENTITY
-            .looking_to(Vec3::X, Vec3::Y)
-            .to_matrix()
-            .inverse();
-    for (mut lit, material, visible) in &mut draws {
-        if !visible.get() && lit.last.is_some() {
-            continue;
-        }
-        let illumination = game
-            .world
-            .illumination
-            .get(&lit.key)
-            .copied()
-            .unwrap_or_default();
-        let origin = match lit.entity {
-            Some(id) => {
-                let state = &game.scene.states[id];
-                let (origin, rotation) = sim
-                    .physics
-                    .entity_pose(id)
-                    .unwrap_or((state.origin, state.rotation));
-                origin + rotation * (illumination.position * lit.scale)
-            }
-            None => glam::Vec3::from_array(sim.eye().to_array()),
-        };
-        let lit_dynamic = elights
-            .iter()
-            .any(|l| modkit_core::lighting::dynamic_reaches(origin, l));
-        if lit.entity.is_some()
-            && !lit_dynamic
-            && !lit.dynamic
-            && lit.last.is_some_and(|(last, hl)| {
-                last.distance_squared(origin) < 1. && hl == lit.half_lambert
-            })
-        {
-            continue;
-        }
-        lit.dynamic = lit_dynamic;
-        let (_, state) = states.entry(lit.entity).or_insert_with(|| {
-            let mut state = data.state_at(origin);
-            if illumination.ambient_boost() {
-                data.boost(&mut state, origin);
-            }
-            for light in &elights {
-                data.add_dynamic(&mut state, origin, light);
-            }
-            (origin, state)
-        });
-        let mut uniform = ModelLighting::from_state(state, lit.half_lambert);
-        if lit.entity.is_none() {
-            uniform.basis = view;
-            uniform.params.w = 1.;
-        }
-        if let Some(mut material) = materials.get_mut(&material.0)
-            && material.lighting != uniform
-        {
-            material.lighting = uniform;
-        }
-        lit.last = Some((origin, lit.half_lambert));
     }
 }
 /// Rotate a bind normal by the weighted bone matrices (CPU skinning path).

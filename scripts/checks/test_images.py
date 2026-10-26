@@ -43,7 +43,11 @@ class CaptureImages(unittest.TestCase):
             a, b = Path(folder) / "a.png", Path(folder) / "b.png"
             write_png(a, [bytes([0, 0, 10, 200]), bytes([0, 10, 10, 10])], width=1)
             write_png(b, [bytes([0, 0, 40, 100]), bytes([0, 11, 10, 9])], width=1)
-            self.assertEqual(pixel_changes(a, b), {"changed": 1, "darker": 1, "brighter": 1, "maximum": 100})
+            self.assertEqual(pixel_changes(a, b, region=(0, 1, 1, 2)),
+                             {"changed": 0, "darker": 0, "brighter": 0, "maximum": 1, "bounds": []})
+            with self.assertRaises(ValueError):
+                pixel_changes(a, b, region=(0, 0, 2, 2))
+            self.assertEqual(pixel_changes(a, b), {"changed": 1, "darker": 1, "brighter": 1, "maximum": 100, "bounds": [0, 0, 0, 0]})
 
 
 if __name__ == "__main__":

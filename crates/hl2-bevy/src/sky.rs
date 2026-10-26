@@ -220,6 +220,7 @@ fn face_material(
             ..Default::default()
         },
         flashlight: white.clone(),
+        viewmodel_flashlight: Default::default(),
         envmap: black_cube.clone(),
         envmap_tint: Vec4::ZERO,
         envmap_contrast: Vec4::ZERO,

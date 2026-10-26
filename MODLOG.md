@@ -1,5 +1,55 @@
 # MODLOG
 
+## 2026-10-25 The flashlight illuminates the viewmodel
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** The separate origin-based weapon camera receives the placed beam through a
+material uniform. Model light presentation maps weapon fragments/normals into world space
+through its existing basis; the shader shares cookie, Lambert, near/far and attenuation
+math with the world path. Placement precedes light presentation, so toggles/flicker clear
+or update the beam in the same frame. No extra light, shadow map or render pass. Moved
+model light presentation into its child module and tightened the renderer size baseline.
+Added pistol/SMG fixtures, portrait/off controls and region/bounds support in the capture
+comparator (with tests), excluding animated HUD pixels from weapon proof. README unchanged.
+
+**Why:** Complete the remaining diffuse-light portion of the flashlight handoff. Source SDK
+`game/client/viewrender.cpp` and the exact installed client's viewmodel draw wrapper were
+reviewed: separate FOV/depth with the normal model draw path. That wrapper does not establish
+native shader parity. The world beam's physical placement wins; this is not a constant
+brightness boost on the weapon.
+
+**Tested how:** `scripts/checks/validate.sh` (1,103 Rust tests passed, 89 ignored; 3 Python
+image-reader tests; strict Clippy/fmt/architecture); `scripts/checks/check_windows.sh`;
+`cargo test -p hl2-bevy flashlight --locked -- --include-ignored` (6 passed, 3 owned-install).
+Packaged release with `scripts/build-bevy.sh`; accepted groups `flashlight_viewmodel`,
+`flashlight_shadows`, `power_hud`, `hud`, `fov_settings` and `coverage`. Final shader controls
+suppress only the weapon beam, restore in `finally`, require positive light above the HUD
+and preserve the upper world region; off is unchanged. A separate prior-build capture
+also has identical decoded world pixels above the weapon in this fixed view. Captures inspected. Details:
+docs/validation.md; longer paired timing evidence in docs/performance.md.
+
+**Result:** Diffuse flashlight light is visible on pistol/SMG parts reached by the actual
+beam, including portrait framing and translated/rotated views. Paired 1920x1080 Metal means, three runs/state: prior/new off 19.484/19.490 ms;
+on 19.525/19.328 ms. Model-light CPU off 0.02638/0.02710 ms, on 0.02726/0.02864 ms
+(about +0.0014 ms on). Each run has 559-574 measured frames after warm-up. No frame
+regression measured in this view; the lower on mean is not an isolated speedup claim.
+Correction to earlier timing descriptions: the 600-frame setting was a safety cap; scripts
+ended launches at tick 240. The prior High plaza set had only 6-59 measured frames after
+warm-up, and power-HUD runs 62-69. Their observed numbers remain, with corrected scope and
+no precision/FPS claim. This continuation uses longer script-limited measurement windows.
+
+**Still broken or not tested:** Weapon self-shadowing, world-depth-map sampling on the
+weapon, bump-normal flashlight shading, exact native illumination parity, Windows runtime
+and ordinary playthroughs. An initial image assertion counted only ammo-HUD changes and
+was rejected. A coordinate diagnostic showed the open-corridor weapon lies outside the
+beam; no artificial light was added. Two eye-height collision probes and a beam-height
+probe failed their placement assumption. A clearance/projection-checked owned-data probe
+then located real fixture positions. Failure evidence is retained in ignored artifacts.
+
+**Next:** Native viewmodel illumination comparison; depth/filter/mask and bump-normal
+fidelity remain separate bounded work before claiming native flashlight parity.
+
 ## 2026-10-25 High flashlight shadows: posed and alpha-tested casters
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

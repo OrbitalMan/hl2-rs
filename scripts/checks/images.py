@@ -1,4 +1,5 @@
 """Small dependency-free RGB reader for the game's non-interlaced PNG captures."""
+from __future__ import annotations
 from pathlib import Path
 import struct
 import zlib
@@ -63,18 +64,28 @@ def png_rgb(path: Path) -> tuple[int, int, bytes]:
     return width, height, bytes(rgb)
 
 
-def pixel_changes(before: Path, after: Path, threshold: int = 2) -> dict[str, int]:
-    """Counts changed/darker/brighter pixels; positive direction is after minus before."""
+def pixel_changes(before: Path, after: Path, threshold: int = 2,
+                  region: tuple[int, int, int, int] | None = None) -> dict[str, int | list[int]]:
+    """Counts RGB changes in an optional rectangle; returns their inclusive bounds."""
     width, height, a = png_rgb(before)
     w, h, b = png_rgb(after)
     if (width, height) != (w, h):
         raise ValueError("capture dimensions differ")
     changed = darker = brighter = maximum = 0
-    for i in range(0, len(a), 3):
+    bounds = [width, height, -1, -1]
+    x0, y0, x1, y1 = region or (0, 0, width, height)
+    if not (0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height):
+        raise ValueError("comparison region is outside the capture")
+    pixels = (y * width + x for y in range(y0, y1) for x in range(x0, x1))
+    for pixel in pixels:
+        i = pixel * 3
         differences = [b[i + c] - a[i + c] for c in range(3)]
         delta = max(abs(d) for d in differences)
         maximum = max(maximum, delta)
+        if delta > threshold:
+            x, y = (i // 3) % width, (i // 3) // width
+            bounds = [min(bounds[0], x), min(bounds[1], y), max(bounds[2], x), max(bounds[3], y)]
         changed += delta > threshold
         darker += min(differences) < -threshold
         brighter += max(differences) > threshold
-    return {"changed": changed, "darker": darker, "brighter": brighter, "maximum": maximum}
+    return {"changed": changed, "darker": darker, "brighter": brighter, "maximum": maximum, "bounds": bounds if changed else []}

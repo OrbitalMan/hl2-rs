@@ -129,6 +129,40 @@ about 1.4 ms in the plaza and 3.8 ms mean in the three-citizen view (noisy). Ful
 validation evidence: docs/performance.md and docs/validation.md. Next bounded step:
 flashlight lighting on the viewmodel.
 
+### Continuation: flashlight on the viewmodel (2026-10-25)
+
+Bounded step: light the weapon with the same placed flashlight, cookie, Lambert term,
+near/far planes and attenuation used by the world. Keep the existing origin-based
+viewmodel camera and its framing. Transform its fragment position/normal through the
+existing draw-to-world lighting basis. Supply the placed beam directly to viewmodel
+materials, since the origin-based camera's light clusters cannot locate a world-space
+flashlight. Reuse one shader implementation of the cookie/attenuation calculation;
+add no light, render pass, shadow map or asset read. Off supplies a zero-enabled uniform.
+Move model-light presentation to a child module before extending the oversized renderer.
+
+Evidence: Source SDK `game/client/viewrender.cpp` draws the viewmodel with its own FOV
+and depth range through the normal model draw path. The exact installed-client draw
+wrapper has the same projection/depth/list flow; it does not establish shader parity.
+The current step adds diffuse flashlight illumination; viewmodel self-shadowing and
+world-depth-map sampling on the weapon remain unverified and outside this bounded step.
+
+Validation: unit tests for translated/rotated world-to-beam projection, power/plane
+values and off clearing. Capture pistol/SMG on/off with fixed exposure; isolate weapon
+pixels using a disposable shader control, preserve world pixels and run existing High
+shadow/HUD/camera checks. Test a turned/translated view and portrait framing. Run local
+validation and Windows-target checking, refresh the package and measure before/after
+off/on frame and model-light CPU time without concurrent builds/replays. Keep README
+unchanged; record limitations and failed evidence in the feature logs.
+
+Completed: numerical projection/basis tests and the owned obstruction test pass. Packaged
+pistol, SMG, portrait and off controls pass, with the upper world region unchanged. The
+first open-corridor comparison changed only HUD pixels; the accepted test excludes them
+and derives clear close-wall views from collision data. In the open view the weapon lies
+outside the actual beam and correctly receives no added light. Local validation and
+Windows-target checks pass; six relevant packaged groups pass across the accepted runs.
+See docs/validation.md and docs/performance.md. Native viewmodel shader comparison,
+self-shadowing and world-depth-map reception remain unverified.
+
 ## Architecture guardrails (2026-10-24)
 
 Goal (owner): the refactoring series stops; checks keep the structure from decaying instead.

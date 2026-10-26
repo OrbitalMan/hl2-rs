@@ -1788,6 +1788,23 @@ it (MODLOG 2026-10-25, step 1).
   children's bounds and silhouettes in their parent's shadow (bone-merged NPC weapons cast nothing).
 
 
+### Viewmodel flashlight continuation (2026-10-25)
+
+The origin-based weapon camera receives the placed beam through a material uniform.
+`rendering::lighting` maps weapon positions/normals into world space with its existing
+lighting basis and refreshes the beam after flashlight placement. World and weapon
+fragments share one cookie/Lambert/near/far/attenuation calculation. No second light or
+render pass is created. Off and zero-brightness flicker provide a disabled beam; unlit,
+additive and sky materials retain their exclusion. The material implementation and model
+lighting presentation stay in their child modules.
+
+This is physical beam illumination, not a constant weapon brightness boost. In the open
+corridor the weapon lies outside the beam, whose origin is 20 units below the eye. The
+clearance-checked close-wall fixtures use the real placement pull-back and show light on
+the pistol and SMG. The viewmodel keeps its own render layer, FOV and framing. This path
+adds diffuse illumination; weapon self-shadowing, world-depth-map sampling on the weapon,
+bump-normal flashlight shading and native side-by-side parity are **not tested**.
+
 ### 23f. Flashlight power HUD (2026-10-25)
 
 `hud::power` reads `HudSuitPower` and `HudFlashlight` through the running game's VFS on the

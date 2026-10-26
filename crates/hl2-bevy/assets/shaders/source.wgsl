@@ -118,6 +118,35 @@ fn model_light(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     }
     return sum;
 }
+// Direct world-space beam data for the origin-based viewmodel camera.
+struct ViewmodelLight {
+    world_to_beam: mat4x4<f32>,
+    origin_linear: vec4<f32>,
+    limits: vec4<f32>,
+}
+@group(#{MATERIAL_BIND_GROUP}) @binding(20) var<uniform> viewmodel_flashlight: ViewmodelLight;
+// Shared cookie, Lambert and distance calculation for world and viewmodel fragments.
+// xyz is added diffuse light; w carries attenuation for the world's shadow blend.
+fn flashlight_base(to: vec3<f32>, n: vec3<f32>, projected: vec3<f32>, near: f32, far: f32, linear: f32) -> vec4<f32> {
+    if linear <= 0.0 || projected.z <= near { return vec4(0.0); }
+    let xy = projected.xy / projected.z;
+    if abs(xy.x) > 1.0 || abs(xy.y) > 1.0 { return vec4(0.0); }
+    let cookie = textureSampleLevel(flashlight_texture, flashlight_sampler, vec2(xy.x, -xy.y) * 0.5 + 0.5, 0.0).rgb;
+    let dist = max(length(to), 0.001);
+    let atten = saturate(linear / dist);
+    let fade = clamp((dist - far) / (-0.4 * far), 0.0, 1.0);
+    let lambert = saturate(dot(n, -to / dist));
+    return vec4(cookie * atten * lambert * fade, atten);
+}
+fn viewmodel_flashlight_color(position: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
+    if viewmodel_flashlight.limits.z < 0.5 { return vec3(0.0); }
+    let p = lighting.basis * vec4(position, 1.0);
+    let n = normalize((lighting.basis * vec4(normal, 0.0)).xyz);
+    return flashlight_base(p.xyz - viewmodel_flashlight.origin_linear.xyz, n,
+        (viewmodel_flashlight.world_to_beam * p).xyz,
+        viewmodel_flashlight.limits.x, viewmodel_flashlight.limits.y,
+        viewmodel_flashlight.origin_linear.w).rgb;
+}
 // Eight-sample Poisson footprint (SDK shader's sampling data), independently applied to
 // Bevy's reverse-Z spotlight map. The engine-generated noise/jitter stream is not installed;
 // this stable 32-pixel tile supplies rotation without a per-frame texture or CPU update.
@@ -167,26 +196,18 @@ fn flashlight(world_position: vec4<f32>, n: vec3<f32>, frag_coord: vec2<f32>) ->
         up = normalize(up);
         let right = cross(d, up);
         let to = world_position.xyz - (*light).position_radius.xyz;
-        let z = dot(to, d);
-        if z <= (*light).shadow_map_near_z { return vec3(0.0); }
         let tan_half = (*light).spot_light_tan_angle;
-        let xy = vec2(dot(to, right), dot(to, up)) / (z * tan_half);
-        if abs(xy.x) > 1.0 || abs(xy.y) > 1.0 { return vec3(0.0); }
-        let cookie = textureSampleLevel(flashlight_texture, flashlight_sampler, vec2(xy.x, -xy.y) * 0.5 + 0.5, 0.0).rgb;
-        let dist = max(length(to), 1e-3);
-        let atten = saturate((*light).position_radius.w / dist);
-        let far = (*light).range;
-        let fade = clamp((dist - far) / (-0.4 * far), 0.0, 1.0);
-        let lambert = saturate(dot(n, -to / dist));
-        // Do not sample eight shadow taps where the flashlight contributes nothing.
-        if fade <= 0.0 || lambert <= 0.0 || all(cookie <= vec3(0.0)) { return vec3(0.0); }
+        let projected = vec3(dot(to, right) / tan_half, dot(to, up) / tan_half, dot(to, d));
+        let beam = flashlight_base(to, n, projected, (*light).shadow_map_near_z, (*light).range, (*light).position_radius.w);
+        // Avoid all shadow taps for fragments receiving no flashlight contribution.
+        if all(beam.rgb <= vec3(0.0)) { return vec3(0.0); }
         var shadow = 1.0;
         if ((*light).flags & 1u) != 0u {
             let visibility = flashlight_shadow(light_id, to, d, frag_coord);
             // SDK DoFlashlight: the 0.35 fill light is reduced with distance attenuation.
-            shadow = mix(mix(visibility, 1.0, 0.35), visibility, atten);
+            shadow = mix(mix(visibility, 1.0, 0.35), visibility, beam.a);
         }
-        return cookie * atten * lambert * fade * shadow;
+        return beam.rgb * shadow;
     }
     return vec3(0.0);
 }
@@ -220,7 +241,9 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
         let n = normalize((lighting.basis * vec4(mesh.world_normal, 0.0)).xyz);
         rgb = srgb_to_linear(base.rgb) * model_light(p, n);
     }
-    if lighting.params.w < 0.5 {
+    if lighting.params.w > 1.5 && parameters.z < 0.5 && parameters.w > -0.5 {
+        rgb += srgb_to_linear(base.rgb) * viewmodel_flashlight_color(mesh.world_position.xyz, mesh.world_normal);
+    } else if lighting.params.w < 0.5 {
         rgb += srgb_to_linear(base.rgb) * flashlight(mesh.world_position, normalize(mesh.world_normal), mesh.position.xy);
     }
     // SDK $selfillum: diffuse = lerp(diffuse, tint * albedo, base alpha), before specular.

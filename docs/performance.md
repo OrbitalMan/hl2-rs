@@ -1,14 +1,52 @@
 # Performance measurements - 2026-10-05
 
+## Flashlight on the weapon (2026-10-25)
+
+Packaged Metal, Apple M1 Pro, `d1_trainstation_02`, 1920x1080, HDR Full, Medium shadows.
+Clear close-wall view: eye -4324 -224 64, yaw 180, pitch 0; pistol selected at tick 20.
+Baseline: `cdaf4be`; new package: this continuation atop it. Three alternating runs per
+build/state, with rotated order, no concurrent builds or other agent replays. Scripts end
+at tick 900 (13.5 simulated seconds), with a 2,000-frame safety cap. Each report confirms
+completion and at least 300 measured frames. Actual reports contain 559-574 measured
+frames after 120 warm-up frames (679-694 total), about 10.9-11.1 measured seconds per run.
+
+| State | Prior mean frame | New mean frame | Prior model-light CPU | New model-light CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Flashlight off | 19.484 ms | 19.490 ms | 0.02638 ms | 0.02710 ms |
+| Flashlight on | 19.525 ms | 19.328 ms | 0.02726 ms | 0.02864 ms |
+
+Frame ranges: off prior 19.463-19.497 / new 19.388-19.576 ms; on prior 19.491-19.575 /
+new 19.190-19.435 ms. No frame regression was measured in this view. The lower new on
+mean does not isolate a speedup or GPU cost. Model-light presentation adds about
+0.0007 ms off and 0.0014 ms on. No extra light, render pass or shadow map was added;
+the beam matrix is computed once per frame when lit, and changed uniforms are published
+only to viewmodel materials. Off/dark returns disabled data without projection work.
+No frame allocations, asset reads or font work were added. These results do not establish
+a general FPS guarantee, costs for every weapon/view, or native timing parity.
+
+Evidence: `artifacts/flashlight-viewmodel/timing-summary.json`,
+`perf-{baseline,current}-{off,on}-{1,2,3}.json` and their logs; `benchmark.py` records the
+rotated launch order and fails below 300 measured frames. Reproduce one launch from the
+retained copy and its timing script (reset the copy's saved settings to the values above):
+
+```sh
+artifacts/flashlight-viewmodel/current/hl2-bevy --background --no-setup --mute --map d1_trainstation_02 --width 1920 --height 1080 --frames 2000 --profile --movement-script artifacts/flashlight-viewmodel/perf-on.json --report artifacts/flashlight-viewmodel/reproduce.json
+```
+
+Repeat off/on three times per package using `perf-off.json` for off. Capture fixtures pause
+at tick 120 and are not timing substitutes. Earlier High and power-HUD descriptions below
+have been corrected: their 600-frame cap was not reached because the script ended sooner.
+Their numbers remain recorded with the actual short-window limitation.
+
 ## High flashlight depth shadows (2026-10-25)
 
 Packaged Metal on Apple M1 Pro, `d1_trainstation_02`, 1920x1080, HDR Full,
-600 frames, profiling on. Prior package: `f0d6945` (High still had no flashlight depth
+a 600-frame safety cap, profiling on. Prior package: `f0d6945` (High still had no flashlight depth
 map); new package: this continuation's constant-tap filter. Three runs per state,
 without concurrent builds/replays. Cameras: plaza eye -3104 -2018 200, yaw 12, pitch -10;
 citizen queue eye -4040 -2460 136, yaw 90, pitch -8. The queue capture visibly contains
 three ordinary citizen NPCs. Scripts grant the suit/toggle the light at tick 1, finish
-at tick 240 and leave the simulation running until the frame bound.
+at tick 240 and end the launch early. These runs do not reach 600 frames.
 
 | View and state | Mean frame | Median | Run range |
 | --- | ---: | ---: | ---: |
@@ -18,6 +56,11 @@ at tick 240 and leave the simulation running until the frame bound.
 | Three citizens, prior High (no depth) | 17.525 ms | 17.456 ms | 17.070-18.049 ms |
 | Three citizens, new Medium | 17.576 ms | 17.266 ms | 17.135-18.326 ms |
 | Three citizens, new High | 21.359 ms | 20.205 ms | 19.821-24.050 ms |
+
+Correction recorded in the viewmodel continuation: these are short script-limited windows,
+not 600-frame measurements. The nine `opt-plaza-*` reports contain 126-179 total frames
+and only 6-59 measured frames after the 120-frame warm-up. Retain the numbers as observed,
+noisy evidence; they need longer runs before precise cost attribution.
 
 High minus Medium adds about 1.38 ms in the plaza and 3.78 ms mean in the citizen
 view (2.94 ms by medians). The citizen High result includes a 24.05 ms outlier. These
@@ -68,16 +111,19 @@ final package adds only the zero-brightness gate described above.
 ## Flashlight power HUD (2026-10-25)
 
 Packaged Metal, Apple M1 Pro, `d1_trainstation_02` spawn corridor, eye -4304 -224 64,
-yaw -90, pitch -10, 1920x1080, 600 frames, profiling on. Three alternating flashlight-off
+yaw -90, pitch -10, 1920x1080, a 600-frame safety cap, profiling on. Three alternating flashlight-off
 and flashlight-on runs of each build, without a build or another replay running alongside.
 Baseline package: `822e5f8`; new package: power HUD changes atop that revision. Copies use
 the same saved settings; timing scripts give the suit and toggle the flashlight at tick 1,
-then finish at tick 240. The scene continues until the frame bound.
+then finish at tick 240, which ends the launch before its frame cap.
 
 | State | Prior mean frame | New mean frame | Prior HUD CPU | New HUD CPU |
 | --- | ---: | ---: | ---: | ---: |
 | Off / fully recharged | 18.330 ms | 18.243 ms | 0.0365 ms | 0.0390 ms |
 | On / auxiliary panel visible | 18.509 ms | 18.672 ms | 0.0383 ms | 0.0566 ms |
+
+These power-HUD runs contain 182-189 total frames and 62-69 measured frames after warm-up;
+the earlier 600-frame wording described a cap that was not reached.
 
 The active HUD adds about 0.018 ms CPU to the prior on case, emitting 55 HUD quads instead
 of 20. Off emits the same 20 quads. New on runs are 19.147, 18.470 and 18.399 ms, versus
@@ -93,7 +139,7 @@ run the packaged copy as follows (substitute `off` for the other state):
 artifacts/power-hud/current/hl2-bevy --background --no-setup --mute --map d1_trainstation_02 --width 1920 --height 1080 --frames 600 --profile --movement-script artifacts/power-hud/bounded_script_on.json --report artifacts/power-hud/reproduce.json
 ```
 
-Those scripts preserve the camera above and do not pause at the end. Repeat off/on three
+Those scripts preserve the camera above and exit when the script finishes, without pausing. Repeat off/on three
 times per build. The replay fixtures also validate the HUD but pause for their final capture,
 so they are not substitutes for the timing scripts.
 Rejected sandbox launches could not access Metal. The first GPU launch rejected a 900-tick

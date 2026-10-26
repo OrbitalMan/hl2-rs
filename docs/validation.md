@@ -1,5 +1,61 @@
 # Local validation — 2026-10-05
 
+## Flashlight on the weapon (2026-10-25, macOS Apple Silicon)
+
+Local checks: `scripts/checks/validate.sh` (1,103 Rust tests passed, 89 ignored; 3 Python
+capture-reader tests; architecture, strict Clippy and formatting), and
+`scripts/checks/check_windows.sh`. The new numerical tests cover translated/rotated
+beam projection, narrower low-power FOV, near/far/attenuation and clearing off/dark data;
+the weapon lighting basis preserves positions and normal lengths through view rotation.
+The owned obstruction test rejects embedded camera positions and locates actual beam
+placement that includes a weapon point. Owned checks:
+`cargo test -p hl2-bevy flashlight --locked -- --include-ignored` (6 passed, 3 owned-install).
+
+Reproduce packaged captures after `scripts/build-bevy.sh`:
+
+```sh
+NO_BUILD=1 ONLY='flashlight_viewmodel flashlight_shadows power_hud hud fov_settings coverage' python3 scripts/checks/replays.py
+```
+
+The weapon check compares normal pistol/SMG and portrait images with a disposable shader
+control that suppresses only the viewmodel's flashlight contribution. It restores the
+shader in `finally`. Comparisons exclude animated HUD pixels, require over 500 brighter
+weapon pixels above threshold 8, and check the upper world region remains unchanged.
+Off is compared with its control above the HUD. Final results: 18,157/11,021/35,187
+brighter weapon pixels for pistol/SMG/portrait, zero changed upper-world pixels, zero off
+weapon pixels above threshold 2. A separate capture of the preceding `cdaf4be` package
+also matches the new world region exactly (1920x650, zero RGB difference), recorded in
+`artifacts/flashlight-viewmodel/world-baseline-comparison.json`. Captures pin dimensions and HDR None;
+reports assert selection, script completion and current posed bounds. Shader controls do
+not modify the installation or package in `bin/`.
+
+Rejected first comparison: changed pixels were in the ammo HUD, not on the weapon. A
+coordinate diagnostic proved the open-corridor weapon was outside the actual cone. No
+artificial brightness or altered beam was added. Two eye-height collision probes failed
+their pull-back assertion: the beam starts lower and misses the bar the eye ray hit. A
+beam-height probe then found a camera inside geometry and was also rejected. The final
+probe checks camera clearance and actual projection before selecting the fixtures:
+pistol eye -4324 -224 64, yaw 180/pitch 0; SMG eye -4304 -172 64, yaw 90/pitch 0.
+Failures and the diagnostic image remain in `artifacts/flashlight-viewmodel`; the original
+captures are retained under `rejected-open-view` instead of overwritten as successes.
+Early compilation caught the new uniform missing from the sky material; the architecture
+check rejected a new glob import. Both were fixed (explicit default/imports); failed
+compilation remains in `tests-initial.log`, followed by passing `tests-fixed.log`.
+
+Accepted groups: `flashlight_viewmodel`, `flashlight_shadows`, `power_hud`, `hud`,
+`fov_settings` and `coverage`. The initial combined run failed the weapon proof; corrected
+and final runs pass. Logs: `replays-initial.log`, `replays-corrected.log`, `replays-final.log`,
+`validate-final.log`, `windows-final.log`, `owned-final.log` in `artifacts/flashlight-viewmodel`.
+The final weapon run includes the world-region assertions and the shader with additive/unlit
+exclusion guards; a dedicated firing/additive-effect capture was not performed.
+
+Evidence: `artifacts/replays/flashlight_vm_*`, `artifacts/flashlight-viewmodel` logs and
+reports. Native shader parity, weapon self-shadowing, world-depth-map sampling on the
+weapon, Windows runtime and ordinary playthroughs are **not tested**. The exact installed
+viewmodel draw wrapper was reviewed alongside Source SDK `game/client/viewrender.cpp`;
+its projection/depth/list flow does not establish native illumination parity. Timing
+windows and the correction to earlier 600-frame wording are in docs/performance.md.
+
 ## High flashlight shadows (2026-10-25, macOS Apple Silicon)
 
 Passed: `scripts/checks/validate.sh` (1,101 Rust tests, 88 ignored; 3 Python image-reader
