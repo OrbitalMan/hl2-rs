@@ -418,11 +418,23 @@ pub(crate) fn bolt_tick(
             direction,
             origin: bolt.position,
         });
-        // CalculateMeleeDamageForce(0.7): damage x ImpulseScale(75, 4) x 0.7 kg in/s.
+        // CalculateMeleeDamageForce(0.7): damage x ImpulseScale(75, 4) x 0.7 kg in/s, also
+        // the death force of an NPC the bolt kills (on the struck solid).
         physics.impulse(hit.entity, direction, bolt.damage * 300. * 0.7 / 39.37);
+        if world
+            .entities
+            .get(hit.entity)
+            .is_some_and(|e| e.class().starts_with("npc_"))
+        {
+            scene.npc_force_points.insert(hit.entity, contact.position);
+            scene.npc_hit_forces.insert(
+                hit.entity,
+                (direction * bolt.damage * 300. * 0.7, contact.position),
+            );
+        }
         sound(scene, "Weapon_Crossbow.BoltHitBody", bolt.position);
-        // The bolt that went through pins the ragdoll to the wall behind (ragdoll
-        // pinning is out of scope; the stuck bolt model is kept).
+        // The bolt that went through pins the ragdoll to the wall behind (the host's
+        // BoltImpact effect: `ragdolls::Impact::Bolt`).
         let forward = crate::physics::angles(bolt.angles) * Vec3::X;
         let stuck = physics
             .projectile_ray(bolt.position, bolt.position + forward * 128., &[hit.entity])

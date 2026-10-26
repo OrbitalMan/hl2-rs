@@ -13,6 +13,32 @@ use std::sync::Arc;
 
 /// g_ragdoll_maxcount (client): older ragdolls are removed beyond this count.
 pub const MAX_RAGDOLLS: usize = 8;
+/// C_ClientRagdoll::ImpactTrace impulse scales (retail client.dll FUN_100a5510: 4000 for
+/// shots, 500 for blasts; the 2013 SDK source has 4000 for both).
+const SHOT_IMPULSE: f32 = 4000.;
+const BLAST_IMPULSE: f32 = 500.;
+
+/// Client-side effects that strike existing ragdolls.
+#[derive(Clone, Copy, Debug)]
+pub enum Impact {
+    /// A bullet or club trace from `start` to its impact (FX_AffectRagdolls, from the
+    /// impact effect or RagdollImpact for a miss).
+    Shot { start: Vec3, end: Vec3 },
+    /// An explosion temp entity (C_TEExplosion::AffectRagdolls).
+    Blast {
+        origin: Vec3,
+        magnitude: f32,
+        radius: f32,
+    },
+    /// A crossbow bolt's BoltImpact at a wall point, flying along `direction`. The
+    /// bolt's kill reaches the entity damage list a tick later than its impact, so a bolt
+    /// that finds no ragdoll retries once (`retried`).
+    Bolt {
+        origin: Vec3,
+        direction: Vec3,
+        retried: bool,
+    },
+}
 
 pub struct Ragdoll {
     model: Arc<RagdollModel>,
@@ -24,6 +50,10 @@ pub struct Ragdoll {
     inverse_binds: Vec<Mat4>,
     scale: f32,
     serial: u64,
+    /// Scene time of RagdollCreate (WasRagdollCreatedOnCurrentTick).
+    born: f64,
+    /// World anchors of crossbow pins (StickRagdollNow ball-sockets).
+    pins: Vec<RigidBodyHandle>,
 }
 
 #[derive(Default)]
@@ -34,6 +64,13 @@ pub struct Ragdolls {
     /// Deaths without a ragdoll (no .phy ragdoll, rig or instance).
     pub skipped: u32,
     pub removed: u32,
+    /// Shots and blasts that pushed a ragdoll, and crossbow pins.
+    pub shot_pushes: u32,
+    /// Shots tested against ragdolls, and the last one that missed (diagnostics).
+    pub shots_seen: u32,
+    pub last_missed_shot: Option<(Vec3, Vec3)>,
+    pub blast_pushes: u32,
+    pub pins: u32,
     /// Every NPC's origin at the previous tick (its root velocity at death).
     last_origins: BTreeMap<usize, Vec3>,
 }
@@ -113,15 +150,19 @@ impl Ragdolls {
             return;
         }
         if let Some((force, position)) = scene.npc_death_forces.remove(&id) {
-            let nearest = poses
-                .iter()
-                .enumerate()
-                .min_by(|a, b| {
-                    a.1 .0
-                        .distance_squared(position)
-                        .total_cmp(&b.1 .0.distance_squared(position))
-                })
-                .map_or(0, |(i, _)| i);
+            // m_nForceBone: the solid nearest the force point (the hit hitbox's physics
+            // bone), else the root.
+            let nearest = position.map_or(0, |position| {
+                poses
+                    .iter()
+                    .enumerate()
+                    .min_by(|a, b| {
+                        a.1 .0
+                            .distance_squared(position)
+                            .total_cmp(&b.1 .0.distance_squared(position))
+                    })
+                    .map_or(0, |(i, _)| i)
+            });
             physics.ragdoll_nudge(&bodies, nearest, force);
         }
         let parents: Vec<_> = rig.bones.iter().map(|b| b.parent).collect();
@@ -144,6 +185,8 @@ impl Ragdolls {
                 inverse_binds: rig.bones.iter().map(|b| b.inverse_bind).collect(),
                 scale: instance.scale,
                 serial: self.serial,
+                born: scene.time,
+                pins: Vec::new(),
             },
         );
         self.spawned += 1;
@@ -162,9 +205,134 @@ impl Ragdolls {
     pub fn remove(&mut self, scene: &mut Scene, physics: &mut Physics, id: usize) {
         if let Some(r) = self.active.remove(&id) {
             physics.remove_ragdoll(&r.bodies);
+            for anchor in r.pins {
+                physics.remove_body(anchor);
+            }
             scene.ragdoll_matrices.remove(&id);
             self.removed += 1;
         }
+    }
+    /// This tick's client ragdoll effects (`scene.ragdoll_impacts`), after this tick's
+    /// deaths became ragdolls: shots and blasts skip ragdolls created on this tick (the
+    /// death force already pushed them), bolts pin them too.
+    pub fn impacts(&mut self, scene: &mut Scene, physics: &mut Physics) {
+        let impacts = std::mem::take(&mut scene.ragdoll_impacts);
+        let mut retry = Vec::new();
+        let owner = |active: &BTreeMap<usize, Ragdoll>, body| {
+            active
+                .iter()
+                .find_map(|(&id, r)| r.bodies.contains(&body).then_some(id))
+        };
+        for impact in impacts {
+            match impact {
+                Impact::Shot { start, end } => {
+                    // FX_AffectRagdolls: not while more than one ragdoll simulates.
+                    let simulating = self
+                        .active
+                        .values()
+                        .filter(|r| {
+                            physics
+                                .ragdoll_body_center(r.bodies[0])
+                                .is_some_and(|(_, awake)| awake)
+                        })
+                        .count();
+                    if simulating > 1 {
+                        continue;
+                    }
+                    self.shots_seen += 1;
+                    let Some((body, _, fraction)) = physics.ragdoll_ray(start, end) else {
+                        self.last_missed_shot = Some((start, end));
+                        continue;
+                    };
+                    let Some(id) = owner(&self.active, body) else {
+                        continue;
+                    };
+                    let ragdoll = &self.active[&id];
+                    if ragdoll.born >= scene.time {
+                        continue;
+                    }
+                    // C_ClientRagdoll::ImpactTrace on VPhysicsGetObject (the root solid):
+                    // 4000 along the shot at start + fraction x (endpos - start), the
+                    // trace fraction applied twice as in the SDK and retail.
+                    let dir = (end - start) * fraction;
+                    let at = start + dir * fraction;
+                    physics.ragdoll_impulse_at(
+                        ragdoll.bodies[0],
+                        dir.normalize_or_zero() * SHOT_IMPULSE,
+                        at,
+                    );
+                    self.shot_pushes += 1;
+                }
+                Impact::Blast {
+                    origin,
+                    magnitude,
+                    radius,
+                } => {
+                    if radius <= 0. || magnitude <= 0. {
+                        continue;
+                    }
+                    for (&id, ragdoll) in &self.active {
+                        if ragdoll.born >= scene.time {
+                            continue;
+                        }
+                        let position = scene.states[id].origin;
+                        let delta = position - origin;
+                        let distance = delta.length().max(1e-3);
+                        let force = magnitude - magnitude / radius * distance;
+                        if force <= 1. {
+                            continue;
+                        }
+                        // UTIL_TraceLine(MASK_SHOT_HULL): anything in between blocks.
+                        if physics.ray(origin, delta / distance, distance).is_some() {
+                            continue;
+                        }
+                        // tr.startpos = endpos - dir x force, 32 units lower; ImpactTrace
+                        // DMG_BLAST: (endpos - startpos) x 500 at the root's center.
+                        let push = delta / distance * force + Vec3::Z * 32.;
+                        let Some((center, _)) = physics.ragdoll_body_center(ragdoll.bodies[0])
+                        else {
+                            continue;
+                        };
+                        physics.ragdoll_impulse_at(ragdoll.bodies[0], push * BLAST_IMPULSE, center);
+                        self.blast_pushes += 1;
+                    }
+                }
+                Impact::Bolt {
+                    origin,
+                    direction,
+                    retried,
+                } => {
+                    // StickRagdollNow: the first ragdoll solid on the 128 units in front
+                    // of the wall point (CRagdollBoltEnumerator), pinned at the wall.
+                    let Some((body, point, _)) =
+                        physics.ragdoll_ray(origin, origin - direction * 128.)
+                    else {
+                        if !retried {
+                            retry.push(Impact::Bolt {
+                                origin,
+                                direction,
+                                retried: true,
+                            });
+                        }
+                        continue;
+                    };
+                    let Some(id) = owner(&self.active, body) else {
+                        continue;
+                    };
+                    if let Some(anchor) = physics.pin_ragdoll(body, origin, point) {
+                        if let Some(ragdoll) = self.active.get_mut(&id) {
+                            ragdoll.pins.push(anchor);
+                        }
+                        self.pins += 1;
+                        scene.sounds.push(crate::sounds::SoundRequest {
+                            origin: Some(scene.states[id].origin),
+                            .."Weapon_Crossbow.BoltSkewer".into()
+                        });
+                    }
+                }
+            }
+        }
+        scene.ragdoll_impacts.extend(retry);
     }
     /// After the physics step: each ragdoll's bone matrices in its entity's model space,
     /// with the entity origin following the root solid (render placement and bounds).

@@ -391,6 +391,7 @@ impl PreparedAudio {
                 // weapon_crossbow.cpp CCrossbowBolt::BoltTouch.
                 "Weapon_Crossbow.BoltHitWorld",
                 "Weapon_Crossbow.BoltHitBody",
+                "Weapon_Crossbow.BoltSkewer",
                 // weapon_rpg.cpp CMissile::IgniteThink.
                 "Missile.Ignite",
                 // weapon_physcannon.cpp GetMotorSound (a looping CSoundPatch).

@@ -2147,6 +2147,91 @@ impl Physics {
             body.apply_impulse_at_point(vector![f.x, f.y, f.z], at, true);
         }
     }
+    /// The first ragdoll solid along `start` -> `end` (the client's ClipRayToEntity
+    /// against ragdolls; their solids stand in for the ragdoll-driven hitboxes): the
+    /// body, the hit point and the fraction of the segment.
+    pub fn ragdoll_ray(&self, start: Vec3, end: Vec3) -> Option<(RigidBodyHandle, Vec3, f32)> {
+        let delta = end - start;
+        let length = delta.length();
+        if length < 1e-3 {
+            return None;
+        }
+        let direction = delta / length;
+        let ray = Ray::new(
+            Point::from(vector(start)),
+            vector![direction.x, direction.y, direction.z],
+        );
+        let filter = QueryFilter::default()
+            .groups(InteractionGroups::new(RAGDOLL_GROUP, RAGDOLL_GROUP))
+            .exclude_sensors();
+        let (collider, toi) = self.query.cast_ray(
+            &self.bodies,
+            &self.colliders,
+            &ray,
+            length * SCALE,
+            true,
+            filter,
+        )?;
+        let body = self.colliders.get(collider)?.parent()?;
+        self.world_sides
+            .ragdoll_bodies
+            .contains_key(&body)
+            .then(|| {
+                let distance = toi / SCALE;
+                (body, start + delta / length * distance, distance / length)
+            })
+    }
+    /// IPhysicsObject::ApplyForceOffset (kg in/s at a world point, Source units).
+    pub fn ragdoll_impulse_at(&mut self, handle: RigidBodyHandle, impulse: Vec3, point: Vec3) {
+        if let Some(body) = self.bodies.get_mut(handle) {
+            let f = impulse / 39.37;
+            body.apply_impulse_at_point(vector![f.x, f.y, f.z], Point::from(vector(point)), true);
+        }
+    }
+    /// A ragdoll body's center of mass (Source units) and whether it is simulating.
+    pub fn ragdoll_body_center(&self, handle: RigidBodyHandle) -> Option<(Vec3, bool)> {
+        self.bodies.get(handle).map(|b| {
+            let c = b.center_of_mass();
+            (Vec3::new(c.x, c.y, c.z) / SCALE, !b.is_sleeping())
+        })
+    }
+    /// CRagdollBoltEnumerator (StickRagdollNow): the struck ragdoll solid doubles its
+    /// mass and gets a ball-socket constraint to the world, the world anchor at
+    /// `wall` and the body anchor at `point` (where the ray met the solid). Returns the
+    /// world anchor body (removed with the ragdoll).
+    pub fn pin_ragdoll(
+        &mut self,
+        handle: RigidBodyHandle,
+        wall: Vec3,
+        point: Vec3,
+    ) -> Option<RigidBodyHandle> {
+        let body = self.bodies.get_mut(handle)?;
+        let local = body
+            .position()
+            .inverse_transform_point(&Point::from(vector(point)));
+        let props = body.mass_properties().local_mprops;
+        let doubled = MassProperties::with_principal_inertia_frame(
+            props.local_com,
+            props.mass() * 2.,
+            props.principal_inertia() * 2.,
+            props.principal_inertia_local_frame,
+        );
+        body.set_additional_mass_properties(doubled, true);
+        // The colliders carry no density: their mass is the authored additional mass.
+        body.recompute_mass_properties_from_colliders(&self.colliders);
+        let anchor = self
+            .bodies
+            .insert(RigidBodyBuilder::fixed().translation(vector(wall)));
+        self.impulses.insert(
+            anchor,
+            handle,
+            SphericalJointBuilder::new()
+                .local_anchor1(Point::origin())
+                .local_anchor2(local),
+            true,
+        );
+        Some(anchor)
+    }
     /// The ragdoll bodies' world poses (Source units).
     pub fn ragdoll_poses(&self, handles: &[RigidBodyHandle]) -> Option<Vec<(Vec3, Quat)>> {
         handles
@@ -3349,7 +3434,11 @@ impl CollisionWorld for Physics {
                     && !collider.is_sensor()
                     && !matches!(
                         collider.collision_groups().memberships,
-                        PROJECTILE_GROUP | SHADOW_GROUP | DEBRIS_GROUP | INTERACTIVE_DEBRIS_GROUP
+                        PROJECTILE_GROUP
+                            | SHADOW_GROUP
+                            | DEBRIS_GROUP
+                            | INTERACTIVE_DEBRIS_GROUP
+                            | RAGDOLL_GROUP
                     )
                     && !self.world_brush_contents.contains_key(handle)
                     && !self.npc_hitboxes.contains(handle)
@@ -4722,10 +4811,9 @@ mod tests {
             step_down_multiplier: 1.,
         }
     }
-    #[test]
-    fn a_two_body_ragdoll_falls_jointed_and_stays_out_of_traces() {
-        // Two 8-unit cubes: the child bone 16 units above its parent in the reference
-        // pose, joined by a ragdoll constraint (+-30 degrees about every axis).
+    /// Two 8-unit cubes: the child bone 16 units above its parent in the reference pose,
+    /// joined by a ragdoll constraint (+-30 degrees about every axis).
+    fn two_cube_ragdoll() -> modkit_core::RagdollModel {
         let cube = |half: f32| modkit_core::ConvexPiece {
             vertices: (0..8)
                 .map(|i| {
@@ -4748,7 +4836,7 @@ mod tests {
             surfaceprop: "default".into(),
             compact_inertia: None,
         };
-        let model = modkit_core::RagdollModel {
+        modkit_core::RagdollModel {
             bodies: vec![body(0), body(1)],
             joints: vec![modkit_core::RagdollJoint {
                 parent: 0,
@@ -4759,7 +4847,52 @@ mod tests {
             }],
             self_collisions: false,
             collision_pairs: Vec::new(),
-        };
+        }
+    }
+    #[test]
+    fn ragdoll_rays_impulses_and_wall_pins() {
+        let world = npc_floor_world();
+        let mut physics = Physics::new(&world);
+        let model = two_cube_ragdoll();
+        let poses = [
+            (Vec3::new(0., 0., 4.), Quat::IDENTITY),
+            (Vec3::new(0., 0., 20.), Quat::IDENTITY),
+        ];
+        let handles = physics.spawn_ragdoll(&world, &model, &poses, Vec3::ZERO, 1);
+        physics.tick(0.015);
+        // The client's ray against ragdolls finds the child cube's face.
+        let (body, point, fraction) = physics
+            .ragdoll_ray(Vec3::new(-100., 0., 20.), Vec3::new(100., 0., 20.))
+            .unwrap();
+        assert_eq!(body, handles[1]);
+        assert!((point.x + 4.).abs() < 0.5, "{point}");
+        assert!((fraction - 0.48).abs() < 0.01, "{fraction}");
+        assert!(physics
+            .ragdoll_ray(Vec3::new(-100., 0., 60.), Vec3::new(100., 0., 60.))
+            .is_none());
+        // A shot's 4000 kg in/s on the root moves the 10 kg ragdoll along +X.
+        let before = physics.ragdoll_poses(&handles).unwrap()[0].0;
+        physics.ragdoll_impulse_at(handles[0], Vec3::X * 4000., before);
+        for _ in 0..10 {
+            physics.tick(0.015);
+        }
+        let after = physics.ragdoll_poses(&handles).unwrap()[0].0;
+        assert!(after.x - before.x > 5., "{before} -> {after}");
+        // A bolt pin 40 units away pulls the struck point to the wall and holds it.
+        let (center, _) = physics.ragdoll_body_center(handles[1]).unwrap();
+        let wall = center + Vec3::new(0., 40., 20.);
+        let anchor = physics.pin_ragdoll(handles[1], wall, center).unwrap();
+        for _ in 0..300 {
+            physics.tick(0.015);
+        }
+        let (pinned, _) = physics.ragdoll_body_center(handles[1]).unwrap();
+        assert!(pinned.distance(wall) < 4., "{pinned} vs wall {wall}");
+        physics.remove_ragdoll(&handles);
+        physics.remove_body(anchor);
+    }
+    #[test]
+    fn a_two_body_ragdoll_falls_jointed_and_stays_out_of_traces() {
+        let model = two_cube_ragdoll();
         let world = npc_floor_world();
         let mut physics = Physics::new(&world);
         let poses = [
@@ -4790,6 +4923,21 @@ mod tests {
         // The relative rotation stays within the 30 degree limits (some solver slack).
         let relative = r.inverse() * poses[1].1;
         assert!(relative.angle_between(Quat::IDENTITY).to_degrees() < 60.);
+        // Player movement passes through client ragdolls (owner playtest: the player's
+        // convex SAT path once missed the ragdoll group).
+        let center = poses[0].0;
+        let trace = CollisionWorld::trace_hull(
+            &physics,
+            center - Vec3::X * 64. + Vec3::Z * 2.,
+            center + Vec3::X * 64. + Vec3::Z * 2.,
+            Vec3::new(-16., -16., 0.),
+            Vec3::new(16., 16., 72.),
+        );
+        assert!(
+            trace.fraction == 1. && !trace.start_solid,
+            "the player hull hit the ragdoll: {}",
+            trace.fraction
+        );
         physics.remove_ragdoll(&handles);
         assert!(physics.world_sides.ragdoll_bodies.is_empty());
     }

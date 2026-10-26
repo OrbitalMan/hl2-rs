@@ -576,6 +576,13 @@ impl Projectiles {
                         self.impacts.push(hit);
                     }
                     if let Some((origin, direction)) = outcome.stuck {
+                        // The BoltImpact effect: StickRagdollNow pins a ragdoll in front
+                        // of the wall point, then CreateCrossbowBolt.
+                        scene.ragdoll_impacts.push(crate::ragdolls::Impact::Bolt {
+                            origin,
+                            direction,
+                            retried: false,
+                        });
                         crate::weapon_crossbow::stick(&mut self.stuck_bolts, origin, direction);
                     }
                     for (kind, at) in [
@@ -843,6 +850,12 @@ impl Projectiles {
             radius,
         });
         scene.sounds.push("BaseExplosionEffect.Sound".into());
+        // The explosion temp entity pushes client ragdolls (C_TEExplosion::AffectRagdolls).
+        scene.ragdoll_impacts.push(crate::ragdolls::Impact::Blast {
+            origin: position,
+            magnitude,
+            radius,
+        });
         let origin = position + Vec3::Z;
         if radius <= 0. {
             return;

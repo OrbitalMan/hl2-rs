@@ -1211,6 +1211,10 @@ impl Inventory {
         let direction = direction.normalize_or_zero();
         for _ in 0..rounds {
             play_sound(scene, w, "single_shot", world, "");
+            // FireBullets' multidamage: pellets on one target add up, applied when a
+            // pellet hits another target (ApplyMultiDamage in AddMultiDamage) or after the
+            // last one, so a target killed mid-shot lets the later pellets through.
+            let mut pending: Vec<(crate::physics::RayHit, Vec3)> = Vec::new();
             for pellet in 0..w.pellets.max(1) {
                 // The first primary shotgun pellet is always on the aiming ray.
                 let aim = if spread_cone == 0. || shotgun && pellet == 0 {
@@ -1241,9 +1245,27 @@ impl Inventory {
                     }
                     self.tracer_count = self.tracer_count.wrapping_add(1);
                 }
-                if let Some(hit) = hit {
-                    self.hit(world, scene, physics, w, hit, aim, melee, eye);
+                // The client's impact (or RagdollImpact for a miss) also strikes the
+                // client ragdolls along the shot; a missed club swing has no impact.
+                if !melee || hit.is_some() {
+                    scene.ragdoll_impacts.push(crate::ragdolls::Impact::Shot {
+                        start: eye,
+                        end: hit
+                            .as_ref()
+                            .map_or(eye + aim * MAX_TRACE_LENGTH, |h| h.position),
+                    });
                 }
+                if let Some(hit) = hit {
+                    if pending.first().is_some_and(|(h, _)| h.entity != hit.entity) {
+                        for (hit, aim) in std::mem::take(&mut pending) {
+                            self.hit(world, scene, physics, w, hit, aim, melee, eye);
+                        }
+                    }
+                    pending.push((hit, aim));
+                }
+            }
+            for (hit, aim) in pending {
+                self.hit(world, scene, physics, w, hit, aim, melee, eye);
             }
         }
         if shotgun && self.owned[&self.active] > 0 {
@@ -1302,12 +1324,29 @@ impl Inventory {
         let direction = direction.normalize_or_zero();
         // CWeaponShotgun::SecondaryAttack fires a fixed twelve pellets, rather
         // than twice the configurable primary count. Every pellet uses spread.
+        let mut pending: Vec<(crate::physics::RayHit, Vec3)> = Vec::new();
         for _ in 0..12 {
             let aim = self.spread(direction, cone(10.));
             self.bullets += 1;
-            if let Some(hit) = physics.bullet_ray(eye, aim, f32::from_bits(0x475db3d7), &[]) {
-                self.hit(world, scene, physics, w, hit, aim, false, eye);
+            let hit = physics.bullet_ray(eye, aim, f32::from_bits(0x475db3d7), &[]);
+            scene.ragdoll_impacts.push(crate::ragdolls::Impact::Shot {
+                start: eye,
+                end: hit
+                    .as_ref()
+                    .map_or(eye + aim * MAX_TRACE_LENGTH, |h| h.position),
+            });
+            if let Some(hit) = hit {
+                // The multidamage of the primary attack above.
+                if pending.first().is_some_and(|(h, _)| h.entity != hit.entity) {
+                    for (hit, aim) in std::mem::take(&mut pending) {
+                        self.hit(world, scene, physics, w, hit, aim, false, eye);
+                    }
+                }
+                pending.push((hit, aim));
             }
+        }
+        for (hit, aim) in pending {
+            self.hit(world, scene, physics, w, hit, aim, false, eye);
         }
         if shells > 2 {
             self.shotgun_need_pump = true;
@@ -1596,14 +1635,27 @@ impl Inventory {
                         scene.fire(id, if npc { "OnDeath" } else { "OnBreak" }, usize::MAX);
                         if npc {
                             scene.npc_deaths.push(id);
-                            // CalculateExplosiveDamageForce: damage x ImpulseScale(75, 4),
-                            // clamped to ImpulseScale(75, 400) (random 0.85-1.15 scale
-                            // omitted), the ragdoll's nudge.
+                            // The ragdoll's nudge lands on m_nForceBone: the last trace
+                            // attack's solid, else the root (the server's default 0).
+                            let force_point = scene.npc_force_points.get(&id).copied();
                             if damage.kind & crate::player_damage::DMG_BLAST != 0 {
-                                let force = (damage.amount * 300.).min(30000.);
-                                scene
-                                    .npc_death_forces
-                                    .insert(id, (damage.direction * force, damage.origin));
+                                // CalculateExplosiveDamageForce: the (falloff) damage x
+                                // ImpulseScale(75, 4), clamped to ImpulseScale(75, 400),
+                                // x U(0.85, 1.15); CalcDamageForceVector fudges it again:
+                                // x and y by U(0.85, 1.15), z x 1.15 when it points up.
+                                let time = scene.time;
+                                let fudge = |salt| 0.85 + 0.3 * crate::fire::roll(id, time, salt);
+                                let mut force = damage.direction
+                                    * (damage.amount * 300.).min(30000.)
+                                    * fudge(11);
+                                let scale = fudge(12);
+                                force.x *= scale;
+                                force.y *= scale;
+                                force.z *= if force.z > 0. { 1.15 } else { scale };
+                                scene.npc_death_forces.insert(id, (force, force_point));
+                            } else if let Some((force, at)) = scene.npc_hit_forces.remove(&id) {
+                                // Projectile hits carry their own damage force (bolts).
+                                scene.npc_death_forces.insert(id, (force, Some(at)));
                             }
                         }
                         // CBreakableProp::Break -> PhysBreakSound: the surfaceprop's break
@@ -1722,6 +1774,29 @@ impl Inventory {
         melee: bool,
         eye: Vec3,
     ) {
+        // m_fNoDamageDecal: a friend refusing the player's damage gets no impact.
+        if player_damage_refused(world, scene, hit.entity) {
+            self.hits += 1;
+            let mut blood = std::mem::take(&mut self.blood);
+            apply_hit(
+                world,
+                scene,
+                physics,
+                weapon.damage,
+                &weapon.ammo_type,
+                &hit,
+                direction,
+                melee,
+                HitSource {
+                    player: true,
+                    origin: eye - Vec3::Z * 64.,
+                },
+                &mut || self.random(),
+                &mut blood,
+            );
+            self.blood = blood;
+            return;
+        }
         // SDK UTIL_ImpactTrace: every bullet and player-crowbar hit plays the hit surface's
         // impact sound (Impacts::add). The player crowbar has no melee_hit cue of its own;
         // WeaponSound(MELEE_HIT) is the NPC-operator path.
@@ -1966,6 +2041,39 @@ impl Inventory {
         (self.rng as u32 as f32 / u32::MAX as f32) * 2. - 1.
     }
 }
+/// CAI_BaseNPC::PassesDamageFilter for the player's damage: NPCs with
+/// bits_CAP_FRIENDLY_DMG_IMMUNE (player companions and the named characters) refuse it
+/// while the player likes them (IRelationType D_LI from the default relationship table;
+/// map ai_relationship overrides are not consulted). Off with the debug option.
+pub fn player_damage_refused(world: &World, scene: &Scene, id: usize) -> bool {
+    use crate::ai::relationships::{classify, Class, Disposition, Relationships};
+    let Some(entity) = world.entities.get(id) else {
+        return false;
+    };
+    let immune = matches!(
+        entity.class(),
+        "npc_citizen"
+            | "npc_alyx"
+            | "npc_barney"
+            | "npc_vortigaunt"
+            | "npc_fisherman"
+            | "npc_kleiner"
+            | "npc_eli"
+            | "npc_mossman"
+            | "npc_monk"
+            | "npc_breen"
+            | "npc_gman"
+            | "npc_dog"
+            | "npc_magnusson"
+    );
+    if !immune || scene.player_hurts_friendlies {
+        return false;
+    }
+    let precriminal =
+        scene.globals.is_on("gordon_precriminal") || scene.globals.is_on("citizens_passive");
+    let class = classify(entity.class(), precriminal);
+    Relationships::default().get(Class::Player, class).0 == Disposition::LI
+}
 /// The struck entity's side of one bullet or club hit, shared by the player's weapons
 /// and NPC operators: VPhysicsTakeDamage's force at the hit point (bullets: the ammo's
 /// CalculateBulletDamageForce impulse; melee: damage x ImpulseScale(75, 4), kg in/s with
@@ -2025,6 +2133,16 @@ pub fn apply_hit(
         }
         return false;
     }
+    // FireBullets accumulates every pellet's force in one multidamage before the NPC
+    // dies: pellets traced against it after an earlier pellet of the same shot killed
+    // it add their force to the death force.
+    if scene.states[id].killed {
+        if let Some((death_force, _)) = scene.npc_death_forces.get_mut(&id) {
+            *death_force += direction * force;
+        }
+        return false;
+    }
+    scene.npc_force_points.insert(id, hit.position);
     // CHalfLife2::GetAmmoDamage: the player's shots on NPCs scale by skill
     // (AdjustPlayerDamageInflicted); CAI_BaseNPC::TraceAttack then scales by the
     // hitbox's hitgroup before blood and TraceBleed.
@@ -2055,6 +2173,13 @@ pub fn apply_hit(
         .skill
         .npc_hit_damage(e.class(), damage, hit.hitgroup, buckshot, distance);
     trace_bleed(physics, world, id, hit, direction, damage, uniform, blood);
+    // TakeDamage -> PassesDamageFilter: the player's friends keep their health (TraceAttack
+    // already bled) and fire OnDamagedByPlayer / OnDamagedByPlayerSquad.
+    if attacker.player && player_damage_refused(world, scene, id) {
+        scene.fire(id, "OnDamagedByPlayer", usize::MAX);
+        scene.fire(id, "OnDamagedByPlayerSquad", usize::MAX);
+        return false;
+    }
     scene.last_npc_hit = Some(NpcHitReport {
         entity: id,
         hitgroup: hit.hitgroup,
@@ -2071,7 +2196,7 @@ pub fn apply_hit(
         scene.npc_deaths.push(id);
         scene
             .npc_death_forces
-            .insert(id, (direction * force, hit.position));
+            .insert(id, (direction * force, Some(hit.position)));
         scene.states[id].killed = true;
         scene.states[id].visible = false;
         physics.set_entity(
@@ -2315,7 +2440,13 @@ pub fn npc_fire_bullets(
                 Some(hitbox) => hitbox,
             }
         });
-        if let Some(t) = player_distance.filter(|t| *t < world_distance) {
+        let player_hit = player_distance.filter(|t| *t < world_distance);
+        // The impact (or RagdollImpact) strikes client ragdolls along the shot.
+        scene.ragdoll_impacts.push(crate::ragdolls::Impact::Shot {
+            start: shot.origin,
+            end: shot.origin + direction * player_hit.unwrap_or(world_distance),
+        });
+        if let Some(t) = player_hit {
             out.player_hits.push((shot.origin, shot.damage));
             // CBasePlayer::TraceAttack bleeds before OnTakeDamage (which refuses the damage
             // while gordon_invulnerable is on), and CWeaponAR2::DoImpactEffect adds its
@@ -3221,6 +3352,61 @@ mod tests {
             player_hitbox_distance(&World::default(), target, 0., Vec3::ZERO, Vec3::X),
             None
         );
+    }
+    #[test]
+    fn pellets_after_the_kill_add_to_the_death_force_like_multidamage() {
+        // FireBullets traces all pellets first and applies one multidamage: every pellet
+        // on the NPC adds its force (Buckshot BULLET_IMPULSE(400, 1200) each), and the
+        // force point is the last trace attack.
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("origin".into(), "80 0 0".into()),
+                ],
+            }],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        scene.states[0].value = 1.;
+        let mut uniform = || 0.5;
+        let mut blood = Vec::new();
+        let mut pellet = |scene: &mut Scene, z: f32| {
+            let hit = crate::physics::RayHit {
+                entity: 0,
+                position: Vec3::new(70., 0., z),
+                normal: -Vec3::X,
+                hitgroup: crate::skill::HITGROUP_CHEST,
+            };
+            apply_hit(
+                &world,
+                scene,
+                &mut physics,
+                8.,
+                "Buckshot",
+                &hit,
+                Vec3::X,
+                false,
+                HitSource {
+                    player: true,
+                    origin: Vec3::ZERO,
+                },
+                &mut uniform,
+                &mut blood,
+            )
+        };
+        assert!(pellet(&mut scene, 50.));
+        assert!(!pellet(&mut scene, 40.));
+        assert!(!pellet(&mut scene, 30.));
+        let (force, at) = scene.npc_death_forces[&0];
+        assert!(
+            (force.x - 3. * bullet_impulse("Buckshot")).abs() < 1.,
+            "{force}"
+        );
+        assert_eq!(at, Some(Vec3::new(70., 0., 50.)));
+        // The corpse was not damaged again.
+        assert!(scene.states[0].killed);
     }
     #[test]
     fn player_headshots_sneak_attack_unaware_humanoids_like_native() {

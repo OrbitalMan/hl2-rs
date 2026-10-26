@@ -352,6 +352,7 @@ pub fn present(
             format!("{} triangles  |  {} textures  |  {} entities  |  {}  |  {:.0} fps", stats.triangles, textures, game.world.entities.len(), if sim.flying() { "FLY" } else { "WALK" }, hud.timing.fps()),
             "WASD / click: mouse / Esc pause / tilde console / F2 fly / Space,Ctrl vertical in fly / G prop impulse".into(),
             "E use / Ctrl crouch / Space jump / R reload / 1-6 / wheel: weapon menu / Q last / F3 dev loadout / F1 overlay / F4 NPC spawn".into(),
+            format!("Player hurts friendlies: {} (F4 options, debug)", if game.scene.player_hurts_friendlies { "ON" } else { "off" }),
             format!("Map reconstruction preview  |  position {:.1}, {:.1}, {:.1}  |  Bevy/wgpu  |  {:.2} ms  |  {} materials / {} colliders / {} bodies", eye.x, eye.y, eye.z, hud.timing.frame_ms, stats.materials, sim.physics.colliders.len(), sim.physics.bodies.len()),
         ];
     }
