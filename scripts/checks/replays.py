@@ -752,6 +752,33 @@ def check_flashlight_viewmodel():
     holds("off has no weapon light", changes["changed"] < 10, changes)
 
 
+def check_flashlight_availability():
+    result = game("flashlight_availability", "--map", "d1_canals_01",
+                  "--movement-script", "test-inputs/bevy-flashlight-availability.json")
+    for label, suit, on, disabled in (
+        ("no-suit", False, False, False), ("suit-picked-up", True, False, False),
+        ("suit-light-on", True, True, False), ("disabled-off", True, False, True),
+        ("disabled-blocked", True, False, True), ("enabled-still-off", True, False, False),
+        ("reenabled-on", True, True, False),
+    ):
+        sample = result.sample(label)["gameplay"]
+        expect(label + " suit", sample["inventory"]["suit"], suit)
+        expect(label + " light", sample["flashlight"]["on"], on)
+        expect(label + " permission", sample["flashlight"]["disabled"], disabled)
+    state = result.sample("reenabled-on")["gameplay"]["flashlight"]
+    holds("legacy suit power drains", state["battery"] is None
+          and 90 < state["suit_power"]["power"] < 100, state)
+
+    for label in ("dead-off", "dead-blocked"):
+        sample = result.sample(label)
+        holds(label + " player died", sample["player"]["dead"])
+        expect(label + " no beam", sample["gameplay"]["flashlight"]["on"], False)
+    expect("permission before direct load", result.sample("disabled-before-direct")["gameplay"]["flashlight"]["disabled"], True)
+    fresh = result.sample("direct-load-fresh")["gameplay"]["flashlight"]
+    holds("direct load resets player flashlight", not fresh["on"] and not fresh["disabled"]
+          and fresh["suit_power"]["power"] == 100, fresh)
+
+
 def check_lamp_emission():
     """The installed tube mask emits independently of its baked static-prop lighting."""
     settings(video={"width": 1920, "height": 1080, "hdr": "none", "hdr_migrated": True})
@@ -859,7 +886,7 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape",
                "bevy-console-open", "bevy-flashlight-hud-on", "bevy-flashlight-hud-recharged",
                "bevy-flashlight-depth-actor", "bevy-flashlight-depth-fence",
-               "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg", "bevy-canals-lamp")
+               "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg", "bevy-canals-lamp", "bevy-flashlight-availability")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1405,6 +1432,7 @@ CHECKS = [
     Check("hud_aspect", check_hud_aspect, "shared"),
     Check("power_hud", check_power_hud, "shared"),
     Check("flashlight_shadows", check_flashlight_shadows, "shared"),
+    Check("flashlight_availability", check_flashlight_availability, "shared"),
     Check("lamp_emission", check_lamp_emission, "shared"),
     Check("flashlight_viewmodel", check_flashlight_viewmodel, "shared"),
     Check("window", check_window, "windowed"),

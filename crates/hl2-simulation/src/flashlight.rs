@@ -3,6 +3,9 @@
 //! battery) and where its light is each frame (`game/client/flashlighteffect.cpp` `UpdateLightNew`). The host
 //! draws the light and plays the sounds this module asks for.
 
+mod controller;
+pub use controller::PlayerFlashlight;
+
 use glam::Vec3;
 use serde::Serialize;
 

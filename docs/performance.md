@@ -1,5 +1,28 @@
 # Performance measurements - 2026-10-05
 
+## Flashlight lifecycle (2026-10-26)
+
+Packaged Metal, Apple M1 Pro, canal fixture view, 1920x1080, HDR None, Medium shadows.
+Control is the lamp-fixed package (`70732bc` behavior); new package includes the reviewed
+availability/lifetime implementation. Three runs per build per off/on state, alternating
+and reversing order for the middle pair. No concurrent builds/replays. Tick 900 with a
+2,000-frame safety cap; every report confirms script completion and the expected light
+state. After 120 warm-up frames, runs measure 549-559 frames over about 10.88-11.09 seconds.
+
+| State | Prior mean frame | New mean frame | Prior range | New range |
+| --- | ---: | ---: | ---: | ---: |
+| Off | 19.891 ms | 19.875 ms | 19.823-19.946 ms | 19.802-19.915 ms |
+| On | 19.861 ms | 19.920 ms | 19.828-19.893 ms | 19.810-19.990 ms |
+
+Ranges overlap; these results do not isolate a speedup or establish an FPS guarantee.
+No new render pass/light, frame asset access or normal-frame allocation is introduced.
+Permission requests allocate only when authored inputs arrive; their vector is retained.
+The old per-frame game-name String allocation is removed. This measures total frame time,
+not a separately instrumented controller CPU slice. Evidence: `artifacts/lighting-bugs/
+lifecycle-timing-summary.json`, `lifecycle-aggregate.json`, per-run reports/logs and
+`lifecycle-timings.py`. The script checks at least 300 measured frames and expected light
+state. Reproduce from the retained packages with `python3 artifacts/lighting-bugs/lifecycle-timings.py`.
+
 ## Fluorescent self-illumination (2026-10-26)
 
 Packaged Metal, Apple M1 Pro, 1920x1080 HDR None, canal fixture camera recorded in

@@ -1,6 +1,30 @@
 # STATUS
  
- Checkpoint: 2026-10-25 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. The flashlight power HUD and High depth shadows are implemented and validated. Diffuse viewmodel flashlight lighting is also implemented; native shader/shadow parity remains unverified. Sections below are newest first.
+ Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. Flashlight HUD, High depth shadows and diffuse viewmodel lighting are implemented. Canal shadow direction/receiver reports are complete; fluorescent emission and flashlight availability/lifetime are corrected below. Native shader/shadow parity remains unverified. Sections below are newest first.
+
+## Lighting follow-up: flashlight availability and lifetime (2026-10-26)
+
+- Suit and enabled permission gate activation; no weapon is required. Registered authored
+  Disable extinguishes/blocks, Enable restores permission without activating. Death shuts
+  off and rejects dead impulses. SDK suit removal does not itself force active light off.
+- Portable controller belongs to the simulation. Campaign changelevel carries state and
+  rebases recharge timing; direct loads/respawn start fresh. !player is independent of the
+  output activator; invalid entity ids cannot become player inputs. Host no longer allocates
+  a game-name string each frame. README unchanged.
+- Verified: validate.sh 1,111 tests/90 ignored +3 Python, Windows-target check, release/hash
+  metadata. All six packaged availability, power-HUD, High-shadow, lamp, viewmodel and
+  coverage groups pass; final invalid-target guard rebuild passes availability/coverage.
+  Owned suit pickup, permission transitions, lethal fall, dead input and fresh direct load
+  are asserted from reports. Campaign/recharge carry and suit removal are unit-tested.
+- Rejected: first death label was still airborne (tick 300), later report proved death;
+  accepted label is tick 320. Initial helper-after-test Clippy failure corrected. Logs and
+  captures retained in artifacts/lighting-bugs; detailed commands: docs/validation.md.
+- Frame means prior/new: off 19.891/19.875 ms, on 19.861/19.920 ms; three alternating
+  runs/build/state, 549-559 measured frames/run. Ranges overlap; no FPS guarantee or isolated
+  controller CPU cost. Details: docs/performance.md.
+- Native visual comparison, an ordinary campaign, all vehicle/control locks, actual suit
+  removal input, player-proxy outputs, save/restore and Windows runtime are **not tested**.
+  Exact native on/off review confirms suit/disabled gates; other lifecycle rules use SDK.
 
 ## Lighting follow-up: fluorescent emission fixed (2026-10-26)
 

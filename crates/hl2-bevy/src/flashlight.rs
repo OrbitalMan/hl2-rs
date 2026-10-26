@@ -48,9 +48,6 @@ pub fn cookie_image(cookie: Option<&vtf::Image>) -> bevy::image::Image {
 
 #[derive(Resource, Default)]
 pub struct HostFlashlight {
-    state: Option<Flashlight>,
-    /// The game the state was made for.
-    game: String,
     placer: Placer,
     light: Option<Light>,
     entity: Option<Entity>,
@@ -62,12 +59,8 @@ impl HostFlashlight {
         self.light
     }
 
-    pub fn state(&self) -> Option<&Flashlight> {
-        self.state.as_ref()
-    }
-
-    pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"state": self.state, "light": self.light, "depth_shadows":self.depth_shadows, "depth_resolution":depth::RESOLUTION})
+    pub fn report(&self, state: Option<&Flashlight>) -> serde_json::Value {
+        serde_json::json!({"state": state, "light": self.light, "depth_shadows":self.depth_shadows, "depth_resolution":depth::RESOLUTION})
     }
 }
 
@@ -104,37 +97,37 @@ pub(crate) fn update(
     let name = campaign
         .loaded_map
         .as_ref()
-        .map_or("hl2", |m| m.game.as_str())
-        .to_owned();
-    if host.state.is_none() || host.game != name {
-        host.state = Some(Flashlight::new(name != "ep2"));
-        host.game = name.clone();
-    }
+        .map_or("hl2", |m| m.game.as_str());
     let context = Context {
         suit: game.inventory.suit,
-        episodic: matches!(name.as_str(), "episodic" | "ep2"),
+        episodic: matches!(name, "episodic" | "ep2"),
         easy: ui
             .as_ref()
             .is_some_and(|ui| ui.source.config.gameplay.skill == 1),
         now: game.scene.time,
     };
     let host = &mut *host;
-    let Some(state) = host.state.as_mut() else {
-        return;
-    };
-    for _ in 0..std::mem::take(&mut sim.flashlight_toggles) {
-        state.toggle(context);
-        if state.on {
-            host.placer.turn_on();
-        }
-    }
-    if !sim.paused && !sim.loading {
-        state.update(time.delta_secs(), context);
-    }
-    for sound in state.sounds.drain(..) {
-        game.sound_requests.push(sound.into());
+    let Gameplay {
+        scene,
+        sound_requests,
+        ..
+    } = &mut *game;
+    let was_on = scene.flashlight.state().is_some_and(|state| state.on);
+    let state = scene.flashlight.step(
+        name != "ep2",
+        std::mem::take(&mut sim.flashlight_toggles),
+        !sim.player.dead,
+        (!sim.paused && !sim.loading).then_some(time.delta_secs()),
+        context,
+    );
+    if state.on && !was_on {
+        host.placer.turn_on();
     }
     let on = state.on && !sim.loading;
+    let power = state.power();
+    for sound in state.sounds.drain(..) {
+        sound_requests.push(sound.into());
+    }
     let placed = camera.single().ok().filter(|_| on).map(|camera| {
         let physics = &sim.physics;
         let trace = |from: glam::Vec3, to: glam::Vec3| {
@@ -149,9 +142,8 @@ pub(crate) fn update(
                     ((hit.position - from).length() / length).clamp(0., 1.)
                 })
         };
-        let power = state.power();
         host.placer
-            .place(view(camera), &trace, (power, game.scene.time as f32))
+            .place(view(camera), &trace, (power, context.now as f32))
     });
     host.light = placed;
     let detail = ui

@@ -37,7 +37,10 @@ impl Scene {
         if target == "!self" || target == "!caller" {
             return vec![p.caller];
         }
-        if target == "!activator" || target == "!player" {
+        if target == "!player" {
+            return vec![usize::MAX];
+        }
+        if target == "!activator" {
             return vec![p.activator];
         }
         world
@@ -197,7 +200,7 @@ impl Scene {
 
     pub(super) fn deliver(&mut self, world: &World, id: usize, p: &Pending, player_feet: Vec3) {
         if id >= self.states.len() {
-            self.unsupported_input("player", &p.input);
+            inputs::deliver_player(self, world, id, p, player_feet);
             return;
         }
         if self.states[id].killed {

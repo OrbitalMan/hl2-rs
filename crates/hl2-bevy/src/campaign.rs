@@ -225,12 +225,7 @@ pub fn poll(
         // changelevel keeps the global table and the player's damage state.
         let previous = game.scene.globals.clone();
         loaded.gameplay.scene.globals.carry(&previous);
-        loaded.gameplay.player_damage = std::mem::take(&mut game.player_damage);
-        loaded.gameplay.suit = std::mem::take(&mut game.suit);
-        loaded
-            .gameplay
-            .suit
-            .rebase_clock(game.scene.time, loaded.gameplay.scene.time);
+        carry_player_state(&mut loaded.gameplay, &mut game);
         loaded.gameplay.inventory = std::mem::take(&mut game.inventory);
         loaded
             .gameplay
@@ -295,6 +290,17 @@ pub fn poll(
         ui.source.config.video.advanced.filtering,
         options.mute,
     );
+}
+
+/// Player-owned transient state survives changelevel, but fresh direct loads start anew.
+fn carry_player_state(next: &mut gameplay::Gameplay, game: &mut gameplay::Gameplay) {
+    next.player_damage = std::mem::take(&mut game.player_damage);
+    next.suit = std::mem::take(&mut game.suit);
+    next.suit.rebase_clock(game.scene.time, next.scene.time);
+    next.scene.flashlight = std::mem::take(&mut game.scene.flashlight);
+    next.scene
+        .flashlight
+        .rebase_clock(game.scene.time, next.scene.time);
 }
 
 #[cfg(test)]
@@ -829,5 +835,47 @@ mod tests {
         );
         assert!(!ui.source.is_loading());
         assert_eq!(ui.source.mode(), hl2_ui::console::Mode::MainMenu);
+    }
+}
+
+#[cfg(test)]
+mod flashlight_tests {
+    use super::*;
+    use hl2_simulation::flashlight::Context;
+
+    #[test]
+    fn campaign_carries_flashlight_permissions_power_and_rebases_the_clock() {
+        let mut old = gameplay::Gameplay::synthetic(Default::default());
+        old.scene.time = 100.;
+        let context = Context {
+            suit: true,
+            now: 100.,
+            ..Default::default()
+        };
+        old.scene.flashlight.step(true, 1, true, Some(1.), context);
+        old.scene.flashlight.request_enabled(false);
+        old.scene.flashlight.step(true, 0, true, None, context);
+        let power = old.scene.flashlight.state().unwrap().power();
+        let mut next = gameplay::Gameplay::synthetic(Default::default());
+        assert!(
+            next.scene.flashlight.state().is_none(),
+            "direct loads get fresh player state"
+        );
+        carry_player_state(&mut next, &mut old);
+        assert!(old.scene.flashlight.state().is_none());
+        let state = next.scene.flashlight.state().unwrap();
+        assert!(state.disabled && !state.on);
+        assert_eq!(state.power(), power);
+        let context = Context {
+            now: 0.25,
+            ..context
+        };
+        assert_eq!(
+            next.scene
+                .flashlight
+                .step(true, 1, true, Some(0.25), context)
+                .power(),
+            power
+        );
     }
 }

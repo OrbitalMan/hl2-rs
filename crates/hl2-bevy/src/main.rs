@@ -1244,7 +1244,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
             }
         }
-        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"studio_decals":studio.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),"shadows":shadows.as_deref().map(shadows::MapShadows::report),"flashlight":flashlight.report(),
+        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"studio_decals":studio.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),"shadows":shadows.as_deref().map(shadows::MapShadows::report),"flashlight":flashlight.report(game.scene.flashlight.state()),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
         report.presentation["two_texture_materials"] =
             material_proxies::report(two_textures.iter(), &source_materials, game.scene.time);

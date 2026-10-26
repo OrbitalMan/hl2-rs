@@ -1,5 +1,33 @@
 # Local validation — 2026-10-05
 
+## Flashlight availability and lifetime (2026-10-26)
+
+`scripts/checks/validate.sh`: 1,111 Rust tests pass, 90 ignored; 3 Python capture-reader
+tests, architecture, strict Clippy and fmt pass. `scripts/checks/check_windows.sh` passes.
+An initial strict check rejected a helper below a test module; it was moved before tests
+and the complete validation passes. Logs retained under `artifacts/lighting-bugs`.
+`cargo test -p hl2-simulation flashlight --locked`: 11 pass. Registered player target test
+and campaign state-carry test pass separately. The architecture ratchet shrinks two long
+functions; existing idle/player-carry logic is factored without changing its behavior.
+
+Release package: `scripts/build-bevy.sh`. Availability fixture begins away from the canal
+suit, attempts impulse 100 without it, picks up the installed suit normally, then tests
+activation and authored disable/enable. No cheat loadout is used. A lethal fall tests
+death shutdown/dead impulses; a subsequent direct load tests fresh permission/power state.
+The first death assertion was too early (still airborne at tick 300; dead by tick 320),
+so labels were corrected from the recorded trajectory. Rejected evidence remains in
+`artifacts/lighting-bugs/rejected-fall-availability.*`. This was a fixture timing failure,
+not proof of a death-shutdown defect. All six packaged groups pass (`flashlight_availability`, `power_hud`, `flashlight_shadows`,
+`lamp_emission`, `flashlight_viewmodel`, `coverage`). After final review tightened invalid
+entity-id rejection, the rebuilt final package passes availability/coverage again. Its
+executable and eight shader hashes match build metadata. Results are recorded in STATUS.
+
+Campaign carry/rebased recharge and suit removal are unit-tested; an ordinary campaign,
+actual suit-removal input, save/restore, all vehicle/control locks, player-proxy outputs,
+Windows runtime and native image comparison are **not tested**. Exact installed on/off
+bodies were reviewed privately; the additional Enable/Disable/death/impulse routing comes
+from the SDK. The installed on body checks suit/disabled flags without a weapon gate.
+
 ## Fluorescent self-illumination (2026-10-26)
 
 `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh` pass. Package built with

@@ -32,6 +32,13 @@ Checkpoint 3 corrects emissive albedo before baked static-prop illumination. The
 alpha mask and material tint remain; packaged old-expression control proves tube-only
 brightness, and alternating timing pairs measure the shader change.
 
+Checkpoint 4 keeps portable state and deferred permission inputs in a simulation-owned
+PlayerFlashlight on Scene. The registered player handler receives the local-player sentinel;
+!player resolves independently of an output's activator. The host supplies suit/game/skill,
+alive state, toggles and time, then presents light/sounds. Campaign changelevel moves the
+controller and rebases its recharge clock; direct loads construct fresh state. Existing
+initial-idle and player-carry code is factored to keep functions within their size ratchet.
+
 Keep README unchanged. Record failures, exact commands, captures and costs in validation,
 performance, STATUS and MODLOG; commit each independently reviewable checkpoint.
 

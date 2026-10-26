@@ -210,7 +210,7 @@
    114
   ],
   "crates/hl2-bevy/src/campaign.rs::poll": [
-   222
+   217
   ],
   "crates/hl2-bevy/src/canvas_renderer.rs::present": [
    175
@@ -336,7 +336,7 @@
    204
   ],
   "crates/hl2-simulation/src/entities.rs::with_campaign": [
-   133
+   114
   ],
   "crates/hl2-simulation/src/entities/choreography.rs::tick_choreography": [
    376

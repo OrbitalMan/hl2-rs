@@ -296,14 +296,13 @@ type HudResources<'w> = (
     Res<'w, crate::simulation::Simulation>,
     Res<'w, crate::Status>,
     Option<Res<'w, crate::performance::Performance>>,
-    Res<'w, crate::flashlight::HostFlashlight>,
 );
 #[allow(clippy::too_many_arguments)]
 pub fn present(
     mut commands: Commands,
     mut hud: ResMut<Hud>,
     mut game: ResMut<crate::gameplay::Gameplay>,
-    (ui, clock, sim, status, performance, flashlight): HudResources,
+    (ui, clock, sim, status, performance): HudResources,
     windows: Query<&Window, With<PrimaryWindow>>,
     video_viewport: Option<Res<crate::video::VideoViewport>>,
     (mut images, mut materials, mut meshes): HudAssets,
@@ -347,7 +346,7 @@ pub fn present(
     hud.source.draw_captions(&captions, time);
     // Background levels behind the main menu draw no HUD.
     if !ui.source.background_level() {
-        game_hud::draw(&hud, &game, &ui, &flashlight);
+        game_hud::draw(&hud, &game, &ui);
     }
     hud.timing.observe(clock.elapsed_secs_f64());
     hud.debug_lines.clear();

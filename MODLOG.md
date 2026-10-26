@@ -1,5 +1,44 @@
 # MODLOG
 
+## 2026-10-26 Checkpoint: flashlight availability and player lifetime
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Simulation-owned player flashlight controller, registered Enable/Disable inputs,
+correct local-player target resolution, death shutdown/dead-input rejection, campaign carry
+with recharge-clock rebasing and fresh state for direct map loads/respawn. Host and HUD read
+that state; removed the per-frame game-name allocation. Factored existing initial-idle and
+player-carry code to shrink two long functions. README unchanged.
+
+**Why:** Suit gating already worked, but authored permission inputs were unsupported and the
+host light could survive death or a new same-game map. SDK confirms suit/disabled gates,
+no weapon requirement, death shutdown and enable-without-activation. Suit removal alone
+clears the suit flag without forcing an active light off. Exact installed on/off functions
+were retrieved/reviewed privately; other lifecycle rules have SDK evidence.
+
+**Tested how:** validate.sh (1,111 Rust tests, 90 ignored; 3 Python image-reader tests,
+architecture/strict Clippy/fmt), Windows-target check, release package/hash metadata.
+All six packaged availability/power-HUD/shadow/lamp/viewmodel/coverage groups pass. Following
+final invalid-target guard review, rebuilt package availability/coverage pass again.
+Unit coverage includes both battery modes, suit transitions, disable/enable, death, pause,
+recharge clocks, relay activator independence, invalid targets and campaign state carry.
+
+**Result:** Owned suit pickup unlocks the light without a cheat loadout. Disable extinguishes
+and blocks; Enable alone stays off; next impulse activates. A lethal fall extinguishes,
+dead impulses stay off, and direct load resets permission/power. No new render pass or
+frame asset access. Three alternating runs/build/state: off prior/new 19.891/19.875 ms,
+on 19.861/19.920 ms; overlapping ranges, 549-559 measured frames/run. Total-frame evidence
+and limits: docs/performance.md.
+
+**Still broken or not tested:** Full campaign/vehicle/control-lock parity, native visual
+comparison, actual suit-removal input, player-proxy flashlight outputs, save/restore and
+Windows runtime. First death label ran before landing; corrected using its recorded
+trajectory, rejected report retained. First strict validation found a helper after tests;
+ordering corrected and full validation passes.
+
+**Next:** A bounded native side-by-side comparison; the listed unimplemented integrations
+are separate future work, not established campaign parity.
+
 ## 2026-10-26 Checkpoint: fluorescent tubes use unlit emissive albedo
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

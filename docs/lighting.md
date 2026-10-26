@@ -77,3 +77,37 @@ Accepted front-on camera: eye 607.53,-8173.45,-25.545, yaw/pitch 0. The earlier 
 capture viewed the edge/inside of the wall and was rejected as emission proof; retained
 alongside the accepted captures. Native side-by-side, every lamp material, bloom and
 Windows runtime remain **not tested**.
+
+## Flashlight availability and player lifetime
+
+Activation requires an equipped suit and an enabled flashlight. It does not require a
+weapon. HL2/Episode One/ Lost Coast use the suit device; Episode Two uses its separate
+battery, with the same suit gate. The installed server's exact on function confirms the
+disabled flag and suit checks, legacy-device path, sound and output dispatch; its exact
+off function confirms device removal, light-flag clearing and sound/output dispatch.
+SDK references: `game/server/hl2/hl2_player.cpp` FlashlightTurnOn/Off and Enable/Disable
+inputs; `game/server/player.cpp` Event_Killed, RemoveSuit and PostThink;
+`game/shared/baseplayer_shared.cpp` ItemPostFrame.
+
+Death switches an active light off; normal impulses are not processed for a dead player.
+DisableFlashlight extinguishes and blocks activation. EnableFlashlight restores permission
+without switching it on. Removing the suit only clears the wearing-suit flag in the SDK:
+an active light is not forcibly extinguished by that operation, but cannot be reactivated
+without the suit. The existing battery/cutoff/recharge behavior is retained.
+
+The simulation now owns the player flashlight controller and deferred permission inputs.
+Registered player inputs use the local-player sentinel; `!player` resolves to the player
+independently of a relay's activator. The host supplies suit, game/skill, alive state,
+impulses and frame time, then presents sounds and light. Campaign changelevel transfers
+the controller with the player and rebases recharge timing. Direct map loads create a
+fresh controller. This corrects the old host resource's game-name-only lifetime, which
+could leak enabled/on/power state into a fresh map or respawn.
+
+Unit tests cover suit acquisition/removal, both battery modes, ordered permission requests,
+death/dead impulses, pause, delayed recharge across a clock reset, first-frame Episode Two
+permission input, relay-activator independence, invalid-target rejection and campaign transfer. Actual suit removal
+is not yet exposed through a gameplay entity input in HL2-RS. Native visual comparison,
+all vehicle/control-lock cases, player-proxy flashlight output integration, save/restore,
+Windows runtime and an ordinary campaign playthrough remain **not tested**. The new
+Enable/Disable wrappers and lifetime behavior have SDK evidence; only the named on/off
+functions received new exact-native review in this checkpoint.

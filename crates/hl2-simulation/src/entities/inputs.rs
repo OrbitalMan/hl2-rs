@@ -9,6 +9,7 @@ use modkit_core::{Entity, World};
 mod doors;
 mod env;
 mod logic;
+mod player;
 mod scenes;
 mod triggers;
 
@@ -32,6 +33,7 @@ pub(super) type Handler = fn(&mut Scene, &Delivery) -> bool;
 
 /// Class name -> the handler of the inputs only that class takes.
 const HANDLERS: &[(&str, Handler)] = &[
+    ("player", player::input),
     ("func_door", doors::door),
     ("func_door_rotating", doors::door),
     ("prop_door_rotating", doors::door),
@@ -62,6 +64,32 @@ pub(super) fn handler(class: &str) -> Option<Handler> {
         .iter()
         .find(|(name, _)| *name == class)
         .map(|&(_, handler)| handler)
+}
+
+/// The local player uses a sentinel id rather than an entry in map entity storage.
+pub(super) fn deliver_player(scene: &mut Scene, world: &World, id: usize, p: &Pending, feet: Vec3) {
+    if id != usize::MAX {
+        scene.unsupported_input("player", &p.input);
+        return;
+    }
+    let entity = Entity {
+        properties: Vec::new(),
+    };
+    let delivery = Delivery {
+        world,
+        id: usize::MAX,
+        pending: p,
+        player_feet: feet,
+        entity: &entity,
+        class: "player",
+        input: &p.input.to_lowercase(),
+        value: 0.,
+    };
+    if handler("player").is_some_and(|handler| handler(scene, &delivery)) {
+        scene.diagnostics.inputs_delivered += 1;
+    } else {
+        scene.unsupported_input("player", &p.input);
+    }
 }
 
 #[cfg(test)]

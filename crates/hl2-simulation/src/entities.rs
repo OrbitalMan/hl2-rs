@@ -340,6 +340,7 @@ pub struct Scene {
     pub phys_impacts: Vec<usize>,
     /// Set by the host: a dead player no longer takes damage (m_takedamage).
     pub player_dead: bool,
+    pub flashlight: crate::flashlight::PlayerFlashlight,
     /// ScreenFade messages for the local player (env_fade).
     pub screen_fades: Vec<crate::player_damage::ScreenFade>,
     hurt: BTreeMap<usize, HurtState>,
@@ -558,6 +559,29 @@ impl Scene {
     pub fn new(world: &World) -> Self {
         Self::with_campaign(world, true)
     }
+    fn initialize_idle_activities(&mut self, world: &World) {
+        // Preserve explicit/default labels and existing loaded poses. Unsupported
+        // implicit NPC labels may resolve through the model-authored idle activity.
+        for id in 0..world.entities.len() {
+            let entity = &world.entities[id];
+            if !entity.class().starts_with("npc_") || entity.get("DefaultAnim").is_some() {
+                continue;
+            }
+            let rig = world
+                .model_instances
+                .iter()
+                .find(|i| i.entity == Some(id))
+                .and_then(|i| world.rigs.get(&i.asset_key()));
+            if rig.is_some_and(|r| {
+                !r.clips.contains_key(&self.states[id].animation)
+                    && r.sequences
+                        .iter()
+                        .any(|s| s.activity.eq_ignore_ascii_case("ACT_IDLE"))
+            }) {
+                self.animate(world, id, "ACT_IDLE", false);
+            }
+        }
+    }
     pub fn with_campaign(world: &World, new_game: bool) -> Self {
         let mut scene = Self {
             states: Vec::new(),
@@ -582,6 +606,7 @@ impl Scene {
             thrown_hits: Vec::new(),
             keyvalue_overrides: BTreeMap::new(),
             player_dead: false,
+            flashlight: Default::default(),
             screen_fades: Vec::new(),
             hurt: BTreeMap::new(),
             unsupported: BTreeSet::new(),
@@ -614,27 +639,7 @@ impl Scene {
         scene.states = (world.entities.iter())
             .map(|e| Self::initial_state(world, e, diagnostics))
             .collect();
-        // Preserve explicit/default labels and existing loaded poses. Unsupported
-        // implicit NPC labels may resolve through the model-authored idle activity.
-        for id in 0..world.entities.len() {
-            let entity = &world.entities[id];
-            if !entity.class().starts_with("npc_") || entity.get("DefaultAnim").is_some() {
-                continue;
-            }
-            let rig = world
-                .model_instances
-                .iter()
-                .find(|i| i.entity == Some(id))
-                .and_then(|i| world.rigs.get(&i.asset_key()));
-            if rig.is_some_and(|r| {
-                !r.clips.contains_key(&scene.states[id].animation)
-                    && r.sequences
-                        .iter()
-                        .any(|s| s.activity.eq_ignore_ascii_case("ACT_IDLE"))
-            }) {
-                scene.animate(world, id, "ACT_IDLE", false);
-            }
-        }
+        scene.initialize_idle_activities(world);
         scene.spawn_combine_cameras(world);
         // Metrocops without a DefaultAnim start on their (weapon-translated) idle activity,
         // as do other weapon users given a weapon (a citizen's SMG1: ACT_IDLE_SMG1).
