@@ -1,5 +1,13 @@
 # Sources and native research
 
+## Pending-vector consumer and scheduler construction (2026-10-26)
+
+Private BC binds an exact consumer through the environment stepping interface, scheduler constructor and default event callback. The 149-byte/27-instruction body adds pending angular/linear terms to the corresponding base terms, then clears six pending words. Four sums use x87 and two use SSE; floating-point control state, exceptional values and full getter equivalence remain unproved. Thirteen new exact baseline/original bodies, two reused exact bodies and 15 rooted byte graphs retain private provenance. The rooted graphs cover 5300 bytes/1575 starts under call-return assumptions; they are not complete indexed function extents.
+
+Closeout independently checks the two reused bodies against immutable pass14 BLOBs, 23 selected constructor/dispatch byte anchors, and the saved REA 6.8/Ghidra dossier's range, starts/mnemonics and pseudocode. This establishes a constructor/default-path static binding, not a measured queue entry or invocation. Additional incoming consumer sites remain metadata-only in this root. Later controller dispatch therefore does not establish that newly produced increments must wait for the next scheduler event. That held-prop application phase is the next concrete feature question.
+
+BC is sealed at 73 files and separately supplements the unchanged 27-root/5411-occurrence historical navigator. The tooling-validation root remains inventoried, not sealed. The restarted built-in connection reports aligned package/server 6.8.0, rea-6.8.0 path, 229 tools and skill 49; future inline full dossiers require `detail:"complete"`. Existing separate Ghidra/Frida fixture tests were reviewed, not repeated. No native game launch/attach, Rust changes or parity test occurred. AY/AU/AX caveats and the original first-map gaps remain; first_map_finished:false. Verify with `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-force-consumer-20261026bc/verify_seal.py`; private checkpoint: work/publishing/research-followup-continuation-20261026bd.md.
+
 ## Actual glass lookup and corrected interception scope (2026-10-24)
 
 Private AX retains five corrected instrumented contact chains. The actual glass table, effective scale 1, lookup inputs, native selection index 0 and computed damage 0 are raw-bound; health stays 15. Inputs 334.4362, 143.1501, 594.3675, 4.9655 and 0.3967 match reconstruction and remain below 625. This binds the observed zero-result path for these contacts, not all impact behavior or an uninstrumented campaign. Native stack-slot reuse is separately byte-bound; the first verifier's assumption that the entry event-pointer slot stayed unchanged was rejected and preserved.

@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-26: pending-vector consumer closeout and live REA 6.8 connection
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.
+
+**Changed / Why:** Reviewed the retained private BC consumer/scheduler evidence and sealed it without repeating decompilation. Verified that the owner's restart activated the built-in REA 6.8 connection. Published only this bounded documentation summary; native bodies, bytes, tooling and receipts remain outside the source checkout.
+
+**Tested how / Result:** `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-force-consumer-20261026bc/verify_seal.py` passes 73 retained files. Acceptance checks 13 new exact bodies/two reused exact bodies, 15 rooted graphs/5300 bytes/1575 instruction starts, selected dispatch slots/direct edges and 23 constructor/dispatch anchors. The retained independent Ghidra dossier agrees on the consumer's 149 bytes/27 starts/mnemonics/pseudocode. Both original inventories pass (67 BC files/47 tooling-validation files); all 27 historical manifest hashes remain unchanged. Live package/server/path/catalog alignment passes at 6.8.0/229 tools/skill 49. Documentation diff and source-only whitelist checks apply; no gameplay rebuild is required.
+
+**Still broken or not tested / Next:** No native game launch/attach/input occurred. The consumer invocation, queue contents, actual substep timing, complete ABI/solver, ordinary campaign and Rust parity are not tested here. First_map_finished:false and the original 16 gaps/four missing scene-index entries remain. Preserve AY's historical hook caveats, AU's failed diagnostic and AX's lost original guard. Next bind held-prop controller dispatch and later consumer paths to determine same-event versus later-event application. Private checkpoint: research-followup-continuation-20261026bd.md. The owner requests committed checkout research changes and authorizes necessary future native launches; keep private native evidence outside Git.
+
 ## 2026-10-24: corrected probes, actual glass lookup and velocity boundary
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.

@@ -1,5 +1,15 @@
 # STATUS
 
+## Pending-vector consumer sealed; live REA 6.8 verified (2026-10-26)
+
+The restarted built-in REA connection now reports package/server 6.8.0, the rea-6.8.0 launcher, 229 tools and skill 49, with aligned identity expectations. The earlier Ghidra and disposable x86 Frida validation receipts remain private; they do not verify all 229 operations. No reinstall or repeated decompilation was needed in this closeout.
+
+Private BC is sealed at 73 retained files. Its 13 new exact bodies/two reused bodies and 15 rooted byte graphs bind a 149-byte/27-instruction consumer through the environment stepping wrapper and default scheduler construction. It adds pending angular/linear components into their base vectors and clears the six pending words. Independent retained Ghidra Evidence agrees with the consumer extent, instruction starts/mnemonics and exact pass14 pseudocode. Queue-helper internals, actual queue entries and runtime invocation/timing remain unobserved; other retained caller metadata prevents assuming this is the only consumption phase.
+
+The 27 historical manifest identities remain unchanged; their existing navigator still covers 5411 occurrences/36 exact dependencies. BC is a separate 28th bounded research seal, not a rewrite of that navigator. Both original handoff inventories pass; rejected drafts and AY/AU/AX caveats remain. Read-only verification: `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-force-consumer-20261026bc/verify_seal.py`. Private checkpoint: work/publishing/research-followup-continuation-20261026bd.md.
+
+No native game was launched or attached in this closeout, and no Rust implementation/build changed. Next feature question: can held-prop controller increments be consumed again within the same scheduler event, or do they survive for a later event? Bind concrete controller/continuation targets statically before any required runtime test. First_map_finished:false; original 16 authored gaps/four missing scene-index entries, full ABI/solver and Rust parity remain open. Claude owns Rust implementation.
+
 ## Corrected native impact evidence and instrumentation caveat (2026-10-24)
 
 The interior-hook caveat supersedes older descriptions limited to timing perturbation. Sealed private AW reproduces saved-EDI corruption from Frida object/onEnter call-listener form at an interior instruction; the documented function-callback probe preserves the baseline sentinel. Sealed AY audits 18 selected roots/five loaded scripts/29 sites and identifies four affected interior sites across AF, AR and X. Keep their raw observations, but do not promote their dynamic causal interpretations to unmodified retail behavior. Static body/byte evidence and separate non-Frida controls remain distinct. The X transition is still an observed controlled instrumented event; ordinary first-map completion remains false.
