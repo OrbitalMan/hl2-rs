@@ -1,5 +1,39 @@
 # Local validation — 2026-10-05
 
+## Quick-info and crosshair layout (2026-10-27)
+
+The installed-resource regression fails on the prior geometry: at 640x480 the arc
+bitmap center is y245.541 instead of y240. Portable SMG crosshair pixels were also
+above view center; both symbol paths now center bitmap bounds independently of
+text ascent. Native Windows GDI reticle placement is preserved.
+
+```sh
+scripts/checks/validate.sh
+scripts/checks/check_windows.sh
+cargo test -p hl2-ui hud:: -- --ignored --nocapture
+NO_BUILD=1 ONLY='hud hud_aspect power_hud' python3 scripts/checks/replays.py
+```
+
+Workspace validation passes: 1,165 Rust tests, 100 ignored, 13 Python helper tests,
+strict Clippy/fmt/architecture. Windows-target Clippy passes. Five owned HUD tests
+pass, including health/ammo panel framing and power HUD behavior. The new layout
+test checks actual emitted arc and weapon-crosshair quads across 640x480, 1280x720,
+1920x1080, 1281x721, 3440x1440 and 720x1280 with all four HUD aspect settings.
+Full, half-filled and warning arcs must center within pixel-rounding tolerance;
+both progress pieces must meet without gaps/overlap, and both arcs stay additive.
+Packaged HUD/aspect checks pass before the change (2 groups); HUD/aspect/power
+checks pass afterward (3 groups, zero failures, 99 seconds). The 720p gameplay
+capture was inspected: both arcs and the SMG reticle share view center. All eleven
+executable/shader hashes match package metadata.
+A portable font test deliberately changes ascent and checks full/split symbol
+bounds at three sizes, with and without blur, including progress endpoints.
+
+Initial failed alignment evidence is retained. The warning test initially sampled
+the zero-time blink-off phase; it now uses a visible pulse phase. An unused import
+after extraction was caught and fixed by strict Clippy. Evidence lives in
+artifacts/quickinfo-layout. Native Windows execution, retail raster equivalence
+and an ordinary campaign playthrough are not tested by these checks.
+
 ## Background-loading wait presentation (2026-10-27)
 
 Production package `fa4a000` supersedes the interactive-during-background-load policy.

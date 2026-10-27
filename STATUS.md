@@ -1,5 +1,25 @@
 # STATUS
 
+## Quick-info arcs aligned with the weapon crosshair (2026-10-27)
+
+- Center quick-info arc bitmap bounds on view center instead of nominal font height.
+  Preserve full-height clipping and share placement across full, partial and warning states.
+- Correct the portable weapon-reticle bitmap center too; native Windows GDI placement
+  remains unchanged. Split reticle and quick-info drawing into HUD child modules;
+  architecture baseline shrinks from 2,044 to 1,830 production lines in hud.rs.
+- New installed-glyph regression reproduces the old 5.54-pixel offset at 640x480.
+  Checks actual emitted arc/crosshair quads across six viewport sizes, four HUD aspect
+  choices and three health/ammo states. Portable tests cover asymmetric ascent,
+  blur and progress clipping endpoints; five owned HUD checks pass.
+- Workspace validation: 1,165 Rust tests, 100 ignored, 13 Python helper tests,
+  strict Clippy/fmt/architecture pass. Windows-target Clippy passes. Packaged HUD
+  and HUD-aspect checks pass before; HUD/HUD-aspect/power pass after (3/3, 99 s).
+  Final gameplay capture inspected; all eleven package hashes verified.
+- Evidence and retained failures: artifacts/quickinfo-layout; detailed commands in
+  docs/validation.md. Native Windows runtime, native retail raster comparison and
+  ordinary campaign playthrough are not tested. Next: broader native HUD comparisons.
+
+
 ## Chapter background presentation during background loading and unclipped QuickInfo crosshair hud (2026-10-27)
 
 - Fixed background map loading presentation: when launching the game into the main menu without a gameplay map, the chapter's pre-blurred background texture (`materials/console/<background>.vtf` / `_widescreen.vtf`) is now immediately rendered alongside the `#GameUI_Loading` tip plaque in the bottom-right corner rather than showing a plain black screen.

@@ -1,5 +1,41 @@
 # MODLOG
 
+## 2026-10-27 — Align quick-info arcs and test HUD symbol layout
+
+**Agent/model:** Codex desktop; GPT-6 family, exact model identifier unavailable.
+
+**Changed:** Center quick-info bitmap bounds on view center for full, partial and
+warning arcs. Center the portable weapon reticle too; preserve Windows native
+raster placement and existing progress cropping. Extract HUD symbol drawing into
+child modules; shrink the architecture baseline. Add installed-resource tests
+across six viewport sizes, all four HUD aspects and three inventory states, plus
+portable asymmetric-ascent/blur/progress-endpoint tests.
+
+**Why:** Nominal text height did not center the installed symbol glyphs. The new
+regression reproduces an arc center 5.54 pixels too low at 640x480; packaged 720p
+captures also exposed the portable SMG reticle above center. Private pinned native
+paint review corroborated view-centered placement; native raster equivalence is
+not claimed.
+
+**Tested how:** scripts/checks/validate.sh (1,165 Rust tests, 100 ignored, 13 Python
+helper tests, strict Clippy/fmt/architecture); scripts/checks/check_windows.sh;
+`cargo test -p hl2-ui hud:: -- --ignored --nocapture` (5 pass). Packaged HUD/aspect
+before (2/2) and HUD/aspect/power after (3/3, 99 s); final gameplay capture inspected;
+eleven executable/shader hashes verified. Evidence: artifacts/quickinfo-layout.
+
+**Result:** Both arc bounds and the weapon reticle center on the view, including
+partial fills and warnings. Final reverse-order timing pair: 18.65495 -> 18.66357
+ms/frame, HUD CPU 0.07757 -> 0.07479 ms; short sample, no causal speed claim.
+Earlier overlapping-check timings are retained/excluded; docs/performance.md explains.
+
+**Still broken or not tested:** Native Windows execution, exact native retail
+raster comparison and ordinary campaign playthrough not tested. Initial failing
+alignment evidence, zero-time warning blink-off test correction and a fixed
+strict-Clippy unused import are retained in validation logs.
+
+**Next:** Broader native HUD raster comparisons.
+
+
 ## 2026-10-27 Checkpoint: chapter background presentation during background loading and unclipped QuickInfo hud
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

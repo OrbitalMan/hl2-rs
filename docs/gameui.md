@@ -34,6 +34,15 @@ such a change.
 - A game's search path is the one its own `<game>/gameinfo.txt` declares (`FileSystem/SearchPaths`, `vpk::search_paths`, mounted by `Vfs::mount_game`), never a hardcoded inheritance table. Retail order: custom folders, the game's own VPKs, the inherited games' VPKs (Episode Two: `ep2_pak`, `ep1_pak`, `hl2_*`, `platform_misc`), then the loose folders (`ep2`, `episodic`, `hl2`, `platform`). Only `game`/`mod`/`platform` entries are content (`gamebin`, `game_lv`, `root_mod` are not); uninstalled VPKs (other voice languages) are skipped. Because every VPK precedes every loose folder, loose base `hl2` files (like `hl2/scripts/chapterbackgrounds.txt`) cannot shadow expansion VPKs (`episodic/ep1_pak_dir.vpk`); a search-order check confirmed that no game's own loose files are shadowed by an inherited VPK (only loose `hl2/models/weapons/*.mdl` duplicates of `hl2_misc`, where the VPK wins as in retail).
 - A map is identified by `(game, map)` (`console::GameMap`), never by its name alone: Lost Coast's `lostcoast/maps/background01.bsp` and `hl2/maps/background01.bsp` share a name. Menu backgrounds carry their game (`Effect::MainMenuMap(GameMap)`, `gameplay.background_game`), level transitions stay in the running game, and `assets::load_with_canvas(root, game, map, ..)` mounts that game (`Vfs::mount_game`). Only a bare map name (`map`, `--map`, respawn) is resolved, from assets: the game whose own folder ships `maps/<name>.bsp` (`source_assets::install::game_for_map`, running game first). Never guess a game from map-name prefixes or invent alias keys.
 
+### HUD symbol alignment
+
+Quick-info arcs and portable weapon reticles center their cached bitmap bounds on
+view center. Their installed symbol fonts have asymmetric ascent/cell metrics;
+centering the nominal font height offsets visible ink. Full/progress/warning arcs
+share one origin; cropping changes only the bitmap span. Text fonts retain their
+text ascent, and Windows monochrome reticles retain their native raster placement.
+Owned layout checks include portrait, odd dimensions and every HUD aspect frame.
+
 ### Widget Interaction & Audio
 
 - Only main menu and submenu navigation buttons play the button rollover sound (`ui/buttonrollover.wav`).

@@ -157,6 +157,18 @@ impl FontFace {
         self.glyphs.borrow_mut().insert(key, glyph.clone());
         glyph
     }
+    /// Cached bitmap bounds relative to the character-cell origin, including font effects.
+    /// Symbol HUDs can center their visible glyph rather than assuming text ascent symmetry.
+    pub fn glyph_bounds(&self, character: char, size: f32, effects: (u16, u16)) -> Rect {
+        let glyph = self.glyph(
+            character,
+            size.round().clamp(1., 1024.) as u16,
+            effects.0.min(64),
+            effects.1,
+        );
+        let dimensions = glyph.texture.as_ref().map_or(Vec2::ZERO, Texture2D::size);
+        Rect::new(glyph.x, glyph.y, dimensions.x, dimensions.y)
+    }
     pub fn draw(
         &self,
         value: &str,
@@ -417,6 +429,42 @@ mod tests {
         let fg_count = quads.iter().filter(|q| q.color == WHITE).count();
         assert_eq!(outline_count, 8);
         assert_eq!(fg_count, 1);
+    }
+
+    #[test]
+    fn symbol_bounds_center_full_and_split_glyphs_despite_text_ascent() {
+        let canvas = Canvas::default();
+        let mut font = FontFace::load(
+            include_bytes!("../assets/fonts/ProggyClean.ttf"),
+            canvas.clone(),
+        )
+        .unwrap();
+        // A symbol's ink need not be symmetric around its nominal text cell.
+        font.ascent += 0.3;
+        for size in [16., 28., 56.] {
+            for effects in [(0, 0), (2, 0)] {
+                let bounds = font.glyph_bounds('(', size, effects);
+                let origin = vec2(100., 240. - bounds.center().y);
+                font.draw("(", origin.x, origin.y, size, effects, WHITE);
+                let full = canvas.drain();
+                assert_eq!(full.len(), 1);
+                assert_eq!(full[0].destination.center().y, 240.);
+                for split in [0., 0.25, 0.5, 0.75, 1.] {
+                    font.draw_cropped("(", origin, size, effects, WHITE, vec2(0., split));
+                    font.draw_cropped("(", origin, size, effects, WHITE, vec2(split, 1.));
+                    let pieces = canvas.drain();
+                    assert_eq!(pieces[0].destination.y, full[0].destination.y);
+                    let last = pieces.last().unwrap().destination;
+                    assert_eq!(
+                        last.y + last.h,
+                        full[0].destination.y + full[0].destination.h
+                    );
+                    if pieces.len() == 2 {
+                        assert_eq!(pieces[0].destination.y + pieces[0].destination.h, last.y);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

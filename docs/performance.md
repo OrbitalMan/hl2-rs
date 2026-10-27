@@ -1,5 +1,21 @@
 # Performance measurements - 2026-10-05
 
+## Quick-info symbol placement (2026-10-27)
+
+Metal / Apple M1 Pro, packaged before/after builds, default settings, 1280x720,
+controlled d1_trainstation_02 HUD replay, profiling enabled, background and muted.
+The final reverse-order pair measured 18.65495 ms/frame before and 18.66357 ms/frame
+after (+0.00862 ms); HUD CPU means were 0.07757 and 0.07479 ms. Each run used
+120 warm-up frames and 152/154 measured frames. This short pair does not establish
+a speedup or isolate a causal cost; no material regression is evident in this sample.
+
+An earlier pair overlapped documentation/architecture checks and is retained in
+the aggregate report, excluded from the comparison above. The change queries
+cached glyph geometry, adds no render pass or frame file access and does not
+change glyph sizes or counts. Exact native rasterization and sustained FPS
+are not established. Reproduce using artifacts/quickinfo-layout/benchmark.py;
+individual reports, timing-summary.json and prior/final package copies are retained.
+
 ## Background-loading wait policy (2026-10-27)
 
 Packages 6019af3 (prior) and fa4a000 (wait gate), Metal on Apple M1 Pro, default

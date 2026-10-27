@@ -1,5 +1,17 @@
 # Design
 
+## Quick-info arc alignment and HUD layout coverage (2026-10-27)
+
+- Reproduce the vertical offset using actual installed glyphs and emitted canvas quads.
+- Keep quick-info drawing in its own HUD module; center arc bitmap bounds on the
+  view center without altering text font metrics or progress clipping. Apply the
+  same correction to the portable weapon reticle; preserve native Windows raster placement.
+- Test full, partial and warning geometry, resolution/font-range transitions,
+  odd dimensions, portrait and HUD aspect framing. Keep resource-driven panel tests.
+- Run workspace validation, Windows-target Clippy and owned-install layout tests.
+  Compare packaged HUD/aspect replays and frame/HUD timings before and after;
+  inspect captures and refresh executable/shader metadata.
+
 ## Movie playback and startup video sequence (2026-10-27)
 
 Bounded design for full-screen movie playback (`playvideo` / `playvideo_exitcommand`) and the startup video sequence across `source-assets`, `hl2-ui`, and `hl2-bevy`:
