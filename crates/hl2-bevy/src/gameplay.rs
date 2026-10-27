@@ -1175,7 +1175,10 @@ impl Gameplay {
         self.projectiles.laser_dot = self.inventory.rpg.dot;
         // NPC missiles seek their owner's dot while it guides (TASK_CIT_RPG_AUGER).
         for missile in &mut self.projectiles.active {
-            if let Some(owner) = missile.npc_owner {
+            if missile.kind != hl2_simulation::projectiles::ProjectileKind::RpgMissile {
+                continue;
+            }
+            if let Some(owner) = missile.npc_owner() {
                 missile.npc_dot = self.ai.npc_laser(owner).map(|(position, shoot)| {
                     hl2_simulation::weapon_rpg::LaserDot::npc(position, shoot)
                 });
@@ -1209,12 +1212,13 @@ impl Gameplay {
             }
             // ViewPunch needs the punch-angle path of the arsenal branch (not here).
         }
-        // Combine grenade tosses: Fraggrenade_Create (NPC damage, 3.5 s fuse).
-        for (_thrower, position, velocity, spin) in std::mem::take(&mut self.ai.grenade_tosses) {
+        // Combine grenade tosses: Fraggrenade_Create (NPC damage, 3.5 s fuse; the soldier
+        // is the thrower and the blast's attacker).
+        for (thrower, position, velocity, spin) in std::mem::take(&mut self.ai.grenade_tosses) {
             let damage = self.scene.skill.get("sk_npc_dmg_fraggrenade", 75.);
             let radius = self.scene.skill.get("sk_fraggrenade_radius", 250.);
             let at = self.scene.time;
-            self.projectiles.spawn(
+            self.projectiles.spawn_npc(
                 hl2_simulation::projectiles::ProjectileSpawn {
                     angles: Some(glam::Vec3::ZERO),
                     kind: hl2_simulation::projectiles::ProjectileKind::FragGrenade,
@@ -1227,6 +1231,7 @@ impl Gameplay {
                     mass: 0.,
                     lifetime: 3.5,
                 },
+                thrower,
                 &mut self.scene,
             );
         }
@@ -1250,6 +1255,7 @@ impl Gameplay {
                 true,
                 hl2_simulation::gameplay::HitSource {
                     player: false,
+                    npc: Some(melee.attacker),
                     origin,
                 },
                 &mut || self.ai.uniform(),

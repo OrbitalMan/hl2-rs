@@ -116,6 +116,8 @@ impl PhysExplosions {
                         dissolve: false,
                         direction,
                         origin: from,
+                        // CPhysExplosion names itself.
+                        attacker: crate::projectiles::Attacker::None,
                     });
                 }
             }

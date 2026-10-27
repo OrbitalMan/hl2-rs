@@ -4,7 +4,7 @@
 //! loop. Not modeled yet: the client "burning_character" particle system (no PCF reader),
 //! EF_DIMLIGHT, burning NPCs, FireSystem heat and water extinguishing.
 use crate::player_damage::{DMG_BLAST, DMG_BULLET, DMG_BURN};
-use crate::projectiles::{Damage, DamageTarget};
+use crate::projectiles::{Attacker, Damage, DamageTarget};
 use glam::Vec3;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -262,6 +262,7 @@ impl Fires {
                     dissolve: false,
                     direction: Vec3::ZERO,
                     origin: at,
+                    attacker: Attacker::None,
                 });
             }
             for &(other, p) in others {
@@ -276,6 +277,7 @@ impl Fires {
                         dissolve: false,
                         direction: Vec3::ZERO,
                         origin: at,
+                        attacker: Attacker::None,
                     });
                 }
             }
@@ -286,6 +288,7 @@ impl Fires {
                 dissolve: false,
                 direction: Vec3::ZERO,
                 origin: at,
+                attacker: Attacker::None,
             });
         }
         damage

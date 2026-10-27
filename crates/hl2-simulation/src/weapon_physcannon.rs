@@ -557,6 +557,7 @@ impl Inventory {
                 dissolve: false,
                 direction: forward,
                 origin: hit.position,
+                attacker: crate::projectiles::Attacker::Player,
             });
         }
         self.physcannon.launches.push(hit.position);

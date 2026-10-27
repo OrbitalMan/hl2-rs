@@ -322,8 +322,8 @@ pub struct Scene {
     /// Props broken this tick (CBreakableProp::Break), for the gib spawner.
     pub prop_breaks: Vec<crate::gibs::PropBreak>,
     /// Explosive props broken this tick (CBreakableProp::Break -> ExplosionCreate):
-    /// world-space center, integer magnitude and radius.
-    pub prop_explosions: Vec<(Vec3, f32, f32, bool)>,
+    /// world-space center, integer magnitude and radius, PropaneTank.Burst, attacker.
+    pub prop_explosions: Vec<(Vec3, f32, f32, bool, crate::projectiles::Attacker)>,
     /// env_physexplosion entities whose Explode input arrived (phys_explosion).
     pub phys_explosions: Vec<usize>,
     /// env_physimpact entities whose Impact input arrived (phys_explosion).
@@ -388,6 +388,11 @@ pub struct Scene {
     pub ragdoll_impacts: Vec<crate::ragdolls::Impact>,
     /// Debug option (ours, F4 overlay): the player's hits hurt friendly-immune NPCs.
     pub player_hurts_friendlies: bool,
+    /// CBreakableProp m_hLastAttacker: the last player or NPC whose damage a prop took.
+    pub prop_attackers: BTreeMap<usize, crate::projectiles::Attacker>,
+    /// CBreakableProp::SetPhysicsAttacker: when the player last picked up or dropped a
+    /// prop (+USE, gravity gun pickup/drop/launch/punt; m_flLastPhysicsInfluenceTime).
+    pub physics_attackers: BTreeMap<usize, f64>,
     /// Ragdolled NPCs' bone matrices (model space), replacing their animation pose.
     pub ragdoll_matrices: BTreeMap<usize, Vec<glam::Mat4>>,
     /// Advances every ragdoll update (render pose cache key).
@@ -605,6 +610,8 @@ impl Scene {
             npc_hit_forces: BTreeMap::new(),
             ragdoll_impacts: Vec::new(),
             player_hurts_friendlies: false,
+            prop_attackers: BTreeMap::new(),
+            physics_attackers: BTreeMap::new(),
             ragdoll_matrices: BTreeMap::new(),
             ragdoll_frame: 0,
             npc_knows_player: Default::default(),
@@ -2335,6 +2342,7 @@ impl Scene {
                 dissolve: false,
                 direction: Vec3::ZERO,
                 origin: self.states[id].origin,
+                attacker: crate::projectiles::Attacker::None,
             });
             self.fire(id, "OnHurt", target);
         }
@@ -2501,6 +2509,7 @@ impl Scene {
         if !class.starts_with("prop_physics") && class != "func_physbox" {
             return;
         }
+        self.physics_attackers.insert(id, self.time);
         self.fire(id, "OnPhysGunPickup", usize::MAX);
         match reason {
             PhysGunPickup::Cannon => self.fire(id, "OnPhysGunOnlyPickup", usize::MAX),
@@ -2515,7 +2524,16 @@ impl Scene {
     pub fn prop_physgun_drop(&mut self, world: &World, id: usize) {
         let class = world.entities.get(id).map_or("", |e| e.class());
         if class.starts_with("prop_physics") || class == "func_physbox" {
+            self.physics_attackers.insert(id, self.time);
             self.fire(id, "OnPhysGunDrop", usize::MAX);
+        }
+    }
+    /// CBreakableProp::HasPhysicsAttacker(dt): the player while the last physgun/+USE
+    /// pickup or drop is at most `window` seconds old.
+    pub fn physics_attacker(&self, id: usize, window: f64) -> crate::projectiles::Attacker {
+        match self.physics_attackers.get(&id) {
+            Some(at) if self.time - window <= *at => crate::projectiles::Attacker::Player,
+            _ => crate::projectiles::Attacker::None,
         }
     }
     fn deliver(&mut self, world: &World, id: usize, p: &Pending, player_feet: Vec3) {
@@ -2951,6 +2969,7 @@ impl Scene {
                     dissolve: false,
                     direction: Vec3::ZERO,
                     origin,
+                    attacker: crate::projectiles::Attacker::None,
                 });
             }
             "sethealth" if class.starts_with("npc_") => self.states[id].value = value,

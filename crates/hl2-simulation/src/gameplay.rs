@@ -1,6 +1,10 @@
 //! Partial HL2 weapon behavior, reconstructed from installed scripts and the singleplayer SDK.
 //! Projectile attacks queue actual moving projectiles, independently of hitscan fire.
-use crate::{entities::Scene, physics::Physics, projectiles::ProjectileSpawn};
+use crate::{
+    entities::Scene,
+    physics::Physics,
+    projectiles::{Attacker, ProjectileSpawn},
+};
 use anyhow::{Context, Result};
 use glam::Vec3;
 use modkit_core::World;
@@ -1498,6 +1502,16 @@ impl Inventory {
                     let Some(entity) = world.entities.get(id) else {
                         continue;
                     };
+                    if scene.states.get(id).is_none_or(|s| s.killed) {
+                        continue;
+                    }
+                    // TakeDamage -> PassesDamageFilter: the attacker's friends refuse its
+                    // projectiles, blasts and thrown props (the bolt's force goes too).
+                    if refuse_damage(world, scene, id, damage.attacker) {
+                        scene.npc_hit_forces.remove(&id);
+                        continue;
+                    }
+                    let by_character = is_character(world, scene, damage.attacker);
                     let class_health = scene.skill.npc_entity_health(entity);
                     let Some(state) = scene.states.get_mut(id) else {
                         continue;
@@ -1540,6 +1554,10 @@ impl Inventory {
                         continue;
                     }
                     self.hits += 1;
+                    // CBreakableProp::OnTakeDamage: m_hLastAttacker (combat characters only).
+                    if !npc && by_character {
+                        scene.prop_attackers.insert(id, damage.attacker);
+                    }
                     if damage.dissolve {
                         // The native dissolver keeps a timed ragdoll and effects.
                         // Here its lethal result removes the live collider while
@@ -1680,6 +1698,16 @@ impl Inventory {
                         // center with both scaled by the model scale; env_explosion takes
                         // integers and a zero radius means magnitude x 2.5.
                         if !npc && entity.class().starts_with("prop_physics") {
+                            // The explosion's attacker: m_hLastAttacker, else the physics
+                            // attacker within 2 s (retail FUN_1021ce50), else this damage's.
+                            // "Player allies get immunity from barrels exploded by the
+                            // player."
+                            let attacker = scene.prop_attackers.get(&id).copied().unwrap_or(
+                                match scene.physics_attacker(id, 2.) {
+                                    Attacker::None => damage.attacker,
+                                    physics => physics,
+                                },
+                            );
                             let key = |k: &str| {
                                 entity
                                     .get(k)
@@ -1715,7 +1743,7 @@ impl Inventory {
                                 // and PropaneTank.Burst instead.
                                 scene
                                     .prop_explosions
-                                    .push((center, magnitude, radius, burst));
+                                    .push((center, magnitude, radius, burst, attacker));
                             } else if burst {
                                 // No explode damage: ExplosionCreate(origin, 1, radius)
                                 // with its sound.
@@ -1723,7 +1751,9 @@ impl Inventory {
                                     .entity_body(id)
                                     .and_then(|b| physics.center_of_mass(b))
                                     .unwrap_or(scene.states[id].origin);
-                                scene.prop_explosions.push((center, 1., 2., false));
+                                scene
+                                    .prop_explosions
+                                    .push((center, 1., 2., false, attacker));
                             }
                         }
                         // PropBreakableCreateAll takes the prop's pose and motion.
@@ -1789,6 +1819,7 @@ impl Inventory {
                 melee,
                 HitSource {
                     player: true,
+                    npc: None,
                     origin: eye - Vec3::Z * 64.,
                 },
                 &mut || self.random(),
@@ -1823,6 +1854,7 @@ impl Inventory {
             melee,
             HitSource {
                 player: true,
+                npc: None,
                 // GetAbsOrigin: the eye minus the standing view offset.
                 origin: eye - Vec3::Z * 64.,
             },
@@ -2041,11 +2073,43 @@ impl Inventory {
         (self.rng as u32 as f32 / u32::MAX as f32) * 2. - 1.
     }
 }
-/// CAI_BaseNPC::PassesDamageFilter for the player's damage: NPCs with
-/// bits_CAP_FRIENDLY_DMG_IMMUNE (player companions and the named characters) refuse it
-/// while the player likes them (IRelationType D_LI from the default relationship table;
-/// map ai_relationship overrides are not consulted). Off with the debug option.
+/// The player's side of `damage_refused` (bullets and clubs: no impact for a friend).
 pub fn player_damage_refused(world: &World, scene: &Scene, id: usize) -> bool {
+    damage_refused(world, scene, id, Attacker::Player)
+}
+/// MyCombatCharacterPointer: the player and live NPCs.
+fn is_character(world: &World, scene: &Scene, attacker: Attacker) -> bool {
+    match attacker {
+        Attacker::Player => true,
+        Attacker::Entity(id) => {
+            world
+                .entities
+                .get(id)
+                .is_some_and(|e| e.class().starts_with("npc_"))
+                && scene.states.get(id).is_some_and(|s| !s.killed)
+        }
+        Attacker::None => false,
+    }
+}
+/// TakeDamage's PassesDamageFilter refusal (`damage_refused`) with its outputs: a refused
+/// player fires OnDamagedByPlayer and OnDamagedByPlayerSquad. True when refused.
+pub fn refuse_damage(world: &World, scene: &mut Scene, id: usize, attacker: Attacker) -> bool {
+    if !damage_refused(world, scene, id, attacker) {
+        return false;
+    }
+    if attacker == Attacker::Player {
+        scene.fire(id, "OnDamagedByPlayer", usize::MAX);
+        scene.fire(id, "OnDamagedByPlayerSquad", usize::MAX);
+    }
+    true
+}
+/// CAI_BaseNPC::PassesDamageFilter's friendly rule (retail server.dll FUN_10057d20): NPCs
+/// with bits_CAP_FRIENDLY_DMG_IMMUNE (player companions and the named characters) refuse
+/// damage from another character that likes them (the attacker's IRelationType toward
+/// them is D_LI in the default relationship table; map ai_relationship overrides are not
+/// consulted). The player's damage passes with the debug option; no attacker, the target
+/// itself, props and dead NPCs (their handle is gone) never refuse.
+pub fn damage_refused(world: &World, scene: &Scene, id: usize, attacker: Attacker) -> bool {
     use crate::ai::relationships::{classify, Class, Disposition, Relationships};
     let Some(entity) = world.entities.get(id) else {
         return false;
@@ -2066,13 +2130,19 @@ pub fn player_damage_refused(world: &World, scene: &Scene, id: usize) -> bool {
             | "npc_dog"
             | "npc_magnusson"
     );
-    if !immune || scene.player_hurts_friendlies {
+    if !immune || !is_character(world, scene, attacker) {
         return false;
     }
     let precriminal =
         scene.globals.is_on("gordon_precriminal") || scene.globals.is_on("citizens_passive");
+    let subject = match attacker {
+        Attacker::Player if scene.player_hurts_friendlies => return false,
+        Attacker::Entity(a) if a == id => return false,
+        Attacker::Entity(a) => classify(world.entities[a].class(), precriminal),
+        _ => Class::Player,
+    };
     let class = classify(entity.class(), precriminal);
-    Relationships::default().get(Class::Player, class).0 == Disposition::LI
+    subject != Class::None && Relationships::default().get(subject, class).0 == Disposition::LI
 }
 /// The struck entity's side of one bullet or club hit, shared by the player's weapons
 /// and NPC operators: VPhysicsTakeDamage's force at the hit point (bullets: the ammo's
@@ -2129,6 +2199,7 @@ pub fn apply_hit(
                 dissolve: false,
                 direction,
                 origin: hit.position,
+                attacker: attacker.attacker(),
             });
         }
         return false;
@@ -2173,11 +2244,9 @@ pub fn apply_hit(
         .skill
         .npc_hit_damage(e.class(), damage, hit.hitgroup, buckshot, distance);
     trace_bleed(physics, world, id, hit, direction, damage, uniform, blood);
-    // TakeDamage -> PassesDamageFilter: the player's friends keep their health (TraceAttack
-    // already bled) and fire OnDamagedByPlayer / OnDamagedByPlayerSquad.
-    if attacker.player && player_damage_refused(world, scene, id) {
-        scene.fire(id, "OnDamagedByPlayer", usize::MAX);
-        scene.fire(id, "OnDamagedByPlayerSquad", usize::MAX);
+    // TakeDamage -> PassesDamageFilter: the shooter's friends keep their health (TraceAttack
+    // already bled; the player's refusal fires OnDamagedByPlayer / OnDamagedByPlayerSquad).
+    if refuse_damage(world, scene, id, attacker.attacker()) {
         return false;
     }
     scene.last_npc_hit = Some(NpcHitReport {
@@ -2214,7 +2283,19 @@ pub fn apply_hit(
 #[derive(Clone, Copy, Debug)]
 pub struct HitSource {
     pub player: bool,
+    /// The NPC that fired or swung (None for the player).
+    pub npc: Option<usize>,
     pub origin: Vec3,
+}
+impl HitSource {
+    /// The CTakeDamageInfo attacker of the hit.
+    pub fn attacker(&self) -> Attacker {
+        match (self.player, self.npc) {
+            (true, _) => Attacker::Player,
+            (false, Some(id)) => Attacker::Entity(id),
+            (false, None) => Attacker::None,
+        }
+    }
 }
 /// The last bullet/club hit on an NPC (diagnostics for native health comparisons).
 #[derive(Clone, Copy, Debug, serde::Serialize)]
@@ -2508,6 +2589,7 @@ pub fn npc_fire_bullets(
                 false,
                 HitSource {
                     player: false,
+                    npc: Some(shot.attacker),
                     origin: shot.origin,
                 },
                 uniform,
@@ -2971,6 +3053,7 @@ mod tests {
             dissolve: false,
             direction: Vec3::X,
             origin: Vec3::ZERO,
+            attacker: Attacker::Player,
         };
         Inventory::default().apply_projectile_damage(
             vec![hit(0), hit(1)],
@@ -2980,8 +3063,10 @@ mod tests {
         );
         assert!(scene.states[0].killed && scene.states[1].killed);
         assert_eq!(scene.prop_explosions.len(), 1);
-        let (_, magnitude, radius, _) = scene.prop_explosions[0];
+        let (_, magnitude, radius, _, attacker) = scene.prop_explosions[0];
         assert_eq!((magnitude, radius), (100., 250.));
+        // The shooter is the explosion's attacker (m_hLastAttacker).
+        assert_eq!(attacker, Attacker::Player);
     }
     #[test]
     fn breakable_damage_applies_prop_data_modifiers() {
@@ -3390,6 +3475,7 @@ mod tests {
                 false,
                 HitSource {
                     player: true,
+                    npc: None,
                     origin: Vec3::ZERO,
                 },
                 &mut uniform,
@@ -3427,6 +3513,7 @@ mod tests {
         let mut blood = Vec::new();
         let player = HitSource {
             player: true,
+            npc: None,
             origin: Vec3::ZERO,
         };
         let mut shoot = |scene: &mut Scene, hitgroup: i32, attacker: HitSource| {
@@ -3463,6 +3550,7 @@ mod tests {
         let mut scene = Scene::new(&world);
         let far = HitSource {
             player: true,
+            npc: None,
             origin: Vec3::new(-400., 0., 0.),
         };
         shoot(&mut scene, crate::skill::HITGROUP_HEAD, far);
@@ -4034,6 +4122,7 @@ mod tests {
                 dissolve: false,
                 direction: Vec3::X,
                 origin: Vec3::X,
+                attacker: Attacker::None,
             }],
             &world,
             &mut scene,
@@ -4054,6 +4143,7 @@ mod tests {
             dissolve: true,
             direction: Vec3::X,
             origin: Vec3::ZERO,
+            attacker: Attacker::Player,
         };
         inv.apply_projectile_damage(vec![dissolve, dissolve], &world, &mut scene, &mut physics);
         assert!(scene.states[0].killed);
@@ -4409,5 +4499,126 @@ mod tests {
             .options = "Weapon_AR2.Reload".into();
         play_sound(&mut scene, &weapon, "reload", &world, "ir_reload");
         assert!(scene.sounds.is_empty());
+    }
+    #[test]
+    fn friends_refuse_the_damage_of_attackers_that_like_them() {
+        use crate::projectiles::{Damage, DamageTarget};
+        let entity = |class: &str| modkit_core::Entity {
+            properties: vec![("classname".into(), class.into())],
+        };
+        // 0 citizen (rebel: PlayerAlly), 1 combine soldier, 2 citizen, 3 metrocop.
+        let world = World {
+            entities: vec![
+                entity("npc_citizen"),
+                entity("npc_combine_s"),
+                entity("npc_citizen"),
+                entity("npc_metropolice"),
+            ],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        assert!(damage_refused(&world, &scene, 0, Attacker::Player));
+        assert!(damage_refused(&world, &scene, 0, Attacker::Entity(2)));
+        assert!(!damage_refused(&world, &scene, 0, Attacker::Entity(1)));
+        assert!(!damage_refused(&world, &scene, 0, Attacker::Entity(0)));
+        assert!(!damage_refused(&world, &scene, 0, Attacker::None));
+        assert!(!damage_refused(&world, &scene, 3, Attacker::Player));
+        scene.player_hurts_friendlies = true;
+        assert!(!damage_refused(&world, &scene, 0, Attacker::Player));
+        assert!(damage_refused(&world, &scene, 0, Attacker::Entity(2)));
+        scene.player_hurts_friendlies = false;
+        // A dead attacker's handle is gone: its late grenade is nobody's.
+        scene.states[2].killed = true;
+        assert!(!damage_refused(&world, &scene, 0, Attacker::Entity(2)));
+        // The player's frag blast leaves the citizen untouched; a Combine one hurts it.
+        let mut physics = Physics::new(&world);
+        let blast = |attacker| Damage {
+            target: DamageTarget::Entity(0),
+            amount: 30.,
+            kind: crate::player_damage::DMG_BLAST,
+            dissolve: false,
+            direction: Vec3::X,
+            origin: Vec3::ZERO,
+            attacker,
+        };
+        let mut inventory = Inventory::default();
+        inventory.apply_projectile_damage(
+            vec![blast(Attacker::Player)],
+            &world,
+            &mut scene,
+            &mut physics,
+        );
+        assert_eq!(scene.states[0].value, 0.);
+        assert_eq!(inventory.hits, 0);
+        inventory.apply_projectile_damage(
+            vec![blast(Attacker::Entity(1))],
+            &world,
+            &mut scene,
+            &mut physics,
+        );
+        assert!(scene.states[0].value > 0. && inventory.hits == 1);
+    }
+    #[test]
+    fn exploding_props_credit_their_last_attacker_or_recent_physics_attacker() {
+        use crate::projectiles::{Damage, DamageTarget};
+        let barrel = |name: &str| modkit_core::Entity {
+            properties: [
+                ("classname", "prop_physics"),
+                ("health", "10"),
+                ("ExplodeDamage", "100"),
+                ("targetname", name),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        };
+        let world = World {
+            entities: vec![
+                barrel("a"),
+                barrel("b"),
+                barrel("c"),
+                modkit_core::Entity {
+                    properties: vec![("classname".into(), "npc_combine_s".into())],
+                },
+            ],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let hit = |id, amount, attacker| Damage {
+            target: DamageTarget::Entity(id),
+            amount,
+            kind: crate::player_damage::DMG_CRUSH,
+            dissolve: false,
+            direction: Vec3::X,
+            origin: Vec3::ZERO,
+            attacker,
+        };
+        // a: the player shot it, then it broke on the world: the player's explosion.
+        // b: the player dropped it 1.5 s before it broke on the world (within 2 s).
+        // c: an NPC shot it last, after the player's drop.
+        scene.prop_physgun_drop(&world, 1);
+        scene.prop_physgun_drop(&world, 2);
+        assert_eq!(scene.physics_attacker(1, 1.), Attacker::Player);
+        scene.time = 1.5;
+        assert_eq!(scene.physics_attacker(1, 1.), Attacker::None);
+        let mut inventory = Inventory::default();
+        inventory.apply_projectile_damage(
+            vec![
+                hit(0, 5., Attacker::Player),
+                hit(0, 20., Attacker::None),
+                hit(1, 20., Attacker::None),
+                hit(2, 5., Attacker::Entity(3)),
+                hit(2, 20., Attacker::None),
+            ],
+            &world,
+            &mut scene,
+            &mut physics,
+        );
+        let attackers: Vec<_> = scene.prop_explosions.iter().map(|e| e.4).collect();
+        assert_eq!(
+            attackers,
+            [Attacker::Player, Attacker::Player, Attacker::Entity(3)]
+        );
     }
 }

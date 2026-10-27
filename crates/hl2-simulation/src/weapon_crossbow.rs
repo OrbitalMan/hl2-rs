@@ -417,6 +417,7 @@ pub(crate) fn bolt_tick(
             dissolve: false,
             direction,
             origin: bolt.position,
+            attacker: bolt.owner,
         });
         // CalculateMeleeDamageForce(0.7): damage x ImpulseScale(75, 4) x 0.7 kg in/s, also
         // the death force of an NPC the bolt kills (on the struck solid).
