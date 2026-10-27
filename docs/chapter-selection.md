@@ -56,7 +56,7 @@ contains shared VGUI Button, Frame, Label and filesystem interfaces, not this
 retail GameUI dialog implementation. SDK `game/server/EnvMessage.cpp`,
 `CCredits::RollOutroCredits`, sets the chapter unlock value to 15; that supports
 keeping the credits config distinct from an ordinary numbered campaign chapter.
-The existing toolkit supplies dialog button capture, focus, key release activation,
+The toolkit supplies the reusable card browser plus dialog button capture, focus, key release activation,
 window ordering, frame drawing and placement; none are copied into a new widget.
 
 The existing GameUI/settings reference was searched for chapter-specific findings
@@ -72,8 +72,11 @@ and pixel-for-pixel comparison remain **not tested**.
 `source-assets::vpk::Vfs::list_game_files` enumerates the selected game's own
 mounted folders, custom packs and archives, excluding inherited games and
 map-embedded files. MOD-scoped VFS priority resolves the discovered config; the selected game's normal
-VFS resolves its material. `hl2-ui::gameui::new_game` prepares a catalog and dialog; the console
-owns its non-modal window and emits `Effect::ChapterMap(GameMap)`. The Bevy host
+VFS resolves its material. `hl2-ui::gameui::new_game` prepares chapter metadata and interprets installed
+resource layouts/localization into `source_ui::card_browser` values. The toolkit
+owns the reusable paged card dialog: geometry, drawing, selection, focus, capture
+and placement, and returns only an accepted card index. The HL2 adapter converts
+that index to its game/map. The console owns its non-modal window and emits `Effect::ChapterMap(GameMap)`. The Bevy host
 sets both request game and map; the existing asynchronous campaign loader installs
 it as gameplay. Failed loads keep the existing error handling.
 

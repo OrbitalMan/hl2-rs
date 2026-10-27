@@ -1893,7 +1893,8 @@ rejected fixtures and timing limits are recorded in validation/performance docs.
 
 New Game opens a non-modal three-card chapter browser for the selected game.
 Installed chapter configs, localization tokens, dialog layouts, scheme colors and
-material thumbnails supply its content. Start New Game submits the selected
+material thumbnails supply its content through the HL2 adapter. The reusable
+`source_ui::card_browser` owns paging, selection, focus, placement and drawing. Start New Game submits the selected
 chapter's first map with explicit game identity to the asynchronous loader.
 Cancel/Escape preserve the menu category/background. All discovered chapters are
 selectable; progress locking, commentary and intro movies are unfinished. Detailed

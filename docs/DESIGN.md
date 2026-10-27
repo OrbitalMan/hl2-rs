@@ -1109,3 +1109,14 @@ to the existing asynchronous loader. Resource loading/decoding is startup work.
 Owner requests selectable chapter starts. Progress locking/commentary and intro
 movie playback are separate unfinished gameplay features; expose all discovered
 launchable chapters rather than inventing progress from installed save files.
+
+### Chapter browser ownership correction (2026-10-27)
+
+Owner clarification: reusable UI-only chapter-browser mechanics belong in source-ui.
+Move the generic paged card dialog, geometry, selection/focus/capture, placement and
+drawing to `source_ui::card_browser`. The caller supplies resolved card text/images,
+layout rectangles, colors, labels, sound and scaling; toolkit outcomes carry only a
+card index. Keep config enumeration, installed resource interpretation/localization,
+chapter keys and game/map conversion in hl2-ui. Move generic interaction/canvas tests
+into source-ui and retain chapter/catalog/typed-effect tests in hl2-ui. Preserve the
+existing packaged behavior and repeat captures/replays/performance after the move.

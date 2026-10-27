@@ -13,8 +13,8 @@ impl Console {
             .new_games
             .iter()
             .map(|(game, catalog)| {
-                let mut dialog = Dialog::new(game, catalog.clone(), &resources.localization);
-                dialog.prepare_text(&self.painter(Vec2::ZERO, 1.));
+                let mut dialog = Dialog::new(game, catalog, &resources.localization);
+                dialog.browser.prepare_text(&self.painter(Vec2::ZERO, 1.));
                 (game.clone(), dialog)
             })
             .collect();
@@ -24,7 +24,7 @@ impl Console {
         let Some(dialog) = self.chapter_dialogs.get_mut(game) else {
             return;
         };
-        dialog.open();
+        dialog.browser.open();
         self.chapter_game = Some(game.to_owned());
         self.set_mode(Mode::NewGame);
         self.clear_menu_hover();
@@ -53,6 +53,7 @@ impl Console {
         };
         let outcome = dialog.input(input, canvas);
         let mut effects: Vec<_> = dialog
+            .browser
             .take_sounds()
             .into_iter()
             .map(Effect::PlaySound)
@@ -83,7 +84,7 @@ impl Console {
         for &rect in occluders {
             self.canvas.push_occluder(rect);
         }
-        dialog.draw(
+        dialog.browser.draw(
             &Painter {
                 theme: &theme,
                 ..self.painter(Vec2::ZERO, 1.)

@@ -1,5 +1,53 @@
 # Local validation — 2026-10-05
 
+## Chapter selection (2026-10-27)
+
+Source implementation: `56717d2`; single-chapter containment fix: `da289c2`.
+Research/design: `7db0bbf`; findings and limitations: [chapter-selection.md](chapter-selection.md).
+
+Commands (no installed files are changed):
+
+```sh
+scripts/checks/validate.sh
+scripts/checks/check_windows.sh
+cargo test --locked -p hl2-ui owned_chapter_catalogs -- --ignored
+scripts/build-bevy.sh
+NO_BUILD=1 ONLY='chapter_selection coverage' python3 scripts/checks/replays.py
+```
+
+The final local run passes 1,135 Rust tests with 93 ignored, 13 Python tests,
+architecture, strict Clippy and formatting. Strict Windows-target Clippy passes;
+Windows native execution is **not tested**. The explicit owned-install test passes:
+15/5/7/1 selectable entries for base/Episode One/Episode Two/Lost Coast, complete
+localized titles and thumbnail coverage, correct first/last map and installed
+Play controls. VFS fixtures verify own loose/custom/archive enumeration, exclusion
+of inherited/embedded configs, and MOD-scoped reads even with embedded collisions.
+
+Input/model tests cover numeric/suffix sorting, malformed/missing-map configs,
+Episode Two recap syntax, pointer press/drag-off/back/release selection, release
+activation with game identity, arrow paging/clamping, focus/Cancel, portrait frame
+fit, Escape-on-release, preserved menu/background and input during background
+loading. Canvas regressions assert native-size thumbnail sampling and containment
+of the single-card layout. The toolkit owns five browser tests (121 total); hl2-ui has 302 passing tests/15 ignored.
+
+The first packaged round passed submenus, chapter-return backgrounds, chapter
+selection and non-modal Options (4 checks/305 s). All four selected chapters loaded,
+but its stretched-thumbnail captures were rejected. SDK ImagePanel confirmed
+native-size clipping; corrected images were inspected. A second round passed
+base/Episode One/Episode Two pointer/cancel/load checks and coverage, but Lost
+Coast's fixture clicked Cancel using wide-dialog coordinates. The failure and
+images were retained, the pointer coordinates corrected to its own layout, and
+visual inspection additionally found overwide decorative separators. The fix
+centers a single card and sizes those rules using the authored frame inset.
+
+Retained rejected evidence: artifacts/chapter-menu/rejected-stretched,
+rejected-pointer-coordinates and rejected-single-chapter. Exact check logs:
+validate-complete.log, windows-complete.log and owned-complete.log in
+artifacts/chapter-menu. Accepted runtime results and performance measurements
+are recorded below after the final runs. Native desktop comparison, Windows/Linux
+runtime, other UI languages and an ordinary campaign playthrough remain **not tested**.
+
+
 ## Windows unit-test portability (2026-10-26)
 
 Contributor kvalls reports three failures on Windows 11 at 4405064 using

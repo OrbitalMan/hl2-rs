@@ -180,7 +180,7 @@ impl Console {
             Window::Options => self.options.frame_bounds(canvas),
             Window::NewGame => self
                 .chapter_dialog()
-                .map_or(Rect::default(), |d| d.bounds(canvas)),
+                .map_or(Rect::default(), |d| d.browser.bounds(canvas)),
             Window::Console => {
                 let layout = self.shell.panel.dialog_layout(&self.canvas);
                 Rect::new(
@@ -450,7 +450,9 @@ impl Host for Console {
     fn escape_closes(&self, window: Window) -> bool {
         match window {
             Window::Options | Window::SubDialog => self.options.escape_closes(),
-            Window::NewGame => self.chapter_dialog().is_some_and(|d| !d.placement.active()),
+            Window::NewGame => self
+                .chapter_dialog()
+                .is_some_and(|d| !d.browser.placement.active()),
             Window::Confirmation => {
                 if self.confirm_box.is_some() {
                     !self.quit_placement.active()
@@ -466,7 +468,7 @@ impl Host for Console {
     fn hold_escape(&mut self, top: Option<Window>) {
         self.options.escape_held = matches!(top, Some(Window::Options | Window::SubDialog));
         if let Some(d) = self.chapter_dialog_mut() {
-            d.escape_held = top == Some(Window::NewGame);
+            d.browser.escape_held = top == Some(Window::NewGame);
         }
         let is_confirm = top == Some(Window::Confirmation);
         if let Some((box_, _)) = &mut self.confirm_box {
@@ -478,7 +480,7 @@ impl Host for Console {
     fn release_escape(&mut self) {
         self.options.escape_held = false;
         if let Some(d) = self.chapter_dialog_mut() {
-            d.escape_held = false;
+            d.browser.escape_held = false;
         }
         if let Some((box_, _)) = &mut self.confirm_box {
             box_.escape_held = false;
@@ -490,7 +492,7 @@ impl Host for Console {
         self.quit_placement.cancel()
             || self
                 .chapter_dialog_mut()
-                .is_some_and(|d| d.placement.cancel())
+                .is_some_and(|d| d.browser.placement.cancel())
     }
 
     fn escape_modal(&mut self) -> bool {

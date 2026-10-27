@@ -1,12 +1,12 @@
 //! Shared toolkit focus, key activation, pointer capture and placement.
-use super::{Dialog, Outcome, Target};
-use glam::Vec2;
-use source_ui::{
+use super::{CardBrowser, Outcome, Target};
+use crate::{
     input::{Input, Key},
     widgets::focus_step,
 };
+use glam::Vec2;
 
-impl Dialog {
+impl CardBrowser {
     pub fn take_sounds(&mut self) -> Vec<String> {
         std::mem::take(&mut self.sounds)
     }
@@ -45,14 +45,14 @@ impl Dialog {
             self.focus = focus_step(self.focus, &order[..count], !input.shift);
             self.focus_visible = true;
         }
-        if matches!(self.focus, Some(Target::Chapter(_))) {
+        if matches!(self.focus, Some(Target::Card(_))) {
             let delta = i32::from(input.pressed(Key::Right)) - i32::from(input.pressed(Key::Left));
-            if delta != 0 && !self.catalog.entries.is_empty() {
+            if delta != 0 && !self.spec.cards.is_empty() {
                 self.selected = (self.selected as i32 + delta)
-                    .clamp(0, self.catalog.entries.len() as i32 - 1)
+                    .clamp(0, self.spec.cards.len() as i32 - 1)
                     as usize;
                 self.first = self.selected / 3 * 3;
-                self.focus = Some(Target::Chapter(self.selected));
+                self.focus = Some(Target::Card(self.selected));
                 self.focus_visible = true;
             }
         }
@@ -63,7 +63,9 @@ impl Dialog {
             .keys
             .update(self.focus, pressed, |k| input.held_keys.contains(&k));
         if let Some(target) = clicked.or(key) {
-            self.sounds.push("ui/buttonclickrelease.wav".into());
+            if let Some(sound) = &self.spec.release_sound {
+                self.sounds.push(sound.clone());
+            }
             return self.activate(target, key.is_some());
         }
         Outcome::None
@@ -72,7 +74,7 @@ impl Dialog {
     fn activate(&mut self, target: Target, keyboard: bool) -> Outcome {
         match target {
             Target::Close | Target::Cancel => return Outcome::Close,
-            Target::Chapter(index) => {
+            Target::Card(index) => {
                 self.selected = index;
                 if keyboard {
                     return self.start();
@@ -81,24 +83,23 @@ impl Dialog {
             Target::Next => {
                 self.first += 3;
                 self.selected = self.first;
-                self.focus = Some(Target::Chapter(self.selected));
+                self.focus = Some(Target::Card(self.selected));
             }
             Target::Previous => {
                 self.first = self.first.saturating_sub(3);
                 self.selected = self.first;
-                self.focus = Some(Target::Chapter(self.selected));
+                self.focus = Some(Target::Card(self.selected));
             }
-            Target::Play => return self.start(),
+            Target::Accept => return self.start(),
         }
         Outcome::None
     }
 
     fn start(&self) -> Outcome {
-        self.catalog
-            .entries
-            .get(self.selected)
-            .map_or(Outcome::None, |entry| {
-                Outcome::Start(crate::console::GameMap::new(&self.game, &entry.map))
-            })
+        if self.selected < self.spec.cards.len() {
+            Outcome::Accept(self.selected)
+        } else {
+            Outcome::None
+        }
     }
 }

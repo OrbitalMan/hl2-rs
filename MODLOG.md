@@ -1,5 +1,37 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: reusable card browser in source-ui
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Move reusable card geometry, paging, selection, focus/capture, placement and
+rendering into source-ui::card_browser. Callers supply resolved text/images, layout rectangles,
+colors, labels, sound and scaling; acceptance returns only a card index. HL2's adapter keeps
+chapter config discovery, installed control-name/localization interpretation and game/map
+conversion. Generic interaction/canvas tests move with the toolkit. The adapter borrows
+catalog images while preparing textures instead of cloning a second decoded-image catalog.
+
+**Why:** Owner clarified that reusable UI-only code belongs in source-ui, while code with
+HL2-specific resource and gameplay concerns remains in hl2-ui. This is a bounded extraction,
+not a broader menu rewrite or a new dependency edge.
+
+**Tested how:** Five toolkit tests and 302 hl2-ui tests pass. validate.sh passes 1,135 Rust
+tests/93 ignored, 13 Python tests, architecture, strict Clippy and formatting. Windows-target
+strict Clippy and the explicit owned catalog test pass. No HL2 names/tokens or filesystem
+access occur in the new toolkit module.
+
+**Result:** The ownership boundary now matches the reusable UI/application contract. Previous
+packaged pointer/cancel/load checks passed for all games (2 checks/124 s), with inspected
+captures. The extracted implementation is release-built; final committed-package replays
+and timing will confirm the move preserves the observable behavior.
+
+**Still broken or not tested:** Final post-extraction packaged captures/timing pending.
+Native Windows/Linux execution, retail pixel parity, alternate UI languages and ordinary
+campaign playthrough are not tested; progress locking/commentary/intro movies remain unfinished.
+
+**Next:** Rebuild the committed checkpoint, repeat packaged checks and isolated frame timing,
+then commit final evidence.
+
 ## 2026-10-27 Checkpoint: single-chapter layout containment
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

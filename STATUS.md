@@ -1,22 +1,21 @@
 # STATUS
 
-## Chapter selection implementation (2026-10-27)
+## Chapter selection / shared card browser (2026-10-27)
 
-- New Game opens a resource-driven, non-modal three-card browser. Clicking selects; Start
-  New Game or focused-card Enter launches the chapter with explicit game/map identity.
-  Installed MOD configs, localization, layouts, scheme colors and materials take priority.
-- validate.sh: 1,133 Rust tests/93 ignored +13 Python; strict Clippy/fmt/architecture and
-  Windows-target strict Clippy pass. Owned catalogs verify all four games and thumbnails.
-- First packaged round: submenus, chapter-return backgrounds, all four chapter loads and
-  non-modal Options pass (4 checks, 305 s). Initial stretched-thumbnail capture rejected;
-  SDK ImagePanel confirms native-size crop, now fixed and covered by a canvas regression.
-- Final pointer/cancel checks pass base/Episode One/Episode Two. Lost Coast fixture used
-  wide-dialog coordinates and clicked Cancel; corrected to its installed 300-unit layout.
-  Its separators overflowed the frame; size them to the authored interior and center the
-  single card. Focused canvas containment test passes; failure/capture retained.
-- Corrected package and final Lost Coast replay/capture are under validation. Next:
-  inspect accepted images, measure frame time and commit evidence. Native UI comparison,
-  Windows/Linux runtime, progress locking/commentary/intro movies remain not tested/unfinished.
+- New Game opens chapter selection and starts the chosen chapter with explicit game/map
+  identity. Installed MOD configs, localization, layouts, scheme colors and materials win.
+- Owner clarified the UI boundary: source-ui::card_browser owns reusable geometry, paging,
+  selection/focus/capture, placement and drawing, returning only a card index. hl2-ui keeps
+  chapter metadata, retail resource/token interpretation and game/map effects. Generic tests
+  moved with the code; no new dependencies or filesystem access in the toolkit.
+- validate.sh: 1,135 Rust tests/93 ignored +13 Python; architecture, strict Clippy/fmt,
+  Windows-target Clippy and the explicit owned catalog test pass. Toolkit 5 tests; hl2-ui 302.
+- Prior packaged pointer/cancel/load checks pass all games (2 checks/124 s); captures inspected.
+  Thumbnail padding, narrow single-card containment and fixture coordinates are fixed; rejected
+  evidence retained. Final post-extraction committed-package checks/timing are next.
+- Native UI comparison, Windows/Linux runtime, other UI languages and ordinary campaign
+  remain not tested. All discovered launchable chapters are exposed; progress locking,
+  commentary, intro movies and retail scroll animation remain unfinished.
 
 
  Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. PR readiness maintenance findings are fixed; runtime behavior is unchanged. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.

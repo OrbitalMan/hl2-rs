@@ -241,7 +241,7 @@ fn chapter_cancel_preserves_category_background_and_escape_waits_for_release() {
     console.open_chapters("ep2");
     let saved = console.background();
     console.escape_pressed();
-    assert!(console.chapter_dialog().unwrap().escape_held);
+    assert!(console.chapter_dialog().unwrap().browser.escape_held);
     assert_eq!(console.mode(), Mode::NewGame);
     console.escape_released();
     assert_eq!(console.mode(), Mode::MainMenu);
