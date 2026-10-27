@@ -15,7 +15,7 @@ pub use tooltips::{PreparedTooltip, TooltipSection, TOOLTIP_GAP};
 mod frame;
 pub use frame::{
     close_button_rect, FrameSpec, FrameStyle, CLIENT_INSET_X, CLIENT_TOP, CLOSE_BUTTON_INSET,
-    CLOSE_BUTTON_SIZE, FRAME_CORNER_RADIUS, TITLE_INSET_X,
+    CLOSE_BUTTON_SIZE, CLOSE_GLYPH_TALL, FRAME_CORNER_RADIUS, TITLE_INSET_X,
 };
 
 use std::borrow::Cow;

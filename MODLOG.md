@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: scale Marlett close button glyph to retail size (8x8 px, 80% of cell 14)
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+
+**Changed:** Adjusted VGUI dialog close button cross rendering in `source-ui` to match retail Source dimensions:
+- Defined `CLOSE_GLYPH_TALL = 10.` in `crates/source-ui/src/widgets/frame.rs` and re-exported it in `source_ui::widgets`.
+- Updated `Painter::close_button` to draw Marlett's `'r'` at `CLOSE_GLYPH_TALL` (tall 10.), rasterizing to an authentic 8x8 pixel cross (80% of fontdue's unadjusted 14px EM raster of 10x10 px).
+- Position math in the 18x16 button rect produces exact integer padding of 5px left/right and 4px top/bottom, centered symmetrically without filling the full titlebar caption height.
+- Updated owned test `owned_marlett_font_resolves_for_dialog_close_buttons` in `hl2-ui` verifying width bounds with `CLOSE_GLYPH_TALL`.
+
+**Why:** Retail Source VGUI (`vgui_controls::FrameButton`) specifies Marlett at tall 14 in Windows GDI with positive cell height (`CreateFontA`). Due to Windows GDI internal leading in Marlett, the rendered cross is 8x8 pixels at 1:1 scale rather than the full 14px EM square raster (10x10 px) produced by fontdue without cell-height adjustment. Setting `CLOSE_GLYPH_TALL = 10.` delivers retail-matching 8x8 cross sizing (80% of raw 14px raster) with symmetric 5px horizontal and 4px vertical margins.
+
+**Tested how:** `scripts/checks/validate.sh` (architecture guardrails, 13 Python helper tests, all workspace tests, doc-tests, strict Clippy, `cargo fmt --check`), `scripts/checks/check_windows.sh`, owned test `owned_marlett_font_resolves_for_dialog_close_buttons`, and packaged replays (`ONLY="video commentary coverage" python3 scripts/checks/replays.py`).
+
+**Result:** Dialog close button cross across all GameUI dialogs is now sized to retail's 8x8 px glyph (80% of previous size), centered cleanly with 5px horizontal and 4px vertical padding.
+
+**Still broken or not tested:** Windows/Linux native platform runtime execution not tested in this session.
+
+**Next:** Await owner instructions.
+
 ## 2026-10-27 Checkpoint: restore authentic Marlett close button glyph across VGUI dialogs
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

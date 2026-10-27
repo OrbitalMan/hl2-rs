@@ -871,10 +871,11 @@ mod tests {
             .expect("Marlett font from scheme");
         let canvas = source_ui::canvas::Canvas::default();
         let font_face = source_ui::font::FontFace::load(&bytes, canvas).expect("FontFace load");
-        let w = font_face.width_cell("r", 14.);
+        let w = font_face.width_cell("r", source_ui::widgets::CLOSE_GLYPH_TALL);
         assert!(
-            (10.0..=16.0).contains(&w),
-            "Marlett 'r' width at tall 14: {w}"
+            (8.0..=12.0).contains(&w),
+            "Marlett 'r' width at tall {}: {w}",
+            source_ui::widgets::CLOSE_GLYPH_TALL
         );
     }
 

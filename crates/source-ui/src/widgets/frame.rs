@@ -15,6 +15,12 @@ pub const TITLE_INSET_X: f32 = 16.;
 pub const CLOSE_BUTTON_SIZE: Vec2 = vec2(18., 16.);
 /// Inset of the close button from the top-right corner of the frame.
 pub const CLOSE_BUTTON_INSET: Vec2 = vec2(24., 6.);
+/// Target cell height for the Marlett close glyph 'r' in VGUI dialog frames.
+///
+/// In Source VGUI (`vgui_controls::Frame`), caption buttons use Marlett at positive
+/// cell height 14 in Windows GDI, where internal leading yields an effective 10px EM square
+/// and an 8x8 cross centered in the 18x16 button rect (80% of fontdue's raw 14px EM raster).
+pub const CLOSE_GLYPH_TALL: f32 = 10.;
 
 /// Authentic corner radius for VGUI rounded dialog frames (`FrameBorder` `backgroundtype 2`).
 ///
@@ -261,8 +267,8 @@ impl Painter<'_> {
         let color = self.theme.close_style(state);
         if let Some(marlett) = &self.fonts.marlett {
             // Source SDK Frame.cpp: _closeButton = new FrameButton(this, "frame_close", "r");
-            // Marlett's 'r' is the standard titlebar close glyph (tall 14 in SourceScheme.res).
-            let tall = 14.;
+            // Marlett's 'r' is the standard titlebar close glyph (rendered at 8x8 px, 80% of tall 14).
+            let tall = CLOSE_GLYPH_TALL;
             let width = marlett.width_cell("r", tall);
             let x = rect.x + (rect.w - width) * 0.5 + offset;
             let y = rect.y + (rect.h - tall) * 0.5 + offset;

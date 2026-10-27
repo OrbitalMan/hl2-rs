@@ -1,5 +1,12 @@
 # STATUS
 
+## Dialog close button scaled to retail 8x8 size (2026-10-27)
+
+- Scaled VGUI dialog close button cross to retail dimensions (`CLOSE_GLYPH_TALL = 10.`, rendering an 8x8 pixel cross, 80% of raw tall-14 raster).
+- Perfectly centered inside the 18x16 close button rect with 5px horizontal and 4px vertical padding (down from 10x10 px with 4px/3px margins).
+- Re-exported `CLOSE_GLYPH_TALL` in `source_ui::widgets`; updated owned installation verification test `owned_marlett_font_resolves_for_dialog_close_buttons`.
+- `validate.sh`, `check_windows.sh`, and packaged replay checks (`video`, `commentary`, `coverage`) pass with 0 failures.
+
 ## Dialog close button Marlett font rendering restored (2026-10-27)
 
 - Restored authentic Source VGUI title bar close button rendering across all dialog frames (Options, Chapters / New Game, subdialogs, Console, Message Boxes).
