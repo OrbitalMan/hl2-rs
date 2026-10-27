@@ -1,5 +1,30 @@
 # Performance measurements - 2026-10-05
 
+## Advanced surface-motion fix (2026-10-27)
+
+Packaged Metal / Apple M1 Pro, 1024x768, HDR None, MSAA off, VSync off, muted background
+hl2/d1_trainstation_02. Identical executable with original/fixed shader; fixed camera,
+pistol/SMG/crowbar firing and switches, 1,100-tick fixture, 2,000-frame cap. Three isolated
+runs per version, alternating and reversing the middle pair. Each measures 766-777 frames
+after 120 warm-up frames over 13.959-14.157 seconds; all scripts finish.
+
+| Shader | Mean frame | Range |
+| --- | ---: | ---: |
+| Original | 18.215 ms | 18.206-18.223 ms |
+| Fixed | 18.213 ms | 18.181-18.238 ms |
+
+Difference -0.002 ms, with overlapping ranges. No regression measured in this scene; this
+is not a general speedup or FPS guarantee. CPU encoding spans (original/fixed ms): 4x
+reduction 0.000676/0.000692, 32-pixel reduction 0.000332/0.000342, dilation
+0.000369/0.000378, reconstruction 0.000265/0.000289. These measure encoding, not GPU execution;
+GPU timestamps are unavailable. No extra passes, textures, buffers or off-mode work.
+Gathers now use odd 17-97 taps instead of 16-96 so a center tap exists. Slow covered pixels
+no longer inherit unrelated long rays, and onset blends over 1-3 pixels. Exposure/reach
+remain 1.25 frames/12%. Evidence: artifacts/advanced-blur-flicker/timing-summary.json and
+performance-summary.json, scripts and per-run logs/reports. Timing runs were separate from captures, image analysis and builds; no overlapping
+capture/build timing round is included.
+
+
 ## Stronger Advanced weapon silhouette blur (2026-10-26)
 
 Packaged Metal / Apple M1 Pro, 1024x768, HDR None, MSAA off, VSync off, muted background

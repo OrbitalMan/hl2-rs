@@ -1,5 +1,17 @@
 # Design
 
+## Advanced weapon blur flicker (2026-10-27)
+
+Work in the isolated hl2-ui checkout while chapter-selection work proceeds separately.
+Reproduce pistol firing/reload/draw and weapon switches with matched-frame Advanced and
+retail/sharp captures. Separate prepass/color visibility errors from motion reconstruction
+by suppressing only the composite while retaining Advanced prepasses, then inspect coverage,
+motion fields and resets as needed. Fix the demonstrated cause in the host/shader boundary;
+keep the strong crowbar silhouette trails and retail modes, with no work when disabled.
+Add focused regressions, inspect captures, measure matched before/after frame times and
+pass CPU cost, run standard/Windows-target checks and packaged blur coverage, rebuild and
+verify package hashes, then commit the checkpoint. Keep chapter UI files untouched.
+
 ## Windows unit-test portability follow-up (2026-10-26)
 
 Keep the Retina clamp assertion macOS-only, matching its margin constant. Separate flag

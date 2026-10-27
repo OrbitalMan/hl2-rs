@@ -1,5 +1,43 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: Advanced weapon blur surface stability
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Covered weapon pixels now use their own motion instead of borrowing the fastest
+neighbor when their movement is below one pixel. Only uncovered background pixels use the
+expanded dominant-motion field. Odd 17-97 tap gathers include the exact center sample, and
+reconstruction fades in over 1-3 pixels of motion. Removed a now-redundant stationary guard.
+The 1.25-frame exposure, 12% reach and strong fast-swing silhouette trails remain. No new
+passes, textures, buffers, history or per-frame CPU work; Disabled/Enabled are unchanged.
+Added a separate packaged GPU regression, reusing the existing fixture and runner, without
+editing the replay runner or chapter UI files under concurrent work.
+
+**Why:** The owner reported pistol/switch animations blinking like z-fighting and suggested
+slow-motion sample overlap. The screen-space gather was assigning unrelated dominant motion
+to slow surface pixels; the original shader fails the GPU ownership check with 4,603 such
+pixels in one pistol frame. This is reconstruction ownership, not depth-testing between taps.
+
+**Tested how:** validate.sh: 1,125 Rust tests/92 ignored, 13 Python, architecture, strict
+Clippy/fmt; Windows-target Clippy. Packaged pistol firing, pistol reload, draw after switch
+and SMG firing at no AA/4x AA assert actual diagnostic execution, zero borrowed-motion and
+zero lost-center-coverage pixels across live bursts. Original shader fails the same check.
+Existing viewmodel_motion_blur/coverage pass, including crowbar trails, world isolation,
+MSAA, paused/still/switch and off/retail cleanup. Normal captures inspected. Package hashes
+verified. Detailed evidence and rejected comparisons: docs/validation.md.
+
+**Result:** Reproduced surface-motion error fixed. Three paired alternating Advanced runs:
+original/fixed mean frame 18.215/18.213 ms; ranges overlap. No regression measured in this
+scene, no GPU-cost or general FPS claim. Performance details: docs/performance.md.
+
+**Still broken or not tested:** Windows/Linux runtime, every weapon/animation, all frame
+rates/resolutions and native visual comparison are not tested. Live burst request timestamps
+can differ and do not fix prior-pose history; frame-number subtraction and an unaligned
+frozen pair are rejected as exact pose comparisons. The first contact sheet had an invalid
+height header and was replaced. These failures/qualifications are retained with evidence.
+
+**Next:** Owner playtest of Advanced in ordinary gameplay; keep the chapter checkout separate.
+
 ## 2026-10-26 Checkpoint: Windows CI test portability
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

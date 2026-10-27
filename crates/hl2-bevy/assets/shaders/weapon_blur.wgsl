@@ -101,13 +101,14 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let tile_size = vec2<i32>(textureDimensions(tiles));
     let tile = clamp(vec2<i32>(in.uv * vec2<f32>(tile_size)),vec2(0),tile_size-vec2(1));
     let dominant = textureLoad(tiles,tile,0).xy;
-    let velocity = select(dominant,own.xy,own.z > 0.5 && length(own.xy * data.params.zw) >= 1.0) * data.params.y;
+    // A covered pixel follows its own surface, even when a nearby part moves faster.
+    let velocity = select(dominant,own.xy,own.z > 0.0) * data.params.y;
     let pixel_motion = length(velocity * data.params.zw);
     if pixel_motion < 1.0 || data.params.x == 0.0 { return base; }
-    // Stationary weapon details remain sharp even beside the swinging tip.
-    if own.z > 0.99 && length(own.xy * data.params.zw) < 0.5 { return base; }
     let vector = velocity * min(1.0,data.params.x / max(length(velocity),0.00001));
-    let count = i32(clamp(ceil(length(vector * data.params.zw)),16.0,96.0));
+    // Odd tap counts always include the current pixel: thin/slow surfaces cannot
+    // lose all coverage merely because even taps straddle their narrow footprint.
+    let count = i32(clamp(ceil(length(vector * data.params.zw)),16.0,96.0)) | 1;
     let world = textureSampleLevel(background,linear_sampler,in.uv,0.0);
     var sum = vec3(0.0);
     var coverage = 0.0;
@@ -128,7 +129,8 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
     let alpha = min(coverage/f32(count),1.0);
     if alpha == 0.0 { return select(world,base,own.z < 0.5); }
-    return vec4(sum/f32(count) + world.rgb * (1.0-alpha),base.a);
+    let reconstructed = vec4(sum/f32(count) + world.rgb * (1.0-alpha),base.a);
+    return mix(base, reconstructed, smoothstep(1.0,3.0,pixel_motion));
 }
 #endif
 #endif

@@ -1,6 +1,30 @@
 # STATUS
 
- Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. PR readiness maintenance findings are fixed; runtime behavior is unchanged. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
+ Checkpoint: 2026-10-27 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui in an isolated worktree. Advanced blur surface-motion ownership is fixed for the reproduced pistol/switch artifacts; existing fast-swing strength remains. Local validation passes; Windows/Linux runtime and native parity remain unverified. Sections below are newest first.
+
+## Advanced weapon blur surface stability (2026-10-27)
+
+- Isolated hl2-ui worktree; chapter checkout untouched. Fixed slow covered pixels borrowing
+  neighboring fast motion. Covered pixels now follow their own motion; background keeps
+  dominant-motion trails. Centered odd gathers and smooth 1-3-pixel onset preserve thin/slow
+  surfaces while retaining 1.25-frame exposure and 12% reach. No additional render resources
+  or passes; retail modes/off work unchanged.
+- Original shader fails the packaged GPU ownership check with 4,603 affected pistol pixels.
+  Fixed pistol fire/reload, switch/draw and SMG fire pass at no AA/4x AA: diagnostic execution
+  is asserted, with no borrowed surface motion or lost center coverage. Normal captures
+  inspected; existing crowbar/silhouette, MSAA, pause/still/switch/off/retail checks pass.
+- Verified: validate.sh 1,125 Rust tests/92 ignored +13 Python, architecture, strict Clippy/fmt,
+  Windows-target check, release package/hashes. Standalone owned regression command:
+  NO_BUILD=1 python3 scripts/checks/check_weapon_blur.py (run separately from replays.py).
+  Existing group: NO_BUILD=1 ONLY='viewmodel_motion_blur coverage' python3 scripts/checks/replays.py.
+- Three isolated paired Advanced runs: original/fixed 18.215/18.213 ms; overlapping ranges.
+  No general speedup, GPU timing or FPS guarantee. Detailed timings: docs/performance.md.
+- Rejected evidence: live capture indices/request timestamps are not exact pose/history
+  alignment; an unaligned frozen pair does not establish a depth bug. One matched sharp
+  pair is identical above threshold 2, but the decisive test uses GPU motion ownership.
+  Initial contact-sheet height was invalid and corrected. Evidence: docs/validation.md.
+- Windows/Linux runtime, all weapons/frame rates/resolutions and native comparison remain
+  not tested. Next: ordinary-play owner confirmation on the isolated build.
 
 ## Windows CI test portability (2026-10-26)
 

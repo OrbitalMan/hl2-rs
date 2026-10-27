@@ -1,5 +1,50 @@
 # Local validation — 2026-10-05
 
+## Advanced weapon blur surface stability (2026-10-27)
+
+The owner reports blinking/twitching on pistol and weapon-change animations in Advanced.
+The original gather assigns dominant neighboring motion to covered pixels moving below one
+pixel. An actual GPU diagnostic on the original shader finds up to 4,603 fully covered
+pistol pixels borrowing unrelated motion. Only the postprocess diagnostic in a copied
+package is changed; animation/model poses remain the owned ones. The fix always uses local
+motion on covered pixels, includes the center via odd 17-97 taps, and fades reconstruction
+from one to three pixels of motion. The fast trail footprint/exposure remains unchanged.
+
+`NO_BUILD=1 python3 scripts/checks/check_weapon_blur.py` passes four animations (pistol fire,
+pistol reload, switch-to-pistol draw, SMG fire) at no AA and 4x AA. Each nine-image live burst
+asserts the selected weapon/animation, zero pose-bound mismatches, no rendering errors,
+positive GPU diagnostic execution, zero borrowed-motion pixels and zero covered pixels
+with no gathered coverage. The positive control prevents a missing/failed pass from passing
+only because it drew no error color. Generated variations reuse the registered viewmodel
+fixture and standard isolated/muted/background runner; no chapter runner/UI files changed.
+Run this check separately from replays.py because both stage their own test package.
+
+`NO_BUILD=1 ONLY='viewmodel_motion_blur coverage' python3 -u scripts/checks/replays.py`
+passes both checks. The existing crowbar test still asserts real GPU motion at no AA/4x AA,
+blur outside the current silhouette, unchanged upper world, and correct still/pause/switch/
+Disabled/retail behavior. Its copied shader hooks are restored afterward.
+
+`scripts/checks/validate.sh` passes (1,125 Rust tests, 92 ignored, 13 Python helpers,
+architecture, strict Clippy/fmt); `scripts/checks/check_windows.sh` passes. Release builds
+use scripts/build-bevy.sh and executable/shader hashes are checked against metadata and the
+tested copy. No new runtime dependency, pass, texture or CPU animation history is introduced.
+Performance evidence: docs/performance.md.
+
+Normal live bursts/contact sheets were inspected qualitatively. Initial frame-index pixel
+comparisons are rejected because request scene times differ. Matching request times also
+does not fix the preceding-pose history, so these images are not exact visual-parity or
+pixel-improvement measurements. One matched sharp prepass/retail sample differs by zero
+pixels above threshold 2 (maximum 1); a separate unaligned frozen pair differs by 5,007 and
+cannot establish/exclude a depth-prepass bug. The accepted regression instead examines the
+GPU's own per-fragment motion choice. Initial contact-sheet output had a two-row header;
+a correctly sized replacement supersedes it. Failure qualifications and original/fixed
+captures/logs live under artifacts/advanced-blur-flicker and artifacts/replays.
+
+Windows/Linux runtime, every weapon/animation, all frame rates/resolutions, ordinary campaign
+play and native visual comparison are not tested. Advanced remains a screen-space animation
+blur approximation and excludes transparent/diagnostic CPU-skinned draws.
+
+
 ## Windows unit-test portability (2026-10-26)
 
 Contributor kvalls reports three failures on Windows 11 at 4405064 using
