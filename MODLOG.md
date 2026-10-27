@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: restore authentic Marlett close button glyph across VGUI dialogs
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+
+**Changed:** Restored authentic Source VGUI dialog close button rendering across `source-ui` and `hl2-ui`:
+- Root-cause: When dialog fonts were switched to the scheme's `Default` font (`GorDIN-Regular.ttf`), the close button `×` character rendered as a tiny 5x5 math symbol (5.0x5.0 px, area 25 px vs 144 px) instead of the authentic Source VGUI cross.
+- In `crates/source-ui/src/widgets/frame.rs`: extracted frame metrics (`CLIENT_INSET_X`, `CLIENT_TOP`, `CLOSE_BUTTON_SIZE`, `CLOSE_BUTTON_INSET`, `FRAME_CORNER_RADIUS`, `TITLE_INSET_X`), declarative `FrameSpec`, `FrameStyle`, and `Painter` methods (`frame`, `frame_with_close`, `frame_background`, `frame_foreground`, `frame_spec`, `close_button`), reducing `widgets.rs` from 2,636 to 2,381 lines.
+- Updated `Painter::close_button` to render character `'r'` from `fonts.marlett` (tall 14 from `SourceScheme.res`), matching Source SDK `vgui_controls/Frame.cpp` (`FrameButton`), with centered geometry inside the 18x16 close button rect (`CLOSE_BUTTON_SIZE`), +1px pressed state offset, and fallback to `X` / `×` if `marlett` is absent.
+- In `crates/source-ui/src/widgets.rs`: added `marlett: Option<FontFace>` to `Fonts`.
+- In `crates/hl2-ui/src/console/fonts.rs`: extracted `LoadedUiFonts` (including `marlett: Option<FontFace>` resolved from `SourceScheme.res` / `resource/marlett.ttf`), `load_ui_fonts`, and `load_title_fonts`, keeping `Console::load` strictly within the 100-line function limit (98 lines).
+- In `crates/hl2-ui/src/console.rs`: wired `widget_fonts.marlett` into `Console::load`.
+- Added unit tests in `source-ui` verifying Marlett glyph emission and pressed offsets; added owned installation test `owned_marlett_font_resolves_for_dialog_close_buttons` verifying Marlett font resolution and `r` glyph metrics.
+- Updated `scripts/checks/architecture-baseline.json` locking in tightened line counts.
+
+**Why:** Retail Source VGUI (`vgui_controls::FrameButton` in `Frame.cpp`) explicitly assigns `"r"` using the `"Marlett"` font (loaded from `resource/marlett.ttf`, tall 14 in `SourceScheme.res`). At tall 14, character `'r'` renders an authentic 10x10 cross perfectly centered in the 18x16 close button rect with 4px horizontal and 3px vertical padding.
+
+**Tested how:** `scripts/checks/validate.sh` (architecture guardrails, 13 Python helper tests, all workspace tests, doc-tests, strict Clippy, `cargo fmt --check`), `scripts/checks/check_windows.sh`, owned installation test `owned_marlett_font_resolves_for_dialog_close_buttons`, and packaged replays (`ONLY="video commentary coverage" python3 scripts/checks/replays.py`).
+
+**Result:** Close buttons across all GameUI dialogs (Options, New Game / Chapters, Audio/Video dialogs, Console, Message Boxes) now display the authentic Source VGUI cross size and appearance with zero regressions in architecture baseline limits.
+
+**Still broken or not tested:** Windows/Linux native platform runtime execution not tested in this session.
+
+**Next:** Await owner instructions.
+
 ## 2026-10-27 Checkpoint: movie playback (playvideo, playvideo_exitcommand), Bink parsing, and startup video sequence
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

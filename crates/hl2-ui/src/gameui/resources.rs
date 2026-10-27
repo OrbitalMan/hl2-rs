@@ -859,6 +859,26 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires an owned Half-Life 2 installation"]
+    fn owned_marlett_font_resolves_for_dialog_close_buttons() {
+        let root = source_assets::install::discover().expect("installed game");
+        let vfs = source_assets::vpk::Vfs::mount(&root).unwrap();
+        let reader = Reader::new(&vfs);
+        let scheme = keyvalues::parse_resource(&reader.read("resource/SourceScheme.res").unwrap())
+            .unwrap()
+            .remove(0);
+        let bytes = source_ui::scheme_fonts::resolve(&scheme, "Marlett", |path| reader.read(path))
+            .expect("Marlett font from scheme");
+        let canvas = source_ui::canvas::Canvas::default();
+        let font_face = source_ui::font::FontFace::load(&bytes, canvas).expect("FontFace load");
+        let w = font_face.width_cell("r", 14.);
+        assert!(
+            (10.0..=16.0).contains(&w),
+            "Marlett 'r' width at tall 14: {w}"
+        );
+    }
+
+    #[test]
     fn game_menu_entries_keep_file_order_categories_and_spacers() {
         let menu = parse_game_menu(
             br##""GameMenu" {

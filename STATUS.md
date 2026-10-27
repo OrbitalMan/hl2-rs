@@ -1,5 +1,13 @@
 # STATUS
 
+## Dialog close button Marlett font rendering restored (2026-10-27)
+
+- Restored authentic Source VGUI title bar close button rendering across all dialog frames (Options, Chapters / New Game, subdialogs, Console, Message Boxes).
+- Traced root cause of tiny close buttons to `GorDIN-Regular.ttf` Unicode multiplication sign `×` (5x5 px glyph).
+- Implemented retail `vgui_controls::FrameButton` behavior: resolved `"Marlett"` font (tall 14 in `SourceScheme.res`, loaded from `resource/marlett.ttf`) and rendered glyph `'r'` centered inside the `18x16` button rectangle with +1px pressed offset and fallback symbol support.
+- Modularized `crates/source-ui/src/widgets/frame.rs` and `crates/hl2-ui/src/console/fonts.rs`, reducing `widgets.rs` to 2,381 lines and `Console::load` to 98 lines (within the 100-line limit), tightening `architecture-baseline.json`.
+- Unit tests and owned test `owned_marlett_font_resolves_for_dialog_close_buttons` pass; `validate.sh`, `check_windows.sh`, and packaged replay checks (`video`, `commentary`, `coverage`) pass with 0 failures.
+
 ## Movie playback (playvideo, playvideo_exitcommand) and startup video sequence verified (2026-10-27)
 
 - Verified movie playback commands `playvideo` and `playvideo_exitcommand` and startup video sequence across `source-assets`, `hl2-ui`, and `hl2-bevy`.

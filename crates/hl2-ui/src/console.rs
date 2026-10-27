@@ -6,7 +6,9 @@ mod draw_menu;
 mod draw_windows;
 mod effect;
 mod focus;
+mod fonts;
 mod loading;
+use fonts::load_ui_fonts;
 mod menu_flow;
 mod options_dialog;
 mod panel;
@@ -150,7 +152,7 @@ pub struct Console {
 
 /// Positive native font heights describe Windows character cells, not pixels per EM.
 #[derive(Clone, Copy)]
-struct CellMetrics {
+pub(crate) struct CellMetrics {
     em_per_cell: f32,
     ascent_per_cell: f32,
 }
@@ -163,7 +165,7 @@ impl Default for CellMetrics {
     }
 }
 impl CellMetrics {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let face = ttf_parser::Face::parse(bytes, 0).ok()?;
         let units = f32::from(face.units_per_em());
         let (ascent, descent) = face.tables().os2.map_or_else(
@@ -327,82 +329,6 @@ impl Default for Console {
 const DEBUG_HEADER_HEIGHT: f32 = 105.;
 const VIEWMODEL_DEBUG_HEIGHT: f32 = 130.;
 
-struct LoadedUiFonts {
-    developer: Option<FontFace>,
-    menu: Option<FontFace>,
-    menu_metrics: CellMetrics,
-    ui: Option<FontFace>,
-    bold: Option<FontFace>,
-    mono: Option<FontFace>,
-}
-
-fn load_ui_fonts(vfs: &Vfs, canvas: &Canvas) -> LoadedUiFonts {
-    let font = |path: &str| {
-        vfs.read(path)
-            .ok()
-            .flatten()
-            .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
-    };
-    let developer = FontFace::load(source_ui::PROGGY_CLEAN, canvas.clone()).ok();
-    // Menu items and dialog controls draw the source scheme's MenuLarge, Default, and UiBold
-    // faces (GorDIN 600, 400, and 700 in the installed scheme) from its registered font files.
-    let reader = crate::gameui::resources::Reader::new(vfs);
-    let scheme = reader
-        .read("resource/SourceScheme.res")
-        .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
-        .and_then(|roots| roots.into_iter().next());
-    let resolve = |name: &str, fallbacks: &[&str]| {
-        scheme
-            .as_ref()
-            .and_then(|root| source_ui::scheme_fonts::resolve(root, name, |path| reader.read(path)))
-            .or_else(|| fallbacks.iter().find_map(|path| reader.read(path)))
-    };
-    let menu_bytes = resolve(
-        "MenuLarge",
-        &[
-            "resource/linux_fonts/liberationsans-regular.ttf",
-            "resource/gordin-regular.ttf",
-        ],
-    );
-    let menu = menu_bytes
-        .as_deref()
-        .and_then(|bytes| FontFace::load(bytes, canvas.clone()).ok())
-        .or_else(|| developer.clone());
-    let menu_metrics = menu_bytes
-        .as_deref()
-        .and_then(CellMetrics::from_bytes)
-        .unwrap_or_default();
-    let ui = resolve(
-        "Default",
-        &[
-            "resource/gordin-regular.ttf",
-            "resource/linux_fonts/liberationsans-regular.ttf",
-        ],
-    )
-    .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
-    .or_else(|| developer.clone());
-    let mono = font("resource/linux_fonts/liberationmono-regular.ttf")
-        .or_else(|| font("resource/linux_fonts/DejaVuSansMono.ttf"))
-        .or_else(|| developer.clone());
-    let bold = resolve(
-        "UiBold",
-        &[
-            "resource/gordin-bold.ttf",
-            "resource/linux_fonts/liberationsans-bold.ttf",
-        ],
-    )
-    .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
-    .or_else(|| ui.clone());
-    LoadedUiFonts {
-        developer,
-        menu,
-        menu_metrics,
-        ui,
-        bold,
-        mono,
-    }
-}
-
 impl Console {
     pub fn load(vfs: &Vfs, canvas: Canvas) -> Self {
         let fonts = load_ui_fonts(vfs, &canvas);
@@ -413,6 +339,7 @@ impl Console {
             widget_fonts: Fonts {
                 text: fonts.ui.clone(),
                 bold: fonts.bold,
+                marlett: fonts.marlett,
             },
             font: fonts.ui,
             menu_font: fonts.menu,
@@ -432,80 +359,7 @@ impl Console {
             .options
             .set_placement(Placement::from_saved(console.config.dialogs.options));
         console.menu_metrics = fonts.menu_metrics;
-        let title_bytes = vfs
-            .read("resource/HL2EP2.ttf")
-            .ok()
-            .flatten()
-            .or_else(|| vfs.read("resource/hl2ep2.ttf").ok().flatten())
-            .or_else(|| {
-                vfs.game_root()
-                    .and_then(|root| std::fs::read(root.join("hl2/resource/hl2ep2.ttf")).ok())
-            })
-            .or_else(|| vfs.read("resource/HALFLIFE2.ttf").ok().flatten())
-            .or_else(|| vfs.read("resource/halflife2.ttf").ok().flatten())
-            .or_else(|| {
-                vfs.game_root()
-                    .and_then(|root| std::fs::read(root.join("hl2/resource/halflife2.ttf")).ok())
-            });
-        if let Some(bytes) = title_bytes {
-            console.title_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
-            console.title_font = FontFace::load(&bytes, canvas.clone()).ok();
-            console.title_face = console.title_font.as_ref().map(FontFace::face);
-            if console.title_font.is_some() {
-                let is_hl2_logo_font = console
-                    .title_face
-                    .as_ref()
-                    .is_some_and(|f| f.lookup_glyph_index('=') == 0);
-                if is_hl2_logo_font {
-                    // Owned 720px retail capture + GDI probe for halflife2.ttf: requested cell48 -> EM41,
-                    // native title baseline262 relative to ClientScheme panelY217.
-                    // Other resolutions scale this measured GDI/label relation; font rasterization remains approximate.
-                    console.title_metrics = CellMetrics {
-                        em_per_cell: 41. / 48.,
-                        ascent_per_cell: 45. / 48.,
-                    };
-                }
-                console.title = vfs
-                    .read("gameinfo.txt")
-                    .ok()
-                    .flatten()
-                    .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
-                    .and_then(|roots| roots.into_iter().next())
-                    .and_then(|root| {
-                        root.get("title")
-                            .and_then(|title| title.text())
-                            .map(str::to_owned)
-                    })
-                    .unwrap_or_else(|| "HALF-LIFE'".into());
-            } else {
-                console.title_face = None;
-                console.title_metrics = CellMetrics::default();
-                console.category_titles =
-                    resources::fallback_category_titles(&console.gameui.localization);
-                console.log("Owned HalfLife2 title font could not be loaded; using the HL2-RS fallback title.");
-            }
-        } else {
-            console.category_titles =
-                resources::fallback_category_titles(&console.gameui.localization);
-            console.log("Owned HalfLife2 title font not found; using the HL2-RS fallback title.");
-        }
-
-        let lc_bytes = vfs
-            .read("lostcoast/resource/lostcoast.ttf")
-            .ok()
-            .flatten()
-            .or_else(|| vfs.read("resource/lostcoast.ttf").ok().flatten())
-            .or_else(|| {
-                vfs.game_root().and_then(|root| {
-                    std::fs::read(root.join("lostcoast/resource/lostcoast.ttf")).ok()
-                })
-            });
-        if let Some(bytes) = lc_bytes {
-            console.lostcoast_title_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
-            console.lostcoast_title_font = FontFace::load(&bytes, canvas.clone()).ok();
-            console.lostcoast_title_face =
-                console.lostcoast_title_font.as_ref().map(FontFace::face);
-        }
+        fonts::load_title_fonts(&mut console, vfs, &canvas);
         // Installed desktop GameUI colors. Layout/window controls remain an initial implementation.
         let scheme_reader = crate::gameui::resources::Reader::new(vfs);
         if let Some(root) = scheme_reader
