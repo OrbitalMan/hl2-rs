@@ -46,6 +46,7 @@ pub struct Campaign {
     loading_frames: u64,
 }
 impl Campaign {
+    #[cfg(test)]
     pub fn new(loaded: &assets::LoadedMap) -> Self {
         let name = loaded.world.name.clone();
         Self {
@@ -76,6 +77,42 @@ type Host<'w> = (
     ResMut<'w, gameplay::Gameplay>,
     ResMut<'w, simulation::Simulation>,
 );
+fn next_map_request(
+    options: &Options,
+    campaign: &Campaign,
+    ui: &mut ui_host::Console,
+    game: &mut gameplay::Gameplay,
+) -> Option<Request> {
+    let background = std::mem::take(&mut ui.background_request);
+    let requested_game = ui.map_request_game.take();
+    let current_game = campaign.loaded_map.as_ref().map(|m| m.game.clone());
+    // Menu backgrounds name their game and level transitions stay in the running game;
+    // a bare map name (`map`, `--map`, respawn) loads in the game that ships it.
+    ui.map_request
+        .take()
+        .map(|map| Request {
+            game: requested_game.unwrap_or_else(|| {
+                source_assets::install::game_for_map(&options.game, &map, current_game.as_deref())
+                    .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned())
+            }),
+            map,
+            landmark: String::new(),
+            direct: true,
+            background,
+        })
+        .or_else(|| {
+            game.scene.transition.take().map(|(map, landmark)| Request {
+                map,
+                game: current_game
+                    .clone()
+                    .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned()),
+                landmark,
+                direct: false,
+                background: false,
+            })
+        })
+}
+
 pub fn poll(
     mut commands: Commands,
     (options, mut campaign, mut ui, mut game, mut sim): Host,
@@ -87,40 +124,7 @@ pub fn poll(
     if let Some(job) = &campaign.job {
         loading::preserve_gameplay_request(&job.request, &mut ui);
     } else {
-        let background = std::mem::take(&mut ui.background_request);
-        let requested_game = ui.map_request_game.take();
-        let current_game = campaign.loaded_map.as_ref().map(|m| m.game.clone());
-        // Menu backgrounds name their game and level transitions stay in the running game;
-        // a bare map name (`map`, `--map`, respawn) loads in the game that ships it.
-        let request = ui
-            .map_request
-            .take()
-            .map(|map| Request {
-                game: requested_game.unwrap_or_else(|| {
-                    source_assets::install::game_for_map(
-                        &options.game,
-                        &map,
-                        current_game.as_deref(),
-                    )
-                    .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned())
-                }),
-                map,
-                landmark: String::new(),
-                direct: true,
-                background,
-            })
-            .or_else(|| {
-                game.scene.transition.take().map(|(map, landmark)| Request {
-                    map,
-                    game: current_game
-                        .clone()
-                        .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned()),
-                    landmark,
-                    direct: false,
-                    background: false,
-                })
-            });
-        let Some(request) = request else {
+        let Some(request) = next_map_request(&options, &campaign, &mut ui, &mut game) else {
             return;
         };
         if loading::reuse_background(&request, &campaign, &mut ui, &mut sim) {
@@ -242,9 +246,13 @@ pub fn poll(
         commands.entity(entity).despawn();
     }
     sim.change_map(&loaded.world, eye, job.request.direct);
+    sim.background_level = job.request.background;
     if job.request.direct {
         if let Some(yaw) = options.yaw {
             sim.yaw = yaw;
+        }
+        if options.pitch != 0. {
+            sim.pitch = options.pitch;
         }
         if options.fly {
             sim.fly = true;

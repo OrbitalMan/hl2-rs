@@ -1,5 +1,14 @@
 # STATUS
 
+## Asynchronous startup map loading with chapter background and progress UI verified (2026-10-27)
+
+- Fixed initial loading sequence when launching without `--map`: immediately presents the chapter's pre-blurred background (`materials/console/<background>.vtf` / `_widescreen.vtf`) with the localized corner loading plaque (`#GameUI_Loading`) and occluded main menu buttons/titles until background level loading completes.
+- Fixed initial loading sequence when launching with gameplay `--map`: immediately presents the target chapter's pre-blurred background with the centered modal `LoadingDialog` and segmented progress bar, smoothly transitioning to gameplay and locking the cursor on load completion.
+- Bypassed 6-second blank video blackout on interactive launch when no software/hardware video frame decoder is installed (`HAS_VIDEO_DECODER = false`).
+- Replaced synchronous map parsing in `main()` with a lightweight stub map (~5 ms setup), moving all heavy map loads to asynchronous worker threads (`hl2-owned-map-loader`).
+- Tightened `architecture-baseline.json` by extracting `next_map_request` in `campaign.rs::poll` (208 -> 179 lines), `setup` (135 -> 119 lines), and `main.rs` (1,204 -> 1,109 lines).
+- `validate.sh`, `check_windows.sh`, and packaged replay checks (`video`, `campaign`, `commentary`, `console`, `bg_compare`) pass with 0 failures.
+
 ## Dialog close button scaled to retail 8x8 size (2026-10-27)
 
 - Scaled VGUI dialog close button cross to retail dimensions (`CLOSE_GLYPH_TALL = 10.`, rendering an 8x8 pixel cross, 80% of raw tall-14 raster).

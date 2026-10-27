@@ -1,7 +1,106 @@
 //! Installation/output side effects after argument parsing has succeeded.
 use super::Options;
-use anyhow::Result;
-use std::path::PathBuf;
+use anyhow::{Context, Result};
+use std::{path::PathBuf, sync::Arc};
+
+/// Resolved target map and mode for initial application startup.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct StartupTarget {
+    pub game: String,
+    pub map: String,
+    pub background: bool,
+}
+
+/// Resolves the startup map target without loading map geometry or heavy assets.
+pub(crate) fn target_map(options: &crate::Options) -> Result<StartupTarget> {
+    let base_game = source_assets::install::BASE_GAME;
+    let config = hl2_ui::config::Config::load_or_default();
+    if let Some(map) = options.map.as_ref() {
+        let is_bg = options.main_menu || map.contains("background");
+        let game = source_assets::install::game_for_map(&options.game, map, None)
+            .unwrap_or_else(|| base_game.to_owned());
+        return Ok(StartupTarget {
+            game,
+            map: map.clone(),
+            background: is_bg,
+        });
+    }
+    let vfs =
+        source_assets::vpk::Vfs::mount(&options.game).context("mount installed owned content")?;
+    let default_background = hl2_ui::gameui::resources::startup_background_map(&vfs);
+    let (game, map) = match (&options.background_map, &config.gameplay.background_map) {
+        (Some(map), _) => (
+            source_assets::install::game_for_map(&options.game, map, None)
+                .unwrap_or_else(|| base_game.to_owned()),
+            map.clone(),
+        ),
+        (None, Some(map)) => (
+            config
+                .gameplay
+                .background_game
+                .clone()
+                .or_else(|| source_assets::install::game_for_map(&options.game, map, None))
+                .unwrap_or_else(|| base_game.to_owned()),
+            map.clone(),
+        ),
+        (None, None) => (
+            base_game.to_owned(),
+            default_background.context(
+                "no main-menu background map in scripts/chapterbackgrounds.txt or config; pass a loadable --map",
+            )?,
+        ),
+    };
+    Ok(StartupTarget {
+        game,
+        map,
+        background: true,
+    })
+}
+
+/// Creates a lightweight stub [`crate::assets::LoadedMap`] for instant window presentation
+/// before asynchronous map loading begins in the worker thread.
+pub(crate) fn load_stub(root: &std::path::Path, game: &str) -> Result<crate::assets::LoadedMap> {
+    let vfs = Arc::new(
+        source_assets::vpk::Vfs::mount(root)
+            .context("mount installed owned content for startup stub")?,
+    );
+    let canvas = source_ui::canvas::Canvas::default();
+    let hud = hl2_ui::hud::WeaponHud::load(&vfs, canvas)?;
+    let world = Arc::new(modkit_core::World::default());
+    let gameplay = crate::gameplay::Gameplay::load_with_campaign(
+        modkit_core::World::default(),
+        &vfs,
+        0,
+        true,
+    )?;
+    let audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
+    let effects = crate::effects::PreparedEffects::load(&vfs, &world);
+    let bsp = source_assets::bsp::Bsp::empty();
+    let shadow_receivers = Arc::new(hl2_simulation::shadows::receivers::Receivers::new(
+        &[],
+        |_| true,
+    ));
+    Ok(crate::assets::LoadedMap {
+        game: game.to_owned(),
+        world,
+        gameplay,
+        hud,
+        audio,
+        sky: None,
+        effects,
+        gaze: std::collections::BTreeMap::new(),
+        flexes: std::collections::BTreeMap::new(),
+        eyes: std::collections::BTreeMap::new(),
+        bsp,
+        revision: 0,
+        materials: std::collections::BTreeMap::new(),
+        flashlight_cookie: None,
+        shadow_receivers,
+        texture_errors: Vec::new(),
+        models: serde_json::Value::Null,
+        vfs,
+    })
+}
 
 pub(super) struct InstallationRequest {
     pub explicit: Option<PathBuf>,
@@ -132,5 +231,49 @@ mod tests {
         }
         let args = ["--setup", "--no-setup"].map(str::to_owned);
         assert!(Options::parse_from(args, config).is_err());
+    }
+
+    #[test]
+    fn target_map_distinguishes_gameplay_maps_and_backgrounds() {
+        let (gameplay_opt, _) = Options::parse_from(
+            ["--map".into(), "d1_trainstation_01".into()],
+            Default::default(),
+        )
+        .unwrap();
+        let target = target_map(&gameplay_opt).unwrap();
+        assert_eq!(target.map, "d1_trainstation_01");
+        assert!(!target.background);
+
+        let (bg_opt, _) =
+            Options::parse_from(["--map".into(), "background01".into()], Default::default())
+                .unwrap();
+        let bg_target = target_map(&bg_opt).unwrap();
+        assert_eq!(bg_target.map, "background01");
+        assert!(bg_target.background);
+
+        let (menu_opt, _) = Options::parse_from(
+            [
+                "--map".into(),
+                "d1_trainstation_01".into(),
+                "--main-menu".into(),
+            ],
+            Default::default(),
+        )
+        .unwrap();
+        let menu_target = target_map(&menu_opt).unwrap();
+        assert_eq!(menu_target.map, "d1_trainstation_01");
+        assert!(menu_target.background);
+    }
+
+    #[test]
+    #[ignore = "requires owned HL2 installation"]
+    fn startup_stub_creates_empty_world_and_mounted_vfs() {
+        let root = source_assets::install::discover().expect("owned install");
+        let stub = load_stub(&root, "hl2").expect("startup stub");
+        assert_eq!(stub.game, "hl2");
+        assert!(stub.world.surfaces.is_empty());
+        assert!(stub.world.entities.is_empty());
+        assert!(stub.bsp.lump(0).is_empty());
+        assert!(stub.materials.is_empty());
     }
 }

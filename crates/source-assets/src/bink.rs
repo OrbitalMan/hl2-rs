@@ -5,6 +5,12 @@
 
 use anyhow::{ensure, Result};
 
+/// Whether a software or hardware video frame decoder is present.
+/// The container header reader parses metadata, geometry and duration for all
+/// Bink movies; frame packet decompression into RGBA presentation textures is
+/// not yet implemented.
+pub const HAS_VIDEO_DECODER: bool = false;
+
 /// Header metadata parsed from a Bink 1 container file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BinkHeader {

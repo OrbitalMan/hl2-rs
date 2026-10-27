@@ -1,5 +1,35 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: asynchronous startup map loading with chapter background and progress UI
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+
+**Changed:** Resolved black screen on startup without `--map` and white/black stall without progress dialog when starting with a gameplay `--map`:
+- Root-cause: Interactive startup unconditionally queued `media/valve.bik` when `!options.novid`, drawing a solid black rectangle for 6 seconds without a video frame decoder. Furthermore, `main()` loaded startup maps synchronously before Bevy window presentation, causing the OS window to hang white/black while parsing BSP, models, and textures. For gameplay maps, `setup()` marked the map immediately loaded, bypassing `start_loading_for_game` so the chapter blurred background and `LoadingDialog` progress bar were never drawn.
+- Defined `HAS_VIDEO_DECODER: bool = false` in `source-assets::bink`. In `hl2-bevy::simulation::movie::startup_video_sequence`, avoided launching startup video playback when `!HAS_VIDEO_DECODER`, eliminating the 6-second blank blackout on interactive launches.
+- Added `Bsp::empty()` in `source-assets::bsp` constructing an empty BSP with 64 zero-length lumps and default HDR state.
+- Extracted startup target resolution (`startup::target_map`) and lightweight stub creation (`startup::load_stub`) in `hl2-bevy::startup`:
+  - `target_map` resolves `(game, map, background)` without loading heavy BSP, models, or textures.
+  - `load_stub` mounts VFS, loads UI fonts and HUD canvas, and provides an empty `LoadedMap` in ~5 ms.
+- Refactored `hl2-bevy::main`:
+  - Removed synchronous `load_startup_map`, reducing `main.rs` production lines from 1,204 to 1,109.
+  - Initialized `Simulation` with `simulation.loading = true` and `simulation.background_level = target.background`.
+  - In `setup()`: installed stub map, set `PreparedMap` with target, and invoked `request_startup_map(&mut console_ui, &target)`.
+  - For background maps (interactive or `--background-map` / `--main-menu`): `request_startup_map` calls `Console::start_background_loading`, queuing the map in `map_request` (`background_request = true`). Frame 0 immediately presents the chapter's pre-blurred background texture (`materials/console/<background>.vtf` / `_widescreen.vtf`) with the localized corner plaque (`#GameUI_Loading`) and hidden menu buttons/titles.
+  - For gameplay maps (`--map <map>`): `request_startup_map` calls `Console::start_loading_for_game`, queuing the map in `map_request` (`background_request = false`). Frame 0 immediately presents the target chapter's pre-blurred background texture with the centered modal `LoadingDialog`, progress bar, and localized stages.
+  - In `hl2-bevy::campaign::poll`: extracted `next_map_request` (reducing `poll` from 208 to 179 lines, well within architecture limits). Frame 0 immediately spawns the asynchronous loader thread (`hl2-owned-map-loader`). On completion, installs the map, synchronizes camera angles/position and `sim.pitch`, switches `sim.loading = false`, locks cursor for gameplay, and dismisses loading dialog / transitions menu.
+- Tightened `architecture-baseline.json` (`main.rs::setup` from 135 to 119 lines, `main.rs` from 1,204 to 1,109 lines, `campaign.rs::poll` from 208 to 179 lines).
+
+**Why:** Retail Half-Life 2 displays the chapter's pre-blurred background texture with the `#GameUI_Loading` tip plaque in the bottom-right corner when launching into the main menu, and displays the chapter's pre-blurred background with the modal `LoadingDialog` and segmented progress bar when launching into a gameplay map. Pre-window synchronous loading caused frozen blank screens, and blank Bink playback caused 6-second blackouts. Instant presentation of the stub map followed by asynchronous worker loading provides authentic retail loading visuals without stalling the OS window.
+
+**Tested how:** `scripts/checks/validate.sh` (architecture guardrails, 13 Python helper tests, all 154 `hl2-bevy` tests, 123 `hl2-ui` tests, doc-tests, strict Clippy, `cargo fmt --check`), `scripts/checks/check_windows.sh` (Windows cross-compilation clippy), unit tests `target_map_distinguishes_gameplay_maps_and_backgrounds` and `startup_stub_creates_empty_world_and_mounted_vfs`, and packaged replay checks (`video`, `campaign`, `commentary`, `console`, `bg_compare`).
+
+**Result:** Clean, immediate startup with authentic loading visuals: background blur and `#GameUI_Loading` plaque on launching without `--map`; chapter blurred background with modal progress bar dialog on launching with `--map`. Zero architecture regressions.
+
+**Still broken or not tested:** Windows/Linux native platform runtime execution not tested in this session.
+
+**Next:** Await owner instructions.
+
 ## 2026-10-27 Checkpoint: scale Marlett close button glyph to retail size (8x8 px, 80% of cell 14)
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

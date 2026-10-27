@@ -41,7 +41,7 @@ use bevy::{
     core_pipeline::tonemapping::Tonemapping,
     prelude::*,
     render::{renderer::RenderAdapterInfo, view::screenshot::Screenshot},
-    window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowResolution},
+    window::{CursorOptions, PrimaryWindow, WindowResolution},
 };
 pub(crate) use map_install::install_map;
 use serde::Serialize;
@@ -353,7 +353,7 @@ impl Options {
 }
 #[derive(Resource)]
 /// The startup map and whether it is a main-menu background level.
-struct PreparedMap(Option<assets::LoadedMap>, bool);
+struct PreparedMap(Option<assets::LoadedMap>, startup::StartupTarget);
 #[derive(Default, Serialize)]
 struct RunStatus {
     #[serde(skip)]
@@ -393,92 +393,13 @@ struct CaptureControl {
 }
 use coords::{bevy_to_source, source_direction, source_to_bevy};
 
-/// Loads the startup map and says whether it is a main-menu background level. A gameplay
-/// `--map` is loaded directly, without a menu background first: the background's freed memory
-/// would stay resident for the whole run. A `--main-menu` map, or a `--map` that fails to load,
-/// loads the menu background instead, and the campaign loader then loads the requested map
-/// asynchronously with the loading dialog (reporting the failure, see `campaign::poll`).
-fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
-    let config = hl2_ui::config::Config::load_or_default();
-    let base_game = source_assets::install::BASE_GAME;
-    if let Some(map) = options.map.as_ref().filter(|_| !options.main_menu) {
-        let game = source_assets::install::game_for_map(&options.game, map, None)
-            .unwrap_or_else(|| base_game.to_owned());
-        println!("Loading owned {game}/{map}...");
-        match assets::load_with_config(
-            &options.game,
-            &game,
-            map,
-            source_ui::canvas::Canvas::default(),
-            true,
-            &config,
-        ) {
-            Ok(loaded) => return Ok((loaded, false)),
-            Err(err) => eprintln!("Warning: map {game}/{map} failed to load: {err:#}"),
-        }
-    }
-    let vfs =
-        source_assets::vpk::Vfs::mount(&options.game).context("mount installed owned content")?;
-    let default_background = hl2_ui::gameui::resources::startup_background_map(&vfs);
-    // `--background-map` loads in the game that ships the map; the persisted background
-    // remembers its game (one saved without it belongs to the game that ships it).
-    let (game, background) = match (&options.background_map, &config.gameplay.background_map) {
-        (Some(map), _) => (
-            source_assets::install::game_for_map(&options.game, map, None)
-                .unwrap_or_else(|| base_game.to_owned()),
-            map.clone(),
-        ),
-        (None, Some(map)) => (
-            config
-                .gameplay
-                .background_game
-                .clone()
-                .or_else(|| source_assets::install::game_for_map(&options.game, map, None))
-                .unwrap_or_else(|| base_game.to_owned()),
-            map.clone(),
-        ),
-        (None, None) => (
-            base_game.to_owned(),
-            default_background.clone().context(
-                "no main-menu background map in scripts/chapterbackgrounds.txt or config; pass a loadable --map",
-            )?,
-        ),
-    };
-    println!("Loading owned main-menu background {game}/{background}...");
-    let loaded = match assets::load_with_config(
-        &options.game,
-        &game,
-        &background,
-        source_ui::canvas::Canvas::default(),
-        true,
-        &config,
-    ) {
-        Ok(loaded) => loaded,
-        Err(err) => {
-            eprintln!(
-                "Warning: background map {game}/{background} failed to load: {err:#}; falling back to default background"
-            );
-            let default_bg = default_background.unwrap_or_else(|| "background01".to_owned());
-            assets::load_with_config(
-                &options.game,
-                base_game,
-                &default_bg,
-                source_ui::canvas::Canvas::default(),
-                true,
-                &config,
-            )
-            .with_context(|| format!("load fallback main-menu background map {default_bg}"))?
-        }
-    };
-    Ok((loaded, true))
-}
-
 fn main() -> Result<()> {
     if setup::run_helper()? {
         return Ok(());
     }
     let options = Options::parse()?;
-    let (loaded, background_level) = load_startup_map(&options)?;
+    let target = startup::target_map(&options)?;
+    let loaded = startup::load_stub(&options.game, &target.game)?;
     let map_name = loaded.world.name.clone();
     let revision = loaded.revision;
     let model_report = loaded.models.clone();
@@ -527,9 +448,8 @@ fn main() -> Result<()> {
             .with_flexible_aspect(options.flexible_aspect),
     );
     simulation.run_after_script = options.capture_live;
-    if options.map.is_some() && background_level {
-        simulation.loading = true;
-    }
+    simulation.loading = true;
+    simulation.background_level = target.background;
     let status = Status::default();
     let packaged_assets = std::env::current_exe()?
         .parent()
@@ -602,7 +522,7 @@ fn main() -> Result<()> {
         .insert_resource(audio::OutputMute(options.mute))
         .insert_resource(tonemap::Tonemap::new(options.tonemap_scale))
         .insert_resource(status.clone())
-        .insert_resource(PreparedMap(Some(loaded), background_level))
+        .insert_resource(PreparedMap(Some(loaded), target))
         .insert_resource(simulation)
         .init_resource::<campaign::Campaign>()
         .init_resource::<CaptureControl>()
@@ -819,15 +739,13 @@ fn setup(
     status: Res<Status>,
     (mut meshes, mut materials, mut images, mut sounds, mut effect_materials, mut inverse_binds): StartupAssets,
     mut present_materials: ResMut<Assets<video::PresentMaterial>>,
-    (adapter, mut windows): (
+    (adapter, _windows): (
         Option<Res<RenderAdapterInfo>>,
         Query<&mut CursorOptions, With<PrimaryWindow>>,
     ),
 ) {
     let loaded = prepared.0.take().expect("startup map consumed once");
-    let map_name = loaded.world.name.clone();
-    let map_game = loaded.game.clone();
-    commands.insert_resource(campaign::Campaign::new(&loaded));
+    let target = prepared.1.clone();
     let (spawn, yaw) = loaded.world.spawn();
     let position = options
         .position
@@ -857,23 +775,9 @@ fn setup(
     let mut console_ui = ui_host::Console::new(ui);
     console_ui.source.set_history(console_host::load_history());
     console_ui.source.index_chapters();
-    console_ui
-        .source
-        .level_loaded_for_map(&map_game, &map_name, prepared.1);
-    // A gameplay startup map is reported and captures the pointer like a map the campaign
-    // loader installs.
-    if !prepared.1 {
-        console_ui
-            .source
-            .log(format!("Loaded {map_game}/{map_name}"));
-        if let Ok(mut cursor) = windows.single_mut() {
-            cursor.grab_mode = CursorGrabMode::Locked;
-            cursor.visible = false;
-        }
-    }
     set_system_recommendation(&mut console_ui, adapter.as_deref());
-    request_startup_map(&mut console_ui, &options, prepared.1);
-    simulation::movie::startup_video_sequence(&options, prepared.1, &mut console_ui);
+    request_startup_map(&mut console_ui, &target);
+    simulation::movie::startup_video_sequence(&options, target.background, &mut console_ui);
     commands.insert_resource(console_ui);
     // Every game camera below renders into the game frame (see `video::present_frame`).
     video::install_frame(
@@ -981,19 +885,20 @@ fn set_system_recommendation(
     console_ui.source.set_system_recommendation(rec);
 }
 
-fn request_startup_map(console_ui: &mut ui_host::Console, options: &Options, is_background: bool) {
-    if let Some(map) = options.map.as_ref().filter(|_| is_background) {
-        let game = source_assets::install::game_for_map(&options.game, map, None)
-            .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned());
-        console_ui.map_request = Some(map.clone());
-        console_ui.map_request_game = Some(game.clone());
-        console_ui.background_request = options.main_menu;
-        if options.main_menu {
-            console_ui.source.start_background_loading(&game, map);
-        } else {
-            console_ui.source.start_loading(map);
-        }
+fn request_startup_map(console_ui: &mut ui_host::Console, target: &startup::StartupTarget) {
+    if target.background {
+        console_ui
+            .source
+            .start_background_loading(&target.game, &target.map);
+        console_ui.background_request = true;
+    } else {
+        console_ui
+            .source
+            .start_loading_for_game(&target.game, &target.map);
+        console_ui.background_request = false;
     }
+    console_ui.map_request = Some(target.map.clone());
+    console_ui.map_request_game = Some(target.game.clone());
 }
 type EntityDrawQuery<'w, 's> = Query<
     'w,

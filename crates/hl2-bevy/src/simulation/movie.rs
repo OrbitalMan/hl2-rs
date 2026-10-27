@@ -57,6 +57,9 @@ pub fn startup_video_sequence(
     is_background_level: bool,
     console_ui: &mut crate::ui_host::Console,
 ) {
+    if !source_assets::bink::HAS_VIDEO_DECODER {
+        return;
+    }
     let unattended = options.capture.is_some()
         || options.monitor_capture.is_some()
         || options.frames.is_some()
