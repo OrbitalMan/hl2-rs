@@ -106,6 +106,21 @@ const RAGDOLL_GROUPS: InteractionGroups = InteractionGroups::new(
         .difference(DEBRIS_GROUP)
         .difference(INTERACTIVE_DEBRIS_GROUP),
 );
+/// Dropped weapons (CBaseCombatWeapon::FallInit, COLLISION_GROUP_WEAPON):
+/// CGameRules::ShouldCollide keeps the player (movement and shadow), NPCs (models and
+/// hulls) and debris off them, so the player walks over them; the world, props, thrown
+/// frags and other weapons still collide, and bullets, +USE and the gravity gun still hit
+/// them (COLLISION_GROUP_NONE traces).
+const WEAPON_GROUP: Group = Group::GROUP_9;
+const WEAPON_GROUPS: InteractionGroups = InteractionGroups::new(
+    WEAPON_GROUP,
+    Group::ALL
+        .difference(NPC_GROUP)
+        .difference(HULL_GROUP)
+        .difference(SHADOW_GROUP)
+        .difference(DEBRIS_GROUP)
+        .difference(RAGDOLL_GROUP),
+);
 const QUERY_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL,
     Group::ALL
@@ -123,7 +138,8 @@ const PLAYER_GROUPS: InteractionGroups = InteractionGroups::new(
         .difference(SHADOW_GROUP)
         .difference(DEBRIS_GROUP)
         .difference(INTERACTIVE_DEBRIS_GROUP)
-        .difference(RAGDOLL_GROUP),
+        .difference(RAGDOLL_GROUP)
+        .difference(WEAPON_GROUP),
 );
 /// The SDK hull (mins, maxs) of npc_* classes (SetHullType), for those done so far.
 pub fn npc_hull(class: &str) -> Option<(Vec3, Vec3)> {
@@ -2435,6 +2451,17 @@ impl Physics {
             }
         }
     }
+    /// COLLISION_GROUP_WEAPON for a dropped weapon's body (`WEAPON_GROUPS`).
+    pub fn set_weapon_group(&mut self, id: usize) {
+        let Some(body) = self.dynamic.get(&id).and_then(|h| self.bodies.get(*h)) else {
+            return;
+        };
+        for collider in body.colliders().to_vec() {
+            if let Some(c) = self.colliders.get_mut(collider) {
+                c.set_collision_groups(WEAPON_GROUPS);
+            }
+        }
+    }
     /// COLLISION_GROUP_DEBRIS for a runtime prop body (a debris gib): it keeps colliding
     /// with the world and ordinary props only.
     pub fn set_body_debris(&mut self, handle: RigidBodyHandle) {
@@ -3187,7 +3214,7 @@ impl NpcCollisionWorld for Physics {
                 && !collider.is_sensor()
                 && !matches!(
                     collider.collision_groups().memberships,
-                    PROJECTILE_GROUP | SHADOW_GROUP | HULL_GROUP
+                    PROJECTILE_GROUP | SHADOW_GROUP | HULL_GROUP | WEAPON_GROUP
                 )
                 && entity.is_none_or(|id| !query.excluded_entities.contains(&id))
                 // Explicit actor bounds supersede an NPC's render-mesh collider.
@@ -3439,6 +3466,7 @@ impl CollisionWorld for Physics {
                             | DEBRIS_GROUP
                             | INTERACTIVE_DEBRIS_GROUP
                             | RAGDOLL_GROUP
+                            | WEAPON_GROUP
                     )
                     && !self.world_brush_contents.contains_key(handle)
                     && !self.npc_hitboxes.contains(handle)
@@ -4100,6 +4128,39 @@ mod tests {
             let pick = physics.pick_ray(Vec3::new(0., 200., 40.), Vec3::X, 200.);
             assert_eq!(pick.map(|h| h.entity), Some(0), "flags {flags}");
         }
+    }
+    #[test]
+    fn dropped_weapons_let_players_and_npcs_through_but_not_traces() {
+        let mut world = native_prop_world();
+        world.model_instances[0].kind = "prop_physics".into();
+        world.model_instances[0].entity = Some(0);
+        world.entities.push(modkit_core::Entity {
+            properties: vec![("classname".into(), "weapon_stunstick".into())],
+        });
+        let mut physics = Physics::new(&world);
+        physics.set_weapon_group(0);
+        physics.refresh_queries();
+        let (mins, maxs) = (Vec3::new(-16., -16., 0.), Vec3::new(16., 16., 72.));
+        let sweep = physics.trace_hull(
+            Vec3::new(0., 200., 10.),
+            Vec3::new(200., 200., 10.),
+            mins,
+            maxs,
+        );
+        assert_eq!(sweep.fraction, 1., "the player hull hit the weapon");
+        let body = &physics.bodies[physics.dynamic[&0]];
+        let groups = physics.colliders[body.colliders()[0]].collision_groups();
+        for blocked in [PLAYER_GROUPS, DEBRIS_GROUPS] {
+            assert!(!groups.test(blocked));
+        }
+        assert!(!groups.test(InteractionGroups::new(HULL_GROUP, Group::ALL)));
+        assert!(!groups.test(InteractionGroups::new(SHADOW_GROUP, Group::ALL)));
+        assert!(groups.test(InteractionGroups::new(Group::GROUP_1, Group::ALL)));
+        // Bullets and the gravity gun still find it.
+        let shot = physics.ray(Vec3::new(0., 200., 40.), Vec3::X, 200.);
+        assert!(shot.is_some());
+        let pick = physics.pick_ray(Vec3::new(0., 200., 40.), Vec3::X, 200.);
+        assert_eq!(pick.map(|h| h.entity), Some(0));
     }
     #[test]
     fn picked_up_debris_hits_npcs_until_it_sleeps() {

@@ -694,6 +694,8 @@ impl Gameplay {
             let Ok(id) = self.insert_entity(entity, Some(instance), physics) else {
                 continue;
             };
+            // FallInit: COLLISION_GROUP_WEAPON (the player and NPCs pass over it).
+            physics.set_weapon_group(id);
             let speed = 64. + (npc.wrapping_mul(2_654_435_761) % 65) as f32;
             if let Some(handle) = physics.entity_body(id) {
                 physics.set_body_velocity(handle, body * speed, Vec3::splat(200.));

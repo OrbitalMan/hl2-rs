@@ -564,6 +564,17 @@ pub fn first_solid(entries: &[keyvalues::Entry]) -> Option<modkit_core::PhysicsS
     solids(entries).into_iter().next()
 }
 
+/// The studiohdr_t checksum a VPhysics prop's single-solid .phy repeats. PhysModelCreate
+/// creates the solid as stored at the entity's origin and angles, so its vertices are in
+/// entity space: the space of the model's sequence-0 pose, whatever its root bones' bind
+/// transforms (owned check: the w_stunbaton/w_pistol/w_irifle solids match their idle
+/// pose, not their bind mesh, which is turned 90 degrees).
+pub fn studio_checksum(mdl: &[u8]) -> Result<u32> {
+    if bytes(mdl, 0, 4)? != b"IDST" || !(44..=49).contains(&u32le(mdl, 4)?) {
+        bail!("PHY adapter requires an MDL 44-49 header");
+    }
+    u32le(mdl, 8)
+}
 /// Narrow adapter guard: only a version-44 MDL with one identity root has
 /// a proved PHY-to-model transform. Do not silently apply this to ragdolls/doors.
 pub fn identity_root_checksum(mdl: &[u8]) -> Result<u32> {

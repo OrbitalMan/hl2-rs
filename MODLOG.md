@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-27 session 33: friendly immunity for projectiles, dropped weapons, shotgun punch
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** Owner request: the player's grenades, bolts, rockets and other projectiles hurt friendlies. Damage now carries its attacker; projectiles keep their owner; CAI_BaseNPC::PassesDamageFilter applies to any attacker that likes a friendly-immune NPC (retail FUN_10057d20); explosive props credit their last attacker or a recent physgun/+USE player (retail Break: 2 s), NPC impact damage names the player within 1 s. Owner playtest of session 32: dropped stunsticks blocked the player and sank into the floor (COLLISION_GROUP_WEAPON group; the .phy solid of rotated-root models is now used as stored, matching the drawn idle pose); shotgun kills lacked punch (measured against native 60 fps recordings: native 72-136 units, ours 61; death poses ported but parked on wip/session33b-20261027; a killing-shot impact push was tried and withdrawn because retail skips ragdolls created this tick); crossbow pins to doors (native A/B: no pin on the station's prop_door_rotating; unchanged). The native oracle window is now moved to the second monitor (the engine ignores -x/-y).
+
+**Tested how / Result:** Unit tests (hl2-simulation 365: refusal per attacker, barrel attacker, ball owner, weapon groups; owned weapon-solid test). Regression movement 26/26, weapons 17/17, attention 26/26. Packaged artifacts/s33: frag/bolt/RPG/SMG grenade/shot barrel leave a citizen at 40 HP and kill a cop; a Combine flush grenade hurts a citizen; the player walks over a dropped stunstick, which lies flat; shotgun corpse 61 units (native 72-136 over four runs, 60 fps recordings). Native: retail ammo forces equal ours.
+
+**Still broken or not tested / Next:** Shot and blast kills move about half of native (our ragdoll's response to an impulse, not the impulse); pistol corpses slide ~30 vs ~12 units; door pins unexplained (owner to name the door); ai_relationship overrides, NPC blast damage feeding AI pain/damaged-by-player, metered NPC ball damage not ported. Next: owner playtest and merge, ragdoll impulse-response A/B, then NPC natural attacks in campaign order (STATUS Open list).
+
 ## 2026-10-26 session 32: ragdoll playtest fixes and friendly damage immunity
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
