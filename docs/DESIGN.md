@@ -1120,3 +1120,14 @@ card index. Keep config enumeration, installed resource interpretation/localizat
 chapter keys and game/map conversion in hl2-ui. Move generic interaction/canvas tests
 into source-ui and retain chapter/catalog/typed-effect tests in hl2-ui. Preserve the
 existing packaged behavior and repeat captures/replays/performance after the move.
+
+## Portability and declared dependencies (2026-10-27)
+
+Owner deferred movies/commentary before runtime code or dependencies were added.
+Keep that work aside. Maintain a cross-platform host and declare runtime versus
+build/test prerequisites in README. Audit subprocesses and native linkage; document
+the existing Linux folder-picker backend separately from gameplay. Preserve the
+Windows CI job and add native Linux/macOS source validation without owned assets.
+Local macOS validation and Windows-target checking do not establish a Linux pass;
+new hosted jobs remain pending until run. No runtime, Cargo dependency or asset
+changes are needed for this bounded documentation/CI checkpoint.

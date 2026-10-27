@@ -29,8 +29,55 @@ The folder preference is stored in `%LOCALAPPDATA%\hl2-rs\installation.json` on 
 | --- | --- | --- |
 | Windows 11 64-bit (x86_64) | Primary tested platform | Owner builds, unit and owned-file tests, packaged replays/captures and native-game comparisons; CI runs on `windows-latest`. |
 | macOS 15+ on Apple Silicon (aarch64, Metal) | Tested by a contributor | On an Apple M1 Pro: build, tests, and the packaged build (`./scripts/build-bevy.sh`, `./launch-bevy.sh`) running `d1_trainstation_02`, including the scripted dispenser, Metrocop sequence and queue, with exit code 0 ([PR #1](https://github.com/kvalls/hl2-rs/pull/1)). Background packaged replays and controlled captures pass; windowed checks and native comparisons are **not tested** (see [validation](docs/validation.md)). |
-| Linux | **Not tested** | Install discovery looks in `~/.steam/steam` and `~/.local/share/Steam`, but neither a build nor the POSIX scripts have been run on Linux. Reports are welcome. |
+| Linux | **Not tested** | Install discovery looks in `~/.steam/steam` and `~/.local/share/Steam`, but neither a build nor the POSIX scripts have been run on Linux locally. Ubuntu CI is configured; its first run and native gameplay verification are pending. |
 | macOS on Intel, other systems | **Not tested** | |
+
+## Runtime and development requirements
+
+The packaged game needs its executable, the matching `bin/bevy-assets` shader folder,
+your owned installed HL2 content, and the operating system's graphics/audio support.
+It reads fonts from the owned content, with the bundled MIT ProggyClean fallback.
+Windows uses its MSVC/UCRT runtime and graphics drivers; macOS uses Apple system
+frameworks and Metal. Linux needs a working X11/Wayland desktop, graphics drivers
+with a wgpu-supported backend (normally Vulkan), and the ALSA/udev system libraries.
+Linux runtime behavior is **not tested** yet.
+
+The game does not require FFmpeg, Python, Node.js, a mod loader, Valve engine DLLs,
+or research tools. Movie playback and commentary implementation are deferred; no
+movie decoder dependency has been added. Rust/Cargo and compiler toolchains are
+build requirements, not requirements for running an already built package. The
+POSIX launcher can rebuild stale packages; use `./launch-bevy.sh --no-build` or run
+`bin/hl2-bevy` directly when no build tools are installed.
+
+On Linux, setup's optional **Browse...** folder picker uses the `rfd` native-dialog
+backend. Its documented runtime requirements are libdbus and a supported
+GTK/GNOME/KDE XDG Desktop Portal backend, with Zenity used for dialogs/fallback.
+These are desktop packages, not bundled game files. Typing the installation path
+in setup, passing `--game`, or using automatic discovery avoids invoking Browse.
+See the pinned [rfd backend requirements](https://docs.rs/rfd/0.17.2/rfd/#linux--bsd-backends).
+
+Source builds need Git, Rust stable/Cargo, and the platform compiler tools:
+Visual Studio C++ tools/Windows SDK on Windows, Xcode command-line tools on macOS,
+and a C++ compiler plus pkg-config and development headers on Linux. Python 3,
+rustfmt and Clippy are needed for the repository's validation scripts; they are
+not game runtime dependencies. Cargo library versions are locked in `Cargo.lock`.
+
+For an Ubuntu/Debian source build, the initial dependency setup is:
+
+```sh
+sudo apt-get update
+sudo apt-get install g++ pkg-config libx11-dev libasound2-dev libudev-dev libxkbcommon-x11-0 libwayland-dev libxkbcommon-dev libdbus-1-dev
+./scripts/build-bevy.sh
+./launch-bevy.sh --no-build
+```
+
+Install the graphics driver and desktop portal backend appropriate to the system;
+package names differ between distributions. The library list follows the pinned
+[Bevy Linux build requirements](https://github.com/bevyengine/bevy/blob/v0.19.1/docs/linux_dependencies.md).
+The Linux commands are documented prerequisites, **not a locally verified build**.
+CI now defines native checks on Windows, Ubuntu and Apple Silicon macOS; adding a
+job does not establish that it has passed. Owned-content/rendering checks remain
+separate from source-only CI.
 
 ## Branches and contributing
 
@@ -56,7 +103,7 @@ Model-authored activity lookup now repairs unsupported implicit NPC idle labels,
 
 ## Build a fresh checkout
 
-You need an owned, installed Steam PC copy of Half-Life 2, Windows 64-bit, Rust stable with the MSVC toolchain, and Visual Studio C++ build tools with a Windows SDK. The renderer uses Bevy/wgpu (tested on Windows with the default backend); GPU and RAM minimums have not been measured. On macOS use `./scripts/build-bevy.sh` and `./launch-bevy.sh`; see [Platforms](#platforms) for what each system has been tested with.
+You need an owned, installed Steam PC copy of Half-Life 2, Rust stable, and the compiler tools for your platform listed in [Runtime and development requirements](#runtime-and-development-requirements). On Windows use the MSVC toolchain and Visual Studio C++ build tools with a Windows SDK. The renderer uses Bevy/wgpu (tested on Windows with the default backend); GPU and RAM minimums have not been measured. On macOS use `./scripts/build-bevy.sh` and `./launch-bevy.sh`; see [Platforms](#platforms) for what each system has been tested with.
 
 The tested installation is Steam app 220, build `19307283`, patch `9912070`. Other game builds are unverified. Rust `1.99.0` was used for the recorded Windows checks. Cargo resolves the library versions in `Cargo.lock`; no external mod, loader or Source engine runtime is needed.
 

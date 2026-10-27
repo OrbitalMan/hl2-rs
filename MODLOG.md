@@ -1,5 +1,37 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: portability and declared prerequisites
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Defer movies/commentary at the owner's request; no runtime source, Cargo manifest
+or lockfile changes were made for them. README separates runtime, build and test requirements,
+including Linux graphics/audio/system libraries and the optional native Browse portal/Zenity
+backend. Preserve Windows CI and add Ubuntu 24.04 / Apple Silicon macOS 15 source validation,
+with Linux build libraries, stable toolchain selection and POSIX syntax checks. Record the
+owner's cross-platform/no-undocumented-external-app requirement in AGENTS.
+
+**Why:** Runtime portability and explicit prerequisites take priority over adding media features.
+Build/test tools and private research probes must not become hidden game requirements.
+
+**Tested how:** Audited production subprocess sites (Windows' built-in registry query and the
+same executable's setup helper), Cargo manifests/lockfile and macOS executable linkage. The
+packaged macOS binary links only system libraries/frameworks; no movie decoder was added to
+Cargo.lock. Workflow YAML/platform matrix, architecture/whitelist, 13 Python helper tests,
+formatting, POSIX shell syntax and Windows-target strict Clippy pass. Commands/evidence in
+artifacts/portability; README links pinned Bevy/rfd prerequisites.
+
+**Result:** Runtime and dependencies are unchanged; requirements are explicit. New Ubuntu/macOS
+CI jobs are configured, not yet executed. No gameplay rebuild or frame-time rerun is needed
+for documentation/CI changes. The existing Windows CI job is preserved.
+
+**Still broken or not tested:** Native Linux build/runtime and the new hosted CI jobs are not
+tested here; no Linux executor is available. Cross-platform design is not a claim of verified
+platform parity. Movies/commentary remain deferred, and no FFmpeg runtime is required.
+
+**Next:** Require native CI results before describing Linux as tested; investigate platform
+failures within the existing dependency boundaries. Resume media/commentary only when requested.
+
 ## 2026-10-27 Checkpoint: chapter browser packaged evidence
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

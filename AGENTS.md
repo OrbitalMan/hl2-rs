@@ -18,6 +18,8 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 10. This repository is self-contained: its files and commit messages never name anything outside it (no workspace folders, scripts, notes, `../` or machine paths); a check that lives elsewhere is described by what it does. The installed game is described by its layout (`hl2/resource/...`), the Source SDK by SDK-relative paths (Source SDK `game/client/...`).
 11. Never slow the game through careless code or a poor design (owner, 2026-10-24): a requested feature or fidelity change may cost frame time, waste may not (work done while its option is off, per-frame allocation or file access, repeated work that could be cached, a heavier solution than needed); measure hot paths and new render passes, record frame time before and after in MODLOG, and reduce a cost larger than the design needs instead of dropping the feature.
 
+12. Keep the runtime cross-platform and document every separately installed runtime prerequisite in README.md before introducing it; never silently depend on external applications or research tools.
+
 ## How to work
 
 - Read first only what the task needs: STATUS.md's first section (current state), the docs/DESIGN.md section of the plan at hand and, for UI work, docs/gameui.md section 0. README.md, docs/research.md and docs/bevy-migration.md are references: search them instead of reading them whole. Machine-local detail is in workspace work/publishing/continuation.md; its newest checkpoint supersedes history.

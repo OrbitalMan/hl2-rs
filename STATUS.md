@@ -1,5 +1,21 @@
 # STATUS
 
+## Portability / dependency declaration checkpoint (2026-10-27)
+
+- Owner deferred movies/commentary before runtime source or Cargo dependencies were added.
+  No FFmpeg or Rust decoder runtime dependency exists in this checkout.
+- README now distinguishes packaged runtime, platform system libraries, optional Linux Browse
+  portal/Zenity integration and build/test tools. AGENTS requires cross-platform runtime and
+  disclosure of separately installed runtime prerequisites.
+- Windows CI preserved; native Ubuntu 24.04/macOS 15 source validation configured. Hosted
+  jobs have not run; native Linux build/runtime remain not tested, with no local Linux executor.
+- Audited subprocess calls and native linkage: Windows registry discovery uses built-in reg,
+  setup relaunches the same executable; packaged macOS links only system libraries/frameworks.
+  Workflow YAML/matrix, architecture/whitelist, 13 Python tests, fmt, POSIX syntax and strict
+  Windows-target Clippy pass. Runtime unchanged; no gameplay rebuild/frame-time rerun.
+- Next: obtain hosted CI results before upgrading Linux's status; media work stays deferred.
+
+
 ## Chapter selection / shared card browser verified (2026-10-27)
 
 - Runtime source/package: 7171e3f. New Game opens chapter selection; Start loads the selected
