@@ -1,5 +1,35 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: opt-in direct-drawing profile experiment
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** A startup-only profiling flag requests supported NoIndirectDrawing on newly
+created 3D cameras. Ordinary/interactive behavior is unchanged. Report/guard verify the
+selected mode. Preserve the complete source and its risks on a separate experiment branch;
+record work/frame as well as FPS. No Bevy code is modified.
+
+**Why:** Measured indirect phase buffer writes add several milliseconds independently of
+pixel count. The owner wants lower work/frame, and permits savings outside blur while still
+requiring the blur itself to become efficient.
+
+**Tested how:** Four profiling tests, strict host Clippy and architecture pass. Twenty-four
+packaged runs finish: three alternating pairs for 720p idle and each native scene. Camera
+mode, actual dimensions, completed scripts and bounded GPU completions are verified. Visual
+probes for direct mode remain pending; no normal-path renderer change is promoted.
+
+**Result:** 720p idle medians improve 12.62/17.31 to 8.30/9.05 ms Enabled/Advanced. CPU work/frame
+falls about 24%/34% across those batches. Two direct 720p pairs are comparable; one baseline-
+memory mismatch remains. Native idle/turn/swing Advanced is 17.78/18.15/20.51 ms and still
+fails the budgets. All evidence and baseline mismatches remain retained, without an energy
+claim. The owner deprioritises watt telemetry; no privileged sampling is pursued.
+
+**Still broken or not tested:** Full native cost, direct-mode visual qualification, ordinary
+interactive behavior with direct drawing, Windows runtime and other GPUs remain unqualified.
+
+**Next:** Cooperative first motion reduction preserving the exact input sample/tie ordering;
+then GPU image probes and repeated native timing. Do not alter blur exposure or tap quality.
+
 ## 2026-10-27 Checkpoint: uncapped profiling and per-frame resource work
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

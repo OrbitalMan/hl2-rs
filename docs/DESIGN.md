@@ -1,5 +1,19 @@
 # Design
 
+## Cooperative motion reduction with unchanged samples (2026-10-27)
+
+Direct drawing removes most render-phase write overhead and greatly improves 720p, but the
+native 4x-AA blur still fails its budget. Preserve that source on its archive branch. Replace
+only the first 4x4 maximum-motion reduction with a cooperative compute kernel: an 8x8 source
+block produces four reduced texels, with up to four sample lanes sharing MSAA loads. Keep
+all samples, thresholding and y/x/sample tie order identical; no tap/exposure/AA change and
+no readback. Write the existing RGBA16F reduced image directly, avoiding a new image or extra
+pass. Dispatch covers partial edge tiles and all output texels. Keep later reductions and
+world/weapon gathers unchanged. Validate shader compilation, actual motion/silhouette/coverage
+probes, then three alternating native pairs and work/frame against the archived direct path.
+Reject/archive any cost or correctness regression. The owner deprioritised watt telemetry;
+continue measured work/frame and memory proxies without pursuing privileged power sampling.
+
 ## Reduce render preparation and measure work per frame (2026-10-27)
 
 Uncapped native and 720p data show render-phase buffer preparation around 2.3 ms Enabled

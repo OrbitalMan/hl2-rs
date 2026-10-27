@@ -1,4 +1,5 @@
 //! Optional bounded CPU stage measurements; disabled for ordinary play.
+mod camera_mode;
 mod gpu_completion;
 mod pacing;
 use bevy::prelude::*;

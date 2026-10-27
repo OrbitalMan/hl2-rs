@@ -67,6 +67,8 @@ def measure(scene, advanced, repeat):
     replay.holds("bounded GPU completion pacing", completion.get("limit") == 2 and
                  completion.get("max_pending_fences", 3) <= 2 and completion.get("errors") == 0, completion)
     replay.holds("GPU completions observed", completion.get("completed_frames_observed", 0) >= 100)
+    replay.expect("camera indirect drawing disabled", completion.get("camera_indirect_drawing_disabled"),
+                  os.environ.get("HL2RS_PROFILE_DIRECT_DRAW") == "1")
     result["gpu_completion"] = completion
     result["adapter"] = run.report["render"].get("adapter")
     result["backend"] = run.report["render"].get("backend")

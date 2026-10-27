@@ -6,6 +6,28 @@ guard are the first reviewable checkpoint. Advanced rendering optimisations are 
 and unqualified; the known high-resolution regression remains open. The primary checkout
 is reserved for the owner's manual testing. Sections below are newest first.
 
+## Direct-drawing experiment: CPU win, native blur still open (2026-10-27)
+
+HL2RS_PROFILE_DIRECT_DRAW=1 opts background --profile into NoIndirectDrawing at camera
+creation. Default/interactive rendering stays unchanged. Reports/guard verify the requested
+mode. Four profiling tests, strict host Clippy and architecture pass. The complete source
+is on codex/experiment/blur-direct-drawing; visual qualification of this mode is pending.
+
+Three 720p/no-AA idle pairs give median 8.30/9.05 ms Enabled/Advanced (about 120/110 FPS),
+versus prior 12.62/17.31 ms. Both frame-time budgets pass; two pairs are comparable, one has
+baseline-memory drift. Median process CPU work/frame falls 28.74 to 21.72 CPU-ms Enabled,
+and 36.13 to 23.73 Advanced, summed over CPU cores. System GPU busy-time/frame proxy falls
+6.81 to 5.54 ms Enabled and 8.33 to 6.37 Advanced. Cross-batch comparisons are observational;
+no energy claim is made. No per-run pressure/interference flags occur in that six-run batch.
+
+Native direct-draw medians are 10.79/17.78 ms idle, 11.73/18.15 turning, 10.86/20.51 swinging.
+Every frame-time budget fails; source is unqualified. Some paired baselines are mismatched,
+retained in artifacts/blur-performance-regression/direct-draw-native and direct-draw-720p-noaa.
+Render buffer writes drop to about 0.02 ms in the 720p representative run. Next: cooperative
+first reduction with identical samples, followed by image probes and repeated native timing.
+The owner deprioritises watt telemetry; do not pursue privileged measurements. Work/frame,
+memory and tails remain efficiency evidence, not precise energy consumption.
+
 ## Uncapped baseline and efficiency scope (2026-10-27)
 
 Background --profile now has zero application-loop interval; ordinary background replays
@@ -89,9 +111,9 @@ Multicore explicitly report unfinished/no-effect behavior in the current setting
 
 ## Experiment preservation (2026-10-27)
 
-Ten local codex/experiment branches preserve meaningful blur approaches. The source-only
+Eleven local codex/experiment branches preserve meaningful blur approaches. The source-only
 index is docs/blur-experiments.md; every branch has docs/blur-experiment.md with provenance
-and reuse notes. Four are complete recorded snapshots; partial/reconstructed shader and
+and reuse notes. Five are complete recorded snapshots; partial/reconstructed shader and
 camera integrations are labelled. These archives are unqualified, and new archive checkouts
 were not rebuilt. Temporary stash cleanup does not remove the archived source objects.
 

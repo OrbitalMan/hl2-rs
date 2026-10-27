@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 #[derive(Default, serde::Serialize)]
 pub(super) struct Stats {
     limit: usize,
+    camera_indirect_drawing_disabled: bool,
     submitted_frames: u64,
     completed_frames_observed: u64,
     max_pending_fences: u64,
@@ -44,12 +45,14 @@ struct Fences {
 }
 
 pub(super) fn prepare(app: &mut App) -> Performance {
+    let direct = super::camera_mode::configure(app);
     let performance = Performance::default();
     if !app.is_plugin_added::<bevy::winit::WinitPlugin>()
         && let Some(render) = app.get_sub_app_mut(RenderApp)
     {
         *performance.1.lock().expect("GPU profiling state") = Some(Stats {
             limit: 2,
+            camera_indirect_drawing_disabled: direct,
             ..Default::default()
         });
         render
