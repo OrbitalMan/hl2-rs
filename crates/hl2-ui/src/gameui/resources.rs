@@ -387,11 +387,13 @@ pub struct GameUiResources {
     /// `(game, image)` -> pre-blurred `materials/console/<image>.vtf` of each chapter background
     /// map of that game; `<map>_widescreen` images are stored next to `<map>`.
     pub background_images: BTreeMap<(String, String), Image>,
-    /// Game -> first chapter map (`cfg/chapter1.cfg` of each mounted game).
+    /// Game -> first selectable chapter map (also enables New Game for that game).
     pub new_game_maps: BTreeMap<String, String>,
     /// Game -> its chapters in play order, with their start maps and backgrounds
     /// (`scripts/chapterbackgrounds.txt`, `cfg/chapter<key>.cfg`).
     pub chapters: BTreeMap<String, Vec<super::chapters::Chapter>>,
+    /// Selectable chapters and their installed dialog resources, keyed by game.
+    pub new_games: BTreeMap<String, super::new_game::Catalog>,
     /// Category -> menu title (two lines for episodes, e.g. "Half-Life 2\n--- Episode One ---").
     pub category_titles: BTreeMap<String, String>,
     /// Files that could not be read or parsed (reported in the console log).
@@ -505,51 +507,7 @@ impl GameUiResources {
         if res.spoken_languages.is_empty() {
             res.spoken_languages.push("english".into());
         }
-        // Each game shows chapter 1 of its own `scripts/chapterbackgrounds.txt` as its menu
-        // background and starts New Game with its own `cfg/chapter1.cfg`, both read through that
-        // game's own search path. The games are the ones the menu switches to.
-        res.games = menu_games(&res.game_menu);
-        for game in res.games.clone() {
-            let backgrounds = read_game_text(vfs, &game, "scripts/chapterbackgrounds.txt");
-            let Some(text) = backgrounds else {
-                res.missing
-                    .push(format!("{game}/scripts/chapterbackgrounds.txt"));
-                continue;
-            };
-            let Some(first_map) = background_map(&text) else {
-                continue;
-            };
-            res.background_maps.insert(game.clone(), first_map);
-            let game_vfs = vfs
-                .game_root()
-                .and_then(|root| Vfs::mount_game(root, &game).ok());
-            let chapter_reader = Reader::new(game_vfs.as_ref().unwrap_or(vfs));
-            res.chapters.insert(
-                game.clone(),
-                super::chapters::list(&text, |path| chapter_reader.read_text(path)),
-            );
-
-            // Pre-blurred background images for every chapter background of this game. Maps
-            // are keyed by game: Half-Life 2 and Lost Coast both have a `background01`.
-            for map_name in chapter_background_maps(&text) {
-                let map = blur(&map_name);
-                for image_name in [map.to_owned(), format!("{map}_widescreen")] {
-                    if let Some(img) = load_vtf_file(&reader, vfs, &game, &image_name) {
-                        res.background_images
-                            .insert((game.clone(), image_name), img);
-                    }
-                }
-            }
-
-            match read_game_text(vfs, &game, "cfg/chapter1.cfg").and_then(|t| chapter_map(&t)) {
-                Some(map) => {
-                    res.new_game_maps.insert(game.clone(), map);
-                }
-                None => res.missing.push(format!("{game}/cfg/chapter1.cfg")),
-            }
-        }
-        // The main category shows the first game's background (Half-Life 2 in the menu).
-        res.background_map = res.background_maps.get(res.main_game()).cloned();
+        res.load_campaigns(vfs, &reader);
         for category in ["main", "hl2", "episodic", "ep2", "lostcoast"] {
             let gameinfo_path = match category {
                 "episodic" => "episodic/gameinfo.txt",
@@ -614,7 +572,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-fn image(vfs: &Vfs, material: &str) -> Option<Image> {
+pub(super) fn image(vfs: &Vfs, material: &str) -> Option<Image> {
     let base = vfs.base_texture(material).ok()??;
     let file = format!(
         "materials/{}.vtf",
@@ -629,7 +587,12 @@ fn image(vfs: &Vfs, material: &str) -> Option<Image> {
     })
 }
 
-fn load_vtf_file(reader: &Reader, vfs: &Vfs, expansion: &str, vtf_filename: &str) -> Option<Image> {
+pub(super) fn load_vtf_file(
+    reader: &Reader,
+    vfs: &Vfs,
+    expansion: &str,
+    vtf_filename: &str,
+) -> Option<Image> {
     let rel_path = format!("materials/console/{vtf_filename}.vtf");
 
     let read_loose = |root: &Path, sub: &str| -> Option<Vec<u8>> {
@@ -733,17 +696,6 @@ pub fn menu_games(items: &[MenuItem]) -> Vec<String> {
         }
     }
     games
-}
-
-/// Reads a text file the way `game` itself sees it: through that game's own search path (its
-/// folder, then Half-Life 2 and the platform), independent of which game's map is loaded now.
-/// Without an installation root (test file systems) it reads through `vfs`.
-fn read_game_text(vfs: &Vfs, game: &str, path: &str) -> Option<String> {
-    let Some(root) = vfs.game_root() else {
-        return Reader::new(vfs).read_text(path);
-    };
-    let game_vfs = Vfs::mount_game(root, game).ok()?;
-    Reader::new(&game_vfs).read_text(path)
 }
 
 /// Extracts all unique background maps from a `scripts/chapterbackgrounds.txt` file content.
@@ -904,6 +856,27 @@ mod tests {
         // Regular ones 0.98: the former menu face looked stretched.
         let (gordin, liberation) = (capital_width(&bytes), capital_width(&liberation));
         assert!(gordin < 0.9 * liberation, "{gordin} vs {liberation}");
+    }
+
+    #[test]
+    #[ignore = "requires an owned Half-Life 2 installation"]
+    fn owned_marlett_font_resolves_for_dialog_close_buttons() {
+        let root = source_assets::install::discover().expect("installed game");
+        let vfs = source_assets::vpk::Vfs::mount(&root).unwrap();
+        let reader = Reader::new(&vfs);
+        let scheme = keyvalues::parse_resource(&reader.read("resource/SourceScheme.res").unwrap())
+            .unwrap()
+            .remove(0);
+        let bytes = source_ui::scheme_fonts::resolve(&scheme, "Marlett", |path| reader.read(path))
+            .expect("Marlett font from scheme");
+        let canvas = source_ui::canvas::Canvas::default();
+        let font_face = source_ui::font::FontFace::load(&bytes, canvas).expect("FontFace load");
+        let w = font_face.width_cell("r", source_ui::widgets::CLOSE_GLYPH_TALL);
+        assert!(
+            (8.0..=12.0).contains(&w),
+            "Marlett 'r' width at tall {}: {w}",
+            source_ui::widgets::CLOSE_GLYPH_TALL
+        );
     }
 
     #[test]

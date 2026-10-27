@@ -88,7 +88,7 @@ pub enum MenuOutcome {
     Resume,
     OpenOptions,
     ConfirmQuit,
-    /// Start the named map (first chapter of a game).
+    /// Open the named game's chapter browser.
     NewGame(String),
     ReturnToMainMenu,
     /// Switched to an expansion submenu (e.g. "hl2", "episodic", "ep2").
@@ -288,11 +288,7 @@ impl GameMenu {
             MenuCommand::OpenOptions => MenuOutcome::OpenOptions,
             MenuCommand::Quit => MenuOutcome::ConfirmQuit,
             MenuCommand::Resume => MenuOutcome::Resume,
-            MenuCommand::NewGame(game) => self
-                .new_game_maps
-                .get(&game)
-                .cloned()
-                .map_or(MenuOutcome::Placeholder(entry.label), MenuOutcome::NewGame),
+            MenuCommand::NewGame(game) => MenuOutcome::NewGame(game),
             MenuCommand::ReturnToMainMenu => MenuOutcome::ReturnToMainMenu,
             _ => MenuOutcome::Placeholder(entry.label),
         }
@@ -316,6 +312,20 @@ pub fn return_to_main_menu_box(loc: &Localization) -> MessageBox {
         loc.text("#GameUI_MainMenuWarning"),
         loc.text("#GameUI_OK"),
         Some(loc.text("#GameUI_Cancel")),
+    )
+}
+
+/// The Developer Commentary explanation confirmation dialog (`#GameUI_CommentaryDialogTitle`,
+/// `#GAMEUI_Commentary_Console_Explanation`, `#vgui_ok`, `#vgui_cancel`, matching
+/// `hl2/resource/commentaryexplanationdialog.res`).
+pub fn commentary_explanation_box(loc: &Localization, measure: impl Fn(&str) -> f32) -> MessageBox {
+    let raw = loc.text("#GAMEUI_Commentary_Console_Explanation");
+    let wrapped = source_ui::widgets::wrap(&raw, 320.0, measure).join("\n");
+    MessageBox::new(
+        loc.text("#GameUI_CommentaryDialogTitle"),
+        wrapped,
+        loc.text("#vgui_ok"),
+        Some(loc.text("#vgui_cancel")),
     )
 }
 
@@ -694,10 +704,7 @@ mod tests {
         assert!(menu.back(&loc));
         assert_eq!(menu.category(), MAIN_CATEGORY);
         menu.activate(0, &loc);
-        assert_eq!(
-            menu.activate(0, &loc),
-            MenuOutcome::NewGame("d1_trainstation_01".into())
-        );
+        assert_eq!(menu.activate(0, &loc), MenuOutcome::NewGame("hl2".into()));
         assert!(menu.back(&loc));
         assert!(!menu.back(&loc), "main category has nothing to go back to");
     }
@@ -780,10 +787,10 @@ mod tests {
         assert!(menu.entries()[4].enabled, "Options enabled");
         assert!(menu.entries()[5].enabled, "Back enabled");
 
-        // New game in lostcoast starts d2_lostcoast
+        // New Game opens the selected game's chapter dialog
         assert_eq!(
             menu.activate(0, &loc),
-            MenuOutcome::NewGame("d2_lostcoast".into())
+            MenuOutcome::NewGame("lostcoast".into())
         );
 
         // Options opens options

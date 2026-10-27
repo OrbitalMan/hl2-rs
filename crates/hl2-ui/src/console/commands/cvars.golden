@@ -624,3 +624,16 @@ skill
     value Some("2")
   1 1: error "skill [1|2|3]: query or set game skill level (1=easy, 2=normal, 3=hard)"
     value Some("2")
+commentary
+  query: no effect
+    | "commentary" = "0"
+    value Some("0")
+  1: ApplyConfig [gameplay.commentary: false -> true]
+    | commentary 1
+    value Some("1")
+  x: error "commentary [0|1]: query or toggle developer commentary mode"
+    value Some("0")
+  9: error "commentary [0|1]: query or toggle developer commentary mode"
+    value Some("0")
+  1 1: error "commentary [0|1]: query or toggle developer commentary mode"
+    value Some("0")

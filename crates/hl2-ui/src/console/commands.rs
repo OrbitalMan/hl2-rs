@@ -11,6 +11,7 @@ mod cheats;
 mod developer;
 mod map;
 mod mouse;
+mod movie;
 mod video;
 
 use super::{Console, Effect};
@@ -215,6 +216,18 @@ pub const COMMANDS: &[Spec] = &[
         "map <name>: load an installed map and reset the player inventory",
         &[Arg::Names(Names::Map)],
         map::map,
+    ),
+    command(
+        "playvideo",
+        "playvideo <filename> [width height]: play a video file from media/",
+        &[Arg::Free, Arg::Free, Arg::Free],
+        movie::playvideo,
+    ),
+    command(
+        "playvideo_exitcommand",
+        "playvideo_exitcommand <filename> <exit command>: play a video file and fire an exit command on completion",
+        &[Arg::Free, Arg::Free],
+        movie::playvideo_exitcommand,
     ),
     command(
         "npc_create",
@@ -629,6 +642,13 @@ pub const COMMANDS: &[Spec] = &[
         map::skill_value,
         map::set_skill,
     ),
+    setting(
+        "commentary",
+        "commentary [0|1]: query or toggle developer commentary mode",
+        BOOLEAN,
+        map::commentary_value,
+        map::set_commentary,
+    ),
     command(
         "migrate_episodic_data",
         "migrate_episodic_data: migrate save data from standalone episodes (placeholder)",
@@ -713,6 +733,10 @@ mod tests {
                     assert!(line.starts_with(&format!("{} x", spec.name)), "{line}");
                 }
                 Ok(None) if spec.name == "echo" => {}
+                Ok(Some(Effect::PlayVideo {
+                    exit_command: Some(_),
+                    ..
+                })) if spec.name == "playvideo_exitcommand" => {}
                 other => assert_eq!(other, Err(spec.usage()), "{}", spec.name),
             }
         }

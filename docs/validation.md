@@ -1,5 +1,26 @@
 # Local validation — 2026-10-05
 
+## Chapter/rendering branch integration (2026-10-27)
+
+Merged chapter UI/loading, commentary/movie playback and HUD alignment with the four-tier
+blur and M1 Pro/Metal rendering policy. scripts/checks/validate.sh passes: 1,184 Rust tests,
+100 ignored; 27 Python tests; strict host Clippy, formatting and architecture. The Windows
+target check, release packaging and owned startup stub test also pass.
+
+Packaged command: NO_BUILD=1 ONLY='chapter_selection return_menu submenus commentary video
+motion_blur_options viewmodel_motion_blur coverage' python3 scripts/checks/replays.py.
+Seven groups pass initially; motion_blur_options fails because its stale Video-tab pixel
+lands outside the tab after incoming font/layout changes. Replace that click with existing
+Tab/Right navigation and assert Video, VideoAdvanced and Advanced-without-Ultra states.
+The focused NO_BUILD=1 ONLY='motion_blur_options' rerun passes, completing all eight groups.
+Retain the failed report/capture and run logs under artifacts/merge-ui-chapters. No runtime
+behavior was changed to satisfy the fixture. Inspect the chapter dialog capture alongside
+report assertions; captures do not prove transient loading frames or native parity.
+
+Windows runtime, fresh interactive FPS, other GPU performance and ordinary full-campaign
+playthrough are NOT TESTED in this integration. Prior performance figures remain historical;
+this merge adds no measured performance claim.
+
 Repeated native qualification defaults to three Enabled/Advanced pairs per scene, with
 order reversed in the middle pair. Report every iteration, paired cost ratios and median/
 minimum/maximum frame means and p95/p99 values. Medians smooth ordinary noise; known
@@ -235,6 +256,263 @@ captures/logs live under artifacts/advanced-blur-flicker and artifacts/replays.
 Windows/Linux runtime, every weapon/animation, all frame rates/resolutions, ordinary campaign
 play and native visual comparison are not tested. Advanced remains a screen-space animation
 blur approximation and excludes transparent/diagnostic CPU-skinned draws.
+
+## Retail quick-info size and horizontal alignment follow-up (2026-10-27)
+
+The earlier vertical alignment checks did not constrain the horizontal midpoint
+or native size. A new midpoint assertion fails on the previous revision: x319.274
+instead of x320 at 640x480. Center the pair's bitmap bounds while preserving the
+installed glyph spacing, and center the portable weapon glyph by ink width.
+
+Retained accepted retail captures at 720p and 1080p were inspected beside the
+packaged output. The 1080p capture's recorded hl2.exe, engine.dll, client.dll and
+server.dll hashes all match the current owned installation. Its session closed
+normally with settings unchanged. The first 1080p session had an empty module
+manifest; use the second verified session for provenance. Rejected SMG-labelled
+captures are excluded (they actually showed a pistol). The accepted 720p pistol
+reference and verified 1080p pistol reference contain the same reticle type as
+our SMG layout fixture; compare layout, not the captured weapon label.
+
+Retail arcs are about 55x42 pixels at 720p and 85x63 at 1080p. The previous macOS
+package drew 75-pixel-tall arcs at 720p: ClientScheme's macOS QuickInfo tall=50
+was interpreted using Windows character-cell metrics. The local QuickInfo font
+resolver now selects the installed desktop tall=28 for that raster contract.
+No global platform condition or stored option is changed. The corrected emitted
+bitmap bounds are approximately 57x42 and 86x63, with at most two pixels of fontdue
+antialias fringe versus the visible native footprint. Tests constrain those sizes,
+both axes, partial/warning geometry and all existing viewport/aspect cases.
+A parser test verifies a consumer override cannot alter normal host conditions.
+
+Reproduction uses the same commands in the section below. Workspace validation
+passes (1,166 Rust tests, 100 ignored, 13 Python helper tests, strict Clippy/fmt/
+architecture); Windows-target Clippy and five owned HUD tests pass. Packaged
+HUD/aspect checks pass before (2/2); HUD/aspect/power pass after (3/3, 101 s).
+Evidence, native module hashes, retained
+failed midpoint assertion and the nearest-neighbor comparison image are in
+artifacts/quickinfo-horizontal. The comparison uses retained retail captures;
+no fresh native game run or exact cross-platform antialias/color equivalence is claimed.
+
+## Quick-info and crosshair layout (2026-10-27)
+
+The installed-resource regression fails on the prior geometry: at 640x480 the arc
+bitmap center is y245.541 instead of y240. Portable SMG crosshair pixels were also
+above view center; both symbol paths now center bitmap bounds independently of
+text ascent. Native Windows GDI reticle placement is preserved.
+
+```sh
+scripts/checks/validate.sh
+scripts/checks/check_windows.sh
+cargo test -p hl2-ui hud:: -- --ignored --nocapture
+NO_BUILD=1 ONLY='hud hud_aspect power_hud' python3 scripts/checks/replays.py
+```
+
+Workspace validation passes: 1,165 Rust tests, 100 ignored, 13 Python helper tests,
+strict Clippy/fmt/architecture. Windows-target Clippy passes. Five owned HUD tests
+pass, including health/ammo panel framing and power HUD behavior. The new layout
+test checks actual emitted arc and weapon-crosshair quads across 640x480, 1280x720,
+1920x1080, 1281x721, 3440x1440 and 720x1280 with all four HUD aspect settings.
+Full, half-filled and warning arcs must center within pixel-rounding tolerance;
+both progress pieces must meet without gaps/overlap, and both arcs stay additive.
+Packaged HUD/aspect checks pass before the change (2 groups); HUD/aspect/power
+checks pass afterward (3 groups, zero failures, 99 seconds). The 720p gameplay
+capture was inspected: both arcs and the SMG reticle share view center. All eleven
+executable/shader hashes match package metadata.
+A portable font test deliberately changes ascent and checks full/split symbol
+bounds at three sizes, with and without blur, including progress endpoints.
+
+Initial failed alignment evidence is retained. The warning test initially sampled
+the zero-time blink-off phase; it now uses a visible pulse phase. An unused import
+after extraction was caught and fixed by strict Clippy. Evidence lives in
+artifacts/quickinfo-layout. Native Windows execution, retail raster equivalence
+and an ordinary campaign playthrough are not tested by these checks.
+
+## Background-loading wait presentation (2026-10-27)
+
+Production package `fa4a000` supersedes the interactive-during-background-load policy.
+The owner still observed lag; earlier acceptance/completion tests were insufficient
+latency evidence. On-demand native dispatch review now establishes menu hiding
+(`InstantHideMainMenu`, menu/title alpha zero); details in gameui.md. Ordinary native
+retail playback/input timing remains not tested.
+
+`scripts/checks/validate.sh` passes: 1,145 Rust tests / 94 ignored, 13 Python helpers,
+architecture, strict Clippy and fmt. `scripts/checks/check_windows.sh` passes.
+Owned checks pass:
+
+```sh
+cargo test -p hl2-bevy --bin hl2-bevy native_menu_wait -- --ignored --nocapture
+cargo test -p hl2-bevy --bin hl2-bevy headless_bevy_app_submenu_entry_switches_background_map_and_scene -- --ignored --nocapture
+```
+
+The native input-system check blocks arrows/Enter/Escape during the wait, then allows
+opening, selecting and starting a chapter after completion. The actual asynchronous
+worker test attempts chapter opening while a worker owns its consumed request and
+asserts the menu is hidden, input is gated, the load remains alive, and scene replacement
+completes (10.59 s). Unit tests cover success and failure restoring access, direct
+activation, Escape, hidden-window canvas rendering, preserved chapter selection, and
+shared card-browser occlusion cancelling held activation. Background request safeguards
+remain independently tested. No English UI literal or new dependency was introduced.
+
+Build with scripts/build-bevy.sh. Eleven executable/shader hashes match package metadata
+for fa4a000. Packaged checks use a private copy and default config:
+
+```sh
+NO_BUILD=1 ONLY='return_menu submenus chapter_selection menu_options coverage' python3 scripts/checks/replays.py
+```
+
+Transient capture limitations are retained rather than counted as passing evidence.
+The burst capture experiment skipped the loading interval because diagnostics/capture
+counters stop while simulation is loading. It recorded the loading-request label with
+menu.visible=false and subsequent restored controls, but its images are not screenshots
+of the wait state. The controlled attached windowed launch loads an owned map through
+map_background; its report also records false at request and true after completion.
+Computer use could not bind the unbundled binary as an app (Invalid app; absent from
+inventory), so no native wait-screen screenshot was obtained. No further capture retry
+was made. Headless canvas-quad comparisons verify hidden rendering; packaged restored
+browser captures provide visual restoration evidence. Final physics/GPU installation
+can still hitch. Native Windows/Linux execution and end-to-end retail UI latency are
+not tested here.
+
+Evidence in artifacts/chapter-loading-gate: validate.log, windows.log, ui-tests-final.log,
+toolkit-tests.log, native-wait.log, owned-wait.log, build.log, package-hashes.json,
+replays.log, wait-burst-report.json and retained burst PNGs/log, window-wait-report.json
+and log. Initial compile/test assumptions and their corrections are retained in ui-tests.log.
+All five groups pass, zero failures, 270 s. Restored return-menu and Episode Two
+browser captures were inspected and copied alongside their reports; both report
+menu.visible=true and NewGame after loading. The burst and controlled windowed
+reports record menu.visible=false at the request and true after successful completion.
+
+Three isolated alternating prior/current browser pairs compare package 6019af3 with
+fa4a000: 18.693/18.743 ms mean frame, HUD CPU 0.1550/0.1581 ms. Run ranges overlap
+slightly; a 0.051 ms difference is not isolated causal evidence. No added render pass
+or frame asset access. Details and reproduction in performance.md.
+
+## Dialog occlusion and background loading (2026-10-27)
+
+Runtime checkpoints: `5a70c90` (dialog/request lifetime), `6019af3` (resource reuse
+and rapid switch back). Full `scripts/checks/validate.sh` passes: 1,143 Rust tests,
+94 ignored, 13 Python helper tests, strict Clippy/fmt and architecture. The
+architecture baseline shrinks for the asset loader/file and campaign poll.
+`scripts/checks/check_windows.sh` passes against final source; native Windows/Linux
+execution is not tested here.
+
+Owned-content checks:
+
+```sh
+cargo test -p hl2-bevy --bin hl2-bevy native_chapter_input -- --ignored --nocapture
+cargo test -p hl2-bevy --bin hl2-bevy headless_bevy_app_submenu_entry_switches_background_map_and_scene -- --ignored --nocapture
+```
+
+Both pass. The first drives the actual per-frame Bevy keyboard input system while
+simulation is marked loading: arrow selection responds, Escape waits for release,
+closing preserves background work, reopening and Enter release submit a chapter
+with foreground loading. This is a controlled headless input-system check, not
+an OS event-latency measurement. The second decodes and installs actual Episode
+One/Lost Coast background worlds asynchronously and checks scene replacement.
+It now opens chapter selection after the actual worker consumes the pending flag,
+changes selection, closes on Escape release, verifies the load remains active, and
+then checks successful completion and scene replacement. This strengthened test
+passes in 11.30 s; final local/Windows strict Clippy and fmt also pass.
+Unit regressions cover the return confirmation's lifetime, queued/active load
+kinds, background result supersession/coalescing, foreground presentation, stale
+failure and rapid return to the already installed background without reloading.
+
+The old packaged build reproduces the reported rectangular hole after gameplay,
+return confirmation, background completion and reopening chapter selection.
+The revised return-menu fixture includes that sequence and asserts the final
+browser/game identity and absence of an active confirmation. Captures and reports
+are under artifacts/chapter-bugs: return-before and return-after (with suffixes).
+The first baseline attempt selected no keyboard row and is retained as
+return-before-rejected-no-selection; it is not visual evidence of the fix.
+Initial native-input test failures incorrectly used press activation and expected
+selection to survive reopening; corrected to release activation and reset-on-open.
+
+The final release package is built with scripts/build-bevy.sh; executable and ten
+shader hashes match build-bevy-info metadata for `6019af3`. Initial fix/resource-reuse
+package: `NO_BUILD=1 ONLY='return_menu chapter_selection submenus menu_options coverage'
+python3 scripts/checks/replays.py` passes five groups, zero failures, 290 s. This
+includes all four campaign chapter previews/selected-map launches. After the final
+rapid-switch reuse helper, committed package `6019af3` passes
+`NO_BUILD=1 ONLY='return_menu submenus coverage' python3 scripts/checks/replays.py`:
+three affected groups, zero failures, 111 s. Return capture is intact and inspected;
+no dialog rectangle is cut out. Performance evidence is in performance.md.
+
+Evidence: artifacts/chapter-bugs contains validate-resource-reuse.log,
+windows-test-final.log, clippy-test-final.log, fmt-final.log, native-input-resource-reuse.log,
+owned-browser-during-worker.log, replays.log, replays-final.log, package-hashes.json,
+return-before/return-after captures/reports/logs and timing outputs. Retail findings
+and verification limits are in gameui.md; static exports do not prove native loading
+input responsiveness or establish zero-hitch loading in either implementation.
+
+## Chapter selection (2026-10-27)
+
+Source implementation: `56717d2`; single-chapter containment fix: `da289c2`;
+reusable toolkit extraction: `7171e3f`.
+Research/design: `7db0bbf`; findings and limitations: [chapter-selection.md](chapter-selection.md).
+
+Commands (no installed files are changed):
+
+```sh
+scripts/checks/validate.sh
+scripts/checks/check_windows.sh
+cargo test --locked -p hl2-ui owned_chapter_catalogs -- --ignored
+scripts/build-bevy.sh
+NO_BUILD=1 ONLY='chapter_selection coverage menu_options submenus' python3 scripts/checks/replays.py
+```
+
+The final local run passes 1,135 Rust tests with 93 ignored, 13 Python tests,
+architecture, strict Clippy and formatting. Strict Windows-target Clippy passes;
+Windows native execution is **not tested**. The explicit owned-install test passes:
+15/5/7/1 selectable entries for base/Episode One/Episode Two/Lost Coast, complete
+localized titles and thumbnail coverage, correct first/last map and installed
+Play controls. VFS fixtures verify own loose/custom/archive enumeration, exclusion
+of inherited/embedded configs, and MOD-scoped reads even with embedded collisions.
+
+Input/model tests cover numeric/suffix sorting, malformed/missing-map configs,
+Episode Two recap syntax, pointer press/drag-off/back/release selection, release
+activation with game identity, arrow paging/clamping, focus/Cancel, portrait frame
+fit, Escape-on-release, preserved menu/background and input during background
+loading. Canvas regressions assert native-size thumbnail sampling and containment
+of the single-card layout. The toolkit owns five browser tests (121 total); hl2-ui has 302 passing tests/15 ignored.
+
+The first packaged round passed submenus, chapter-return backgrounds, chapter
+selection and non-modal Options (4 checks/305 s). All four selected chapters loaded,
+but its stretched-thumbnail captures were rejected. SDK ImagePanel confirmed
+native-size clipping; corrected images were inspected. A second round passed
+base/Episode One/Episode Two pointer/cancel/load checks and coverage, but Lost
+Coast's fixture clicked Cancel using wide-dialog coordinates. The failure and
+images were retained, the pointer coordinates corrected to its own layout, and
+visual inspection additionally found overwide decorative separators. The fix
+centers a single card and sizes those rules using the authored frame inset.
+
+Final committed package (`7171e3f`) passes submenus, chapter_selection, menu_options
+and coverage: 4 check groups, zero failures, 199 s. The chapter group runs four
+browser previews plus four actual chapter loads. It asserts opening does not start
+gameplay; Cancel/reopen preserves the background; all titles/thumbnails are available;
+9a sorts correctly; pointer selection and Start use the correct chapter and game;
+load completion reaches Gameplay with no loader failures:
+
+| Game | Selected chapter | Verified loaded map |
+| --- | --- | --- |
+| Half-Life 2 | 2 | d1_trainstation_05 |
+| Episode One | 2 | ep1_citadel_03 |
+| Episode Two | 2 | ep2_outland_02 |
+| Lost Coast | 1 | d2_lostcoast |
+
+All four final browser captures were inspected after the resource/containment fixes;
+post-extraction comparison changes zero of 139,040 opaque thumbnail pixels across
+ten sampled image interiors (all four games). Geometry/input behavior is covered
+by the toolkit tests; transparent/background pixels are excluded from that comparison. Captures still
+show unfinished world/material rendering; UI validation does not establish complete
+background-map fidelity. Eleven package executable/shader hashes match the build
+metadata. Replays use a muted/background copy with default settings, leaving the
+normal package's settings and owned content untouched.
+
+Retained rejected evidence: artifacts/chapter-menu/rejected-stretched,
+rejected-pointer-coordinates and rejected-single-chapter. Final check logs:
+validate-toolkit.log, windows-toolkit.log, owned-toolkit.log, replays-toolkit.log
+package-hashes-toolkit.json and toolkit-thumbnail-comparison.json under artifacts/chapter-menu. Final performance
+evidence: [performance.md](performance.md). Native desktop comparison, Windows/Linux
+runtime, other UI languages and an ordinary campaign playthrough remain **not tested**.
 
 
 ## Windows unit-test portability (2026-10-26)

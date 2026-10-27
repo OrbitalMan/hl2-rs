@@ -200,7 +200,20 @@ pub fn resource_condition(token: &str) -> Result<bool> {
 /// Duplicate active keys are preserved, including numbered font resolution ranges.
 /// `#include` and `#base` remain entries; resolving their paths belongs to the VFS caller.
 pub fn parse_resource(data: &[u8]) -> Result<Vec<Entry>> {
-    fn block(t: &[Token], i: &mut usize, depth: usize) -> Result<Vec<Entry>> {
+    parse_resource_with_condition(data, resource_condition)
+}
+
+/// Resolve conditions for a specific resource consumer without changing host-wide policy.
+pub fn parse_resource_with_condition(
+    data: &[u8],
+    condition: impl Fn(&str) -> Result<bool>,
+) -> Result<Vec<Entry>> {
+    fn block(
+        t: &[Token],
+        i: &mut usize,
+        depth: usize,
+        condition: &impl Fn(&str) -> Result<bool>,
+    ) -> Result<Vec<Entry>> {
         if depth > 64 {
             bail!("KeyValues resource nesting limit");
         }
@@ -214,13 +227,13 @@ pub fn parse_resource(data: &[u8]) -> Result<Vec<Entry>> {
             *i += 1;
             let mut keep = true;
             while t.get(*i).is_some_and(Token::condition) {
-                keep &= resource_condition(&t[*i].value)?;
+                keep &= condition(&t[*i].value)?;
                 *i += 1;
             }
             let token = t.get(*i).context("missing KeyValues resource value")?;
             let value = if token.control("{") {
                 *i += 1;
-                let children = block(t, i, depth + 1)?;
+                let children = block(t, i, depth + 1, condition)?;
                 if !t.get(*i).is_some_and(|v| v.control("}")) {
                     bail!("unclosed KeyValues resource block");
                 }
@@ -233,7 +246,7 @@ pub fn parse_resource(data: &[u8]) -> Result<Vec<Entry>> {
                 Value::Text(token.value.clone())
             };
             while t.get(*i).is_some_and(Token::condition) {
-                keep &= resource_condition(&t[*i].value)?;
+                keep &= condition(&t[*i].value)?;
                 *i += 1;
             }
             if keep {
@@ -245,7 +258,7 @@ pub fn parse_resource(data: &[u8]) -> Result<Vec<Entry>> {
     let text = decode_text(data)?;
     let t = lexical_tokens(&text)?;
     let mut i = 0;
-    let entries = block(&t, &mut i, 0)?;
+    let entries = block(&t, &mut i, 0, &condition)?;
     if i != t.len() {
         bail!("unexpected KeyValues resource closing brace");
     }
@@ -385,6 +398,43 @@ mod tests {
     fn malformed_is_error() {
         assert!(entities(b"{\"x\"}").is_err());
         assert!(tokens("\"unterminated").is_err());
+    }
+
+    #[test]
+    fn consumer_conditions_do_not_change_host_resource_policy() {
+        let bytes = br#"Scheme { Fonts { QuickInfo { tall 28 [!$OSX] tall 50 [$OSX] } }
+            MacOnly [$OSX] { visible 1 } }"#;
+        let original = parse_resource(bytes).unwrap();
+        let desktop = parse_resource_with_condition(bytes, |condition| match condition {
+            "[$OSX]" => Ok(false),
+            "[!$OSX]" => Ok(true),
+            other => resource_condition(other),
+        })
+        .unwrap();
+        let height = |entries: &[Entry]| {
+            entries[0]
+                .get("Fonts")
+                .unwrap()
+                .get("QuickInfo")
+                .unwrap()
+                .get("tall")
+                .unwrap()
+                .text()
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(height(&desktop), "28");
+        assert_eq!(
+            height(&original),
+            if cfg!(target_os = "macos") {
+                "50"
+            } else {
+                "28"
+            }
+        );
+        let again = parse_resource(bytes).unwrap();
+        assert_eq!(height(&again), height(&original));
+        assert_eq!(again[0].get("MacOnly").is_some(), cfg!(target_os = "macos"));
     }
 
     #[test]

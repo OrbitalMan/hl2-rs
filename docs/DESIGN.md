@@ -1,5 +1,16 @@
 # Design
 
+## Integrate chapter UI and rendering work (2026-10-27)
+
+Merge orbitalman/hl2-ui-chapters into orbitalman/hl2-ui. Preserve the resource-driven
+chapter browser, asynchronous startup/loading, commentary and movie paths together with
+the four blur tiers and startup-only rendering policy. Resolve startup composition by
+reusing the existing app helper; preserve both branches' evidence rather than choosing
+one history. Recalculate architecture exceptions from actual merged code without hiding
+growth. Validate workspace tests, strict host/Windows-target Clippy, formatting and the
+packaged chapter/loading, commentary, movie and blur coverage checks. Record failures
+and untested runtime scope explicitly. Leave unrelated files untouched.
+
 ## Restore weapon-only Advanced and opt into Ultra (2026-10-27)
 
 Owner decision during wrap-up: Disabled and Enabled retain retail behavior. Advanced adds
@@ -284,6 +295,70 @@ keep the strong crowbar silhouette trails and retail modes, with no work when di
 Add focused regressions, inspect captures, measure matched before/after frame times and
 pass CPU cost, run standard/Windows-target checks and packaged blur coverage, rebuild and
 verify package hashes, then commit the checkpoint. Keep chapter UI files untouched.
+
+## Horizontal HUD symbol centering follow-up (2026-10-27)
+
+- Reproduce residual left drift with installed glyph bearings and emitted bounds.
+- Preserve authored arc spacing, translate the pair by its actual horizontal midpoint,
+  and center the portable crosshair by ink bounds rather than advance width.
+- Compare retained accepted native 720p/1080p captures. Use the installed desktop
+  QuickInfo font definition with our character-cell rasterizer; do not apply macOS
+  backend-specific font sizes as Windows cell sizes or alter global resource conditions.
+- Assert both axes, retail size/spacing and equal outer margins across viewport/aspect/state cases;
+  compare packaged captures and timings, run workspace and Windows-target checks.
+
+## Quick-info arc alignment and HUD layout coverage (2026-10-27)
+
+- Reproduce the vertical offset using actual installed glyphs and emitted canvas quads.
+- Keep quick-info drawing in its own HUD module; center arc bitmap bounds on the
+  view center without altering text font metrics or progress clipping. Apply the
+  same correction to the portable weapon reticle; preserve native Windows raster placement.
+- Test full, partial and warning geometry, resolution/font-range transitions,
+  odd dimensions, portrait and HUD aspect framing. Keep resource-driven panel tests.
+- Run workspace validation, Windows-target Clippy and owned-install layout tests.
+  Compare packaged HUD/aspect replays and frame/HUD timings before and after;
+  inspect captures and refresh executable/shader metadata.
+
+## Movie playback and startup video sequence (2026-10-27)
+
+Bounded design for full-screen movie playback (`playvideo` / `playvideo_exitcommand`) and the startup video sequence across `source-assets`, `hl2-ui`, and `hl2-bevy`:
+
+1. **Bink container parser (`source-assets::bink`)**:
+   - Parse Bink 1 container header (`BIKi`, `BIKb`, `BIKf`, `BIKg`, `BIKh`): file size, frame count, width, height, FPS (`fps_num / fps_den`), calculated duration in seconds, flags, and audio track parameters.
+   - Unit tests against synthetic header fixtures and owned installation videos (`media/valve.bik`, `media/ep1_recap.bik`, `media/ep2_teaser.bik`).
+2. **Console commands and modal `VideoPanel` (`hl2-ui::console`, `hl2-ui::gameui::video`)**:
+   - Register `playvideo <filename> [width height]` and `playvideo_exitcommand <filename> <exit command>` in `COMMANDS` (`cvars.golden`).
+   - Path resolution: look under `media/<filename>`, appending `.bik` if unadorned.
+   - Implement `VideoPanelState`: full-screen modal blackout, aspect-ratio letterboxing/pillarboxing (`flVideoRatio` vs `flFrameRatio`), skip key handling (`KEY_ESCAPE`, `KEY_SPACE`, `KEY_ENTER`, `KEY_BACKQUOTE` / `~`), elapsed playback clock, and exit command dispatch.
+   - Retail fallback invariant: if the video cannot be opened or played, log `Unable to play video: %s` and immediately dispatch the exit command (`engine->ClientCmd(pExitCommand)`) so campaign progression (e.g. `ep2/cfg/chapter1.cfg` -> `map ep2_outland_01`) never soft-locks.
+3. **Host wiring and startup sequence (`hl2-bevy`)**:
+   - Wire `Effect::PlayVideo` in `sim.console_effects`, muting active background/ambient audio while playback is active and unmuting on stop.
+   - Startup videos: on launch without `--novid` / `-novid`, without `--map`, and without `--no-setup`, check `media/StartupVids.txt` (default `media/valve.bik`), play before displaying the main menu, and transition to the menu upon completion or skip.
+   - Instrument presentation report with active `video` playback state (`filename`, `playing`, `elapsed`, `duration`, `exit_command`).
+
+Validation: unit tests in `source-assets` and `hl2-ui`; `validate.sh`, `check_windows.sh`, and packaged replay checks (`replays.py`).
+
+## Developer commentary mode (2026-10-27)
+
+Bounded design for Developer Commentary across `source-ui`, `hl2-ui`, `hl2-simulation` and `hl2-bevy`:
+
+1. **Chapter browser footer toggle and card badge (`source-ui::card_browser`, `hl2-ui::gameui::new_game`)**:
+   - Read `newgamedialog.res` and `newgamechapterpanel.res` through `Reader::new(vfs)` so `hl2_complete/resource/newgamedialog.res` and `hl2_complete/resource/newgamechapterpanel.res` take precedence when present.
+   - Parse `ImagePanel1` (`22, 254, 308x40`), `CommentaryIcon` (`25, 258, 43x42`, `scaleAmount 0.5`), and `Commentary` (`CheckButton` at `60, 262, 264x24`, font `ChapterTitle`, label `#HL2_Enable_Commentary`) from `newgamedialog.res`, plus the per-card `CommentaryIcon` (`10, 100, 43x42`, `scaleAmount 0.5`) from `newgamechapterpanel.res`.
+   - Decode `materials/vgui/resource/commentary_hl2c.vtf` (fallback `materials/vgui/hud/icon_commentary_small.vtf`).
+   - Add generic optional footer toggle and card badge specs to `source_ui::card_browser::BrowserLayout` without naming HL2 in `source-ui`. When checked, each chapter card renders the scaled badge at `(10, 100)` over the thumbnail's bottom-left corner. Include the checkbox in `CardBrowser`'s keyboard focus and pointer handling.
+2. **Explanation confirmation and cvar (`hl2-ui::console`, `hl2-ui::config`)**:
+   - Add `commentary: bool` (`#[serde(default)]`) to `GameplaySettings` and register the `commentary` cvar in `COMMANDS` (`cvars.golden`).
+   - When starting a chapter from `NewGameDialog` with commentary unchecked, clear `config.gameplay.commentary` and `cheats`, emit `Effect::ApplyConfig`, close `NewGame` and start the map.
+   - When starting a chapter with commentary checked, open modal `ConfirmKind::StartCommentary(GameMap)` using `MessageBox` (`380x240`, title `#GameUI_CommentaryDialogTitle`, text `#GAMEUI_Commentary_Console_Explanation`, OK `#vgui_ok`, Cancel `#vgui_cancel`, matching `hl2/resource/commentaryexplanationdialog.res`). Confirming sets `config.gameplay.commentary = true` and `cheats = true`, emits `Effect::ApplyConfig`, closes `NewGame` and starts the map; cancelling returns focus to `NewGame`.
+3. **In-game `point_commentary_node` simulation and presentation (`hl2-simulation::commentary`, `hl2-ui::hud`, `hl2-bevy`)**:
+   - Parse `maps/<map>_commentary.txt` (`Entities` -> `entity` blocks, replacing `^` with `"` in string values and converting `connections` subblocks to standard entity outputs).
+   - When commentary mode is enabled on a gameplay map, append the parsed commentary entities and the `commentary_semaphore` `info_target` before model loading so `point_commentary_node` spawns with `models/extras/info_speech.mdl` (preloading both skin 0 `speech_info` and skin 1 `speech_info_used`). Fire `commentary_auto` outputs (`OnCommentaryNewGame`, `OnCommentaryMultiplayerSpawn`) on map spawn.
+   - Support `StartCommentary`, `StopCommentary`, `StartUnstoppableCommentary`, `Enable`, `Disable` and `Toggle` inputs on `point_commentary_node`.
+   - Run per-tick commentary logic only while `commentary` is enabled (zero per-frame work when off): raycast the player's view against visible `point_commentary_node` `[-16, -16, -16]..[16, 16, 16]` bounds, spin the speech balloon (`0x` idle, `1x` when aimed at while unlistened, `3x` while active), toggle targeted nodes on `+use`, jump to the next node with a brief black fade on `+attack2`, execute `precommands` / `postcommands`, interpolate camera overrides for `viewposition` / `viewtarget` (with `point_commentary_viewpoint` sprite visibility and `prevent_movement`), emit audio and closed captions, switch finished nodes to skin 1 (`speech_info_used`), and make the player invulnerable to damage while commentary mode is active.
+   - Add `HudCommentary` (`crates/hl2-ui/src/hud/commentary.rs`, parsed from `scripts/hudlayout.res` `HudCommentary`: `c-190, 350, 380x40`, `vgui/hud/icon_commentary`, speaker label, `N \ M` counter and orange progress bar), drawn while a node is active and `closecaption` is disabled (matching `CHudCommentary::ShouldDraw`).
+
+Validation: unit tests and owned-install tests across `source-ui`, `hl2-ui`, `hl2-simulation` and `hl2-bevy`; `validate.sh`, `check_windows.sh`, and packaged UI/HUD checks.
 
 ## Windows unit-test portability follow-up (2026-10-26)
 
@@ -1371,3 +1446,84 @@ Unstarted pass15 (dropped): trace unresolved dispatchers from raw instruction ed
 ## Publication validation
 
 Public changes for this pass are documentation only: preserve history/invariants and the source-only whitelist, update evidence and the private checkpoint, check links and audit the public snapshot, then commit/push to bevy-migration. Do not rebuild/replay unchanged runtime code.
+
+## Chapter selection (2026-10-27, bounded plan)
+
+New Game opens a non-modal chapter browser owned by hl2-ui over source-ui; it no
+longer submits chapter 1 immediately. Discover nonempty chapter configs from the
+selected game's own mounted content, not inherited expansion/base configs or the
+background-map index. Resolve names with installed localization and thumbnails
+with that game's material/VTF search path. Installed NewGameDialog and
+NewGameChapterPanel layouts supply frame and control geometry. Keep game/map
+identity explicit when Start New Game submits the selected chapter's first map
+to the existing asynchronous loader. Resource loading/decoding is startup work.
+
+1. Record SDK, owned resources and identity-pinned private native findings;
+   separate observed static behavior from untested native UI interaction.
+2. Add independently tested chapter catalog/model and shared-widget dialog,
+   then wire its window, cancellation and loading effect without gameplay changes.
+3. Validate discovery against all installed expansions, pointer/keyboard/focus
+   cancellation and map identity; run local/Windows checks, packaged captures
+   and replays. Measure menu frame time before/after and document limitations.
+
+Owner requests selectable chapter starts. Progress locking/commentary and intro
+movie playback are separate unfinished gameplay features; expose all discovered
+launchable chapters rather than inventing progress from installed save files.
+
+### Chapter browser ownership correction (2026-10-27)
+
+Owner clarification: reusable UI-only chapter-browser mechanics belong in source-ui.
+Move the generic paged card dialog, geometry, selection/focus/capture, placement and
+drawing to `source_ui::card_browser`. The caller supplies resolved card text/images,
+layout rectangles, colors, labels, sound and scaling; toolkit outcomes carry only a
+card index. Keep config enumeration, installed resource interpretation/localization,
+chapter keys and game/map conversion in hl2-ui. Move generic interaction/canvas tests
+into source-ui and retain chapter/catalog/typed-effect tests in hl2-ui. Preserve the
+existing packaged behavior and repeat captures/replays/performance after the move.
+
+## Portability and declared dependencies (2026-10-27)
+
+Owner deferred movies/commentary before runtime code or dependencies were added.
+Keep that work aside. Maintain a cross-platform host and declare runtime versus
+build/test prerequisites in README. Audit subprocesses and native linkage; document
+the existing Linux folder-picker backend separately from gameplay. Preserve the
+Windows CI job and add native Linux/macOS source validation without owned assets.
+Local macOS validation and Windows-target checking do not establish a Linux pass;
+new hosted jobs remain pending until run. No runtime, Cargo dependency or asset
+changes are needed for this bounded documentation/CI checkpoint.
+
+## Background loading and dialog lifetime (2026-10-27)
+
+Reproduce the return-confirmation silhouette and requests made while a background
+worker is running. Remove orphaned closing dialog payloads when the window stack
+is replaced; compose confirmations only at their actual stack position. Keep
+chapter controls available during background work. Pending-request flags do not
+describe the active worker: campaign owns that distinction. Preserve foreground
+loads, queue the newest background request, and discard superseded background
+results before installing their world or changing the newer loading presentation.
+Foreground loading cancels the background transition presentation. Closing a
+browser does not cancel its background worker.
+
+Validate with UI lifetime/drawing and pending-worker regressions, owned asynchronous
+loads, packaged return-to-menu captures and chapter replays; run strict portable
+checks. Inspect pinned retail loading notifications/resources, distinguishing
+static presentation evidence from untested native responsiveness. Avoid rebuilding
+unused GameUI resources on each runtime map load; measure loading/frame costs.
+
+## Wait for background loading (2026-10-27)
+
+Owner still observes chapter input lag under actual background decoding. Previous
+checks established event acceptance/completion, not low input latency. Owned retail
+loading-state dispatch reaches `InstantHideMainMenu` and menu/title alpha zero;
+replace the unsupported interactive-during-load policy with a wait presentation.
+Hide main/submenu titles/buttons and chapter content while background loading is
+active, retaining authored background imagery and localized corner plaque. Gate
+pointer, keyboard, Escape and direct menu activation consistently; consume held
+interaction so it cannot activate a control when loading ends. Keep existing windows
+and selection to restore after successful or failed loading. Preserve background
+request coordination and foreground loading behavior. This is HL2 GameUI policy.
+
+Add rendering/input/held-release/success/failure regressions, adapt owned asynchronous
+and native-input tests, rebuild and capture the wait state plus restored browser,
+run strict cross-platform checks and packaged menu/chapter replays. Compare steady
+browser frame time and record the limits of static retail evidence.

@@ -81,6 +81,19 @@ pub fn read_entities(path: &std::path::Path) -> Result<Vec<modkit_core::Entity>>
 }
 
 impl Bsp {
+    /// Creates an empty BSP with 64 empty lumps and version 20, representing no geometry.
+    pub fn empty() -> Self {
+        Self {
+            lightmaps: Vec::new(),
+            face_lighting: Vec::new(),
+            static_props: Vec::new(),
+            version: 20,
+            revision: 0,
+            lumps: vec![Vec::new(); 64],
+            lump_versions: vec![0; 64],
+            hdr: true,
+        }
+    }
     pub fn parse(data: &[u8]) -> Result<Self> {
         Self::parse_with(data, true)
     }
@@ -882,5 +895,12 @@ mod tests {
             "{} overlay surfaces, {triangles} triangles, materials {materials:?}",
             world.overlays.len()
         );
+    }
+    #[test]
+    fn empty_bsp_has_empty_lumps() {
+        let bsp = Bsp::empty();
+        assert_eq!(bsp.version, 20);
+        assert_eq!(bsp.lumps.len(), 64);
+        assert!(bsp.lumps.iter().all(|l| l.is_empty()));
     }
 }

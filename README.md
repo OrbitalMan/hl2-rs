@@ -29,8 +29,55 @@ The folder preference is stored in `%LOCALAPPDATA%\hl2-rs\installation.json` on 
 | --- | --- | --- |
 | Windows 11 64-bit (x86_64) | Primary tested platform | Owner builds, unit and owned-file tests, packaged replays/captures and native-game comparisons; CI runs on `windows-latest`. |
 | macOS 15+ on Apple Silicon (aarch64, Metal) | Tested by a contributor | On an Apple M1 Pro: build, tests, and the packaged build (`./scripts/build-bevy.sh`, `./launch-bevy.sh`) running `d1_trainstation_02`, including the scripted dispenser, Metrocop sequence and queue, with exit code 0 ([PR #1](https://github.com/kvalls/hl2-rs/pull/1)). Background packaged replays and controlled captures pass; windowed checks and native comparisons are **not tested** (see [validation](docs/validation.md)). |
-| Linux | **Not tested** | Install discovery looks in `~/.steam/steam` and `~/.local/share/Steam`, but neither a build nor the POSIX scripts have been run on Linux. Reports are welcome. |
+| Linux | **Not tested** | Install discovery looks in `~/.steam/steam` and `~/.local/share/Steam`, but neither a build nor the POSIX scripts have been run on Linux locally. Ubuntu CI is configured; its first run and native gameplay verification are pending. |
 | macOS on Intel, other systems | **Not tested** | |
+
+## Runtime and development requirements
+
+The packaged game needs its executable, the matching `bin/bevy-assets` shader folder,
+your owned installed HL2 content, and the operating system's graphics/audio support.
+It reads fonts from the owned content, with the bundled MIT ProggyClean fallback.
+Windows uses its MSVC/UCRT runtime and graphics drivers; macOS uses Apple system
+frameworks and Metal. Linux needs a working X11/Wayland desktop, graphics drivers
+with a wgpu-supported backend (normally Vulkan), and the ALSA/udev system libraries.
+Linux runtime behavior is **not tested** yet.
+
+The game does not require FFmpeg, Python, Node.js, a mod loader, Valve engine DLLs,
+or research tools. Movie playback and commentary implementation are deferred; no
+movie decoder dependency has been added. Rust/Cargo and compiler toolchains are
+build requirements, not requirements for running an already built package. The
+POSIX launcher can rebuild stale packages; use `./launch-bevy.sh --no-build` or run
+`bin/hl2-bevy` directly when no build tools are installed.
+
+On Linux, setup's optional **Browse...** folder picker uses the `rfd` native-dialog
+backend. Its documented runtime requirements are libdbus and a supported
+GTK/GNOME/KDE XDG Desktop Portal backend, with Zenity used for dialogs/fallback.
+These are desktop packages, not bundled game files. Typing the installation path
+in setup, passing `--game`, or using automatic discovery avoids invoking Browse.
+See the pinned [rfd backend requirements](https://docs.rs/rfd/0.17.2/rfd/#linux--bsd-backends).
+
+Source builds need Git, Rust stable/Cargo, and the platform compiler tools:
+Visual Studio C++ tools/Windows SDK on Windows, Xcode command-line tools on macOS,
+and a C++ compiler plus pkg-config and development headers on Linux. Python 3,
+rustfmt and Clippy are needed for the repository's validation scripts; they are
+not game runtime dependencies. Cargo library versions are locked in `Cargo.lock`.
+
+For an Ubuntu/Debian source build, the initial dependency setup is:
+
+```sh
+sudo apt-get update
+sudo apt-get install g++ pkg-config libx11-dev libasound2-dev libudev-dev libxkbcommon-x11-0 libwayland-dev libxkbcommon-dev libdbus-1-dev
+./scripts/build-bevy.sh
+./launch-bevy.sh --no-build
+```
+
+Install the graphics driver and desktop portal backend appropriate to the system;
+package names differ between distributions. The library list follows the pinned
+[Bevy Linux build requirements](https://github.com/bevyengine/bevy/blob/v0.19.1/docs/linux_dependencies.md).
+The Linux commands are documented prerequisites, **not a locally verified build**.
+CI now defines native checks on Windows, Ubuntu and Apple Silicon macOS; adding a
+job does not establish that it has passed. Owned-content/rendering checks remain
+separate from source-only CI.
 
 ## Branches and contributing
 
@@ -56,7 +103,7 @@ Model-authored activity lookup now repairs unsupported implicit NPC idle labels,
 
 ## Build a fresh checkout
 
-You need an owned, installed Steam PC copy of Half-Life 2, Windows 64-bit, Rust stable with the MSVC toolchain, and Visual Studio C++ build tools with a Windows SDK. The renderer uses Bevy/wgpu (tested on Windows with the default backend); GPU and RAM minimums have not been measured. On macOS use `./scripts/build-bevy.sh` and `./launch-bevy.sh`; see [Platforms](#platforms) for what each system has been tested with.
+You need an owned, installed Steam PC copy of Half-Life 2, Rust stable, and the compiler tools for your platform listed in [Runtime and development requirements](#runtime-and-development-requirements). On Windows use the MSVC toolchain and Visual Studio C++ build tools with a Windows SDK. The renderer uses Bevy/wgpu (tested on Windows with the default backend); GPU and RAM minimums have not been measured. On macOS use `./scripts/build-bevy.sh` and `./launch-bevy.sh`; see [Platforms](#platforms) for what each system has been tested with.
 
 The tested installation is Steam app 220, build `19307283`, patch `9912070`. Other game builds are unverified. Rust `1.99.0` was used for the recorded Windows checks. Cargo resolves the library versions in `Cargo.lock`; no external mod, loader or Source engine runtime is needed.
 
@@ -102,7 +149,7 @@ To compile and package `bin/hl2-bevy` and the `bin/bevy-assets` shader folder wi
 
 ## Play the current build
 
-Double-click `launch-bevy.cmd` in this folder. It launches `bin/hl2-bevy.exe`, the packaged release build. Rust is needed only for rebuilding. Without `--map` (or when the requested map cannot be loaded) the game opens the main menu over the chapter-1 background map `background01`; a loadable `--map` starts gameplay directly. Options that need an immediately loaded map (`--position`, `--yaw`, `--pitch`, `--fly`, `--movement-script`, `--capture-live`, `--capture-burst`, `--capture-monitor`) make the launch fail with an error when no loadable `--map` is given. The main menu uses the installed `gamemenu.res` categories; Load Game, Achievements and Workshop are disabled placeholders (see [docs/gameui.md](docs/gameui.md)); EXTRAS opens the Extras submenu (Lost Coast and Workshop placeholder), and New Game supports Half-Life 2, Episode One, Episode Two, and Lost Coast. OPTIONS opens the Options dialog (Gameplay, Keyboard with its Advanced dialog, Mouse, Gamepad, Audio, Video with its Advanced dialog) laid out from the installed resources; unfinished or partial controls carry cyan development status hints, and unavailable controls are hidden per platform; settings are saved to `hl2-config.json` next to the executable. Dialog buttons follow the installed scheme colors, plus a slight hover fill that retail lacks on desktop, and keep a press while the pointer is dragged off and back; an open drop-down list takes all clicks until it closes (see docs/gameui.md sections 6a and 6b). On macOS the green full-screen button is recognized as the Full screen display mode (and leaving it as Windowed); applying settings that do not change resolution or display mode never touches the window (docs/gameui.md section 10; not tested by hand). Key and mouse-button bindings, mouse sensitivity/invert/filter/acceleration, difficulty, master and music volume, resolution and display mode take effect; the window starts in the stored display mode unless `--windowed`, `--fullscreen` or `--borderless` is given (runs with `--frames`, `--capture` or `--movement-script` start windowed). Brightness (gamma) applies in every display mode with a live preview; The Closed captions setting shows subtitles or closed captions from the installed caption dictionaries for scene speech and sound scripts, also behind the main menu (VOX sentences such as HEV lines have none yet). HDR selects LDR without bloom, LDR with bloom, or full HDR. Model/texture/shadow detail, supported antialiasing, filtering, color correction and motion blur affect rendering; Advanced motion blur adds viewmodel animation blur to retail camera blur; Ultra adds denser camera/world and opaque/masked moving-model reconstruction, including projectiles. Ultra GPU performance tuning is in progress; transparent particle motion is not reconstructed. Speaker setup, sound quality and spoken language remain stored-only; focus-loss muting is partial (see the cyan hints and docs/gameui.md).
+Double-click `launch-bevy.cmd` in this folder. It launches `bin/hl2-bevy.exe`, the packaged release build. Rust is needed only for rebuilding. Without `--map` (or when the requested map cannot be loaded) the game opens the main menu over the chapter-1 background map `background01`; a loadable `--map` starts gameplay directly. Options that need an immediately loaded map (`--position`, `--yaw`, `--pitch`, `--fly`, `--movement-script`, `--capture-live`, `--capture-burst`, `--capture-monitor`) make the launch fail with an error when no loadable `--map` is given. The main menu uses the installed `gamemenu.res` categories; Load Game, Achievements and Workshop are disabled placeholders (see [docs/gameui.md](docs/gameui.md)); EXTRAS opens the Extras submenu (Lost Coast and Workshop placeholder), and New Game opens a resource-driven chapter browser for Half-Life 2, Episode One, Episode Two, and Lost Coast. Select a chapter and use Start New Game (or Enter) to load its first map; all installed chapters are selectable. Chapter progress locking remains unfinished. Developer commentary and startup/movie playback are implemented; see docs/gameui.md for their current limitations. OPTIONS opens the Options dialog (Gameplay, Keyboard with its Advanced dialog, Mouse, Gamepad, Audio, Video with its Advanced dialog) laid out from the installed resources; unfinished or partial controls carry cyan development status hints, and unavailable controls are hidden per platform; settings are saved to `hl2-config.json` next to the executable. Dialog buttons follow the installed scheme colors, plus a slight hover fill that retail lacks on desktop, and keep a press while the pointer is dragged off and back; an open drop-down list takes all clicks until it closes (see docs/gameui.md sections 6a and 6b). On macOS the green full-screen button is recognized as the Full screen display mode (and leaving it as Windowed); applying settings that do not change resolution or display mode never touches the window (docs/gameui.md section 10; not tested by hand). Key and mouse-button bindings, mouse sensitivity/invert/filter/acceleration, difficulty, master and music volume, resolution and display mode take effect; the window starts in the stored display mode unless `--windowed`, `--fullscreen` or `--borderless` is given (runs with `--frames`, `--capture` or `--movement-script` start windowed). Brightness (gamma) applies in every display mode with a live preview; The Closed captions setting shows subtitles or closed captions from the installed caption dictionaries for scene speech and sound scripts, also behind the main menu (VOX sentences such as HEV lines have none yet). HDR selects LDR without bloom, LDR with bloom, or full HDR. Model/texture/shadow detail, supported antialiasing, filtering, color correction and motion blur affect rendering; Advanced motion blur adds viewmodel animation blur to retail camera blur; Ultra adds denser camera/world and opaque/masked moving-model reconstruction, including projectiles. Ultra GPU performance tuning is in progress; transparent particle motion is not reconstructed. Speaker setup, sound quality and spoken language remain stored-only; focus-loss muting is partial (see the cyan hints and docs/gameui.md).
 
 ```powershell
 .\launch-bevy.cmd --map d1_trainstation_01

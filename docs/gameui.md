@@ -34,6 +34,21 @@ such a change.
 - A game's search path is the one its own `<game>/gameinfo.txt` declares (`FileSystem/SearchPaths`, `vpk::search_paths`, mounted by `Vfs::mount_game`), never a hardcoded inheritance table. Retail order: custom folders, the game's own VPKs, the inherited games' VPKs (Episode Two: `ep2_pak`, `ep1_pak`, `hl2_*`, `platform_misc`), then the loose folders (`ep2`, `episodic`, `hl2`, `platform`). Only `game`/`mod`/`platform` entries are content (`gamebin`, `game_lv`, `root_mod` are not); uninstalled VPKs (other voice languages) are skipped. Because every VPK precedes every loose folder, loose base `hl2` files (like `hl2/scripts/chapterbackgrounds.txt`) cannot shadow expansion VPKs (`episodic/ep1_pak_dir.vpk`); a search-order check confirmed that no game's own loose files are shadowed by an inherited VPK (only loose `hl2/models/weapons/*.mdl` duplicates of `hl2_misc`, where the VPK wins as in retail).
 - A map is identified by `(game, map)` (`console::GameMap`), never by its name alone: Lost Coast's `lostcoast/maps/background01.bsp` and `hl2/maps/background01.bsp` share a name. Menu backgrounds carry their game (`Effect::MainMenuMap(GameMap)`, `gameplay.background_game`), level transitions stay in the running game, and `assets::load_with_canvas(root, game, map, ..)` mounts that game (`Vfs::mount_game`). Only a bare map name (`map`, `--map`, respawn) is resolved, from assets: the game whose own folder ships `maps/<name>.bsp` (`source_assets::install::game_for_map`, running game first). Never guess a game from map-name prefixes or invent alias keys.
 
+### HUD symbol alignment
+
+Quick-info arcs and portable weapon reticles center their cached bitmap bounds on
+view center. Their installed symbol fonts have asymmetric ascent/cell metrics;
+centering the nominal font height offsets visible ink. Full/progress/warning arcs
+share one origin; cropping changes only the bitmap span. Text fonts retain their
+text ascent, and Windows monochrome reticles retain their native raster placement.
+The arc pair is centered using both glyph bearings while retaining authored spacing;
+the portable reticle uses ink bounds horizontally as well. QuickInfo selects the
+installed desktop character-cell font definition: the macOS-specific larger height
+belongs to a different native font backend and must not be treated as a Windows
+character-cell size. This selection is local to QuickInfo; normal resource parsing
+and all other platform restrictions stay host-specific. Owned layout checks include
+portrait, odd dimensions, every HUD aspect frame and retained retail size references.
+
 ### Widget Interaction & Audio
 
 - Only main menu and submenu navigation buttons play the button rollover sound (`ui/buttonrollover.wav`).
@@ -51,8 +66,9 @@ such a change.
 
 ### Expansion Background Maps
 
-- Game assets are the source of truth, no map tables: the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`); each game's menu background is chapter 1 of its own `scripts/chapterbackgrounds.txt` and its New Game map comes from its own `cfg/chapter1.cfg`, both read through that game's own mount (`resources::read_game_text`), never through the mount of whatever map is loaded (the startup mount follows the saved background, so an Episode Two background made Half-Life 2 resolve to `ep2_background01`).
-- Entering an expansion's submenu (Half-Life 2, Episode One, Episode Two, Lost Coast) updates the background map to that expansion's initial chapter background and triggers an asynchronous 3D scene swap.
+- Game assets are the source of truth, no map tables: the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`); each game's menu background is chapter 1 of its own `scripts/chapterbackgrounds.txt` and New Game opens its own `cfg/chapter*.cfg` browser, both read through that game's own mount, never through the mount of whatever map is loaded (the startup mount follows the saved background, so an Episode Two background made Half-Life 2 resolve to `ep2_background01`).
+- Entering an expansion's submenu (Half-Life 2, Episode One, Episode Two, Lost Coast) updates the background map to that expansion's initial chapter background and triggers an asynchronous 3D scene swap, unless a background level from any chapter of that same game is already active (`Console::show_category`, matching retail `SwitchExpansion` at `0x100b3bb0`).
+- Starting a gameplay map (`Console::start_loading_for_game`) resolves that map's chapter background (`Console::chapter_background_for`) and draws its pre-blurred `materials/console/<background>(_widescreen).vtf` texture full-screen behind the centered modal `LoadingDialog` while hiding the main/pause menu titles, buttons and non-modal windows (matching retail `CBasePanel::PaintBackground` at `0x100b0b50`, with the deliberate improvement that starting a chapter from the browser immediately shows the selected chapter's blurred background rather than waiting until after the load).
 - Background map load failures only log a warning to console and `campaign.failures`; they must never crash the game, terminate the process, or dismiss the menu.
 - Navigating Back or pressing Escape preserves the current expansion background map; it must not revert to base Half-Life 2 until another expansion is explicitly chosen.
 - Loading a gameplay map saves the background of the chapter that map belongs to in its game as the menu background (`Console::remember_chapter_background`, `gameui::chapters`), so both Return to main menu and the next launch after quitting mid-game show it: `d2_coast_01` returns to `hl2/background04` (chapter 7), a Half-Life 2 map loaded from the Episode Two menu returns to a Half-Life 2 background. Chapters come from game resources only: `scripts/chapterbackgrounds.txt` (order, background), `cfg/chapter<key>.cfg` (start map) and the `trigger_changelevel` targets of the game's loose BSPs; a map no chapter reaches falls back to chapter 1's background. The index is built off the main thread at startup (`Console::index_chapters`).
@@ -61,12 +77,60 @@ such a change.
 ### Background vs Gameplay Loading UI/UX & Transition State Sequence
 
 - Gameplay map loading uses the full modal centered `LoadingDialog` (380 x 112) with a segmented progress bar and localized stage reports (`#GameUI_LoadingFilename`, `#LoadingProgress_*`), blocking clicks to underlying menus.
-- Background map loading uses an explicit state sequence (`BackgroundTransitionState`: `Idle` -> `Starting` -> `Loading` -> `Finished` / `Failed`) and renders a non-blocking bottom-right corner plaque (`LoadingKind::Background`, 130 x 36) displaying localized `#GameUI_Loading` ("LOADING...") over a translucent dark panel routed through the shared dialog frame (`FrameSpec` with rounded corners and no outer 3D border), without progress bars.
-- Menu navigation buttons remain interactive, armed on hover, and clickable while a background map is loading.
+- Background map loading uses an explicit state sequence (`BackgroundTransitionState`: `Idle` -> `Starting` -> `Loading` -> `Finished` / `Failed`) and renders a bottom-right corner plaque (`LoadingKind::Background`, 130 x 36) displaying localized `#GameUI_Loading` ("LOADING...") over a translucent dark panel routed through the shared dialog frame (`FrameSpec` with rounded corners and no outer 3D border), without progress bars.
+- While a background loads, hide main/submenu titles/buttons and open dialogs; consume their pointer/keyboard/Escape input. Keep the authored loading background and localized corner plaque. Restore the existing windows/selection when loading finishes or fails; do not replay held activation into restored controls.
 - During background transitions, GameUI binds the target campaign's authored pre-blurred 2D background texture (`materials/console/%s.vtf` / `_widescreen.vtf` from owned game resources), draws it full-screen behind menu buttons and titles, and tints it with the authentic `MainMenu.Backdrop` (`rgba(0, 0, 0, 156)` per `sourcescheme.res`) alongside the non-blocking corner plaque. The blur texture is keyed by the upcoming background's `(game, map)` (the transition's target category and map), ensuring the pre-blurred image always matches the upcoming background (e.g. `ep2`/`ep2_background01` -> `ep2_background01.vtf`, `lostcoast`/`background01` -> Lost Coast cliff `background01.vtf`). When loading non-base expansion assets (`lostcoast`, `episodic`, `ep2`), the expansion package archive (`lostcoast/lostcoast_pak_dir.vpk`) is searched first to prevent assets sharing base names from being shadowed by `hl2_complete`.
 - When background map loading finishes or fails, the transition cleanly transitions to `Finished` or `Failed`, and the corner plaque, pre-blurred background texture, and backdrop overlay disappear immediately.
 - Displayed menu subtitles are derived strictly from `BackgroundTransitionState`: while in `Starting` or `Loading`, the previously displayed subtitle remains visible; when reaching `Finished` or `Failed`, the target subtitle is applied (so a failed load never leaves the subtitle stuck). Rapid consecutive switches update the target map and category, and stale load events for older maps are safely ignored.
 - Technical note on background blur: retail Source does not run a dynamic GPU blur shader or live full-screen post-processing blur pass during background transitions. Instead, Valve authored pre-blurred 512x512 background textures in `materials/console/` for each expansion (`background01.vtf` through `07.vtf`, `ep1_background01.vtf`, `ep2_background01.vtf`, `lostcoast/background01.vtf`, and widescreen counterparts) and renders them with `MainMenu.Backdrop` tinting while loading the 3D map.
+
+### Background worker and dialog lifetime (2026-10-27)
+
+The active campaign worker owns the background/gameplay distinction. The UI's
+`background_request` flag describes only a pending request and becomes false when
+that request is consumed. Keep the latest background request queued while a worker
+runs. Coalesce an identical `(game, map)` request; discard a superseded background
+result before replacing any world, dismissing a newer dialog, or reporting completion.
+Foreground loads take priority. Starting one resets background transition presentation;
+stale background failures cannot dismiss it. Closing chapter selection leaves the
+worker and its loading plaque alive. Runtime map loads retain the existing GameUI,
+not a newly decoded menu/font/thumbnail set that would immediately be discarded.
+
+Replacing the window stack also drops fading dialog payloads. A global quit/return
+confirmation is drawn and occludes only at its real position in that stack. A closed
+or orphaned message box cannot cut a rectangle from another window.
+
+Retail evidence: owned `bin/gameui.dll`, SHA256
+`62ada6888369bed1a01a2aac50bc81e689a6e7b8df5cbfdc350a8ad690108136`,
+loading-start notification at `0x100af900`, finish at `0x100af7d0`, loading-dialog
+construction at `0x1006be00`, startup-background texture construction at `0x100b3f80`.
+These distinguish loading state notifications, background-specific dialog presentation
+and authored loading textures. Virtual-call names beyond recovered strings are
+inferred. Static exports, the published SDK and resource layouts do not establish
+uninterrupted input responsiveness while retail loads its engine world; native runtime
+comparison remains not tested. The earlier interactive-during-background-load policy
+was unsupported and is superseded by the wait behavior below. Final world/physics/GPU
+installation can still hitch.
+
+### Retail menu hiding during loading (2026-10-27)
+
+Further on-demand review of the same owned GameUI hash corrects the earlier
+interactive-menu assumption. `0x100af900` sets the loading byte at offset `0x274`;
+`0x100b4130` reads that byte (also represented as the low byte of field `0x9d`)
+and dispatches loading state 1 through `0x100b2dc0`. That state contains the
+recovered `InstantHideMainMenu` / `LoadMap` strings and calls `0x100b2fa0` with
+alpha zero. The helper applies that alpha to panels and title labels through
+`0x100e40c0`, whose simple float-field assignment matches published Source SDK
+`src/vgui2/vgui_controls/Panel.cpp`'s `Panel::SetAlpha`. Ready states restore or
+fade the menu; `0x100af7d0` clears the loading byte on completion. These are static
+control-flow findings, not a new retail runtime capture or proof of every inherited
+panel identity. Native input latency remains not tested.
+
+HL2 GameUI now uses a wait presentation while its background worker is active.
+The plaque keeps its installed localization and layout. Hidden controls receive
+no activation; shared card-browser occlusion cancels key/pointer capture while
+preserving selection. The toolkit knows nothing about loading or HL2. Existing
+request supersession/failure recovery remain intact for host/console requests.
 
 ### KeyValues Syntax Quirks & Parser Tolerance
 
@@ -103,6 +167,7 @@ such a change.
 - Submenu background maps: entering an expansion submenu updates the background map and scene asynchronously; failures log a warning and leave the menu intact. Back or Escape preserves the expansion background map.
 - Windows and modal dialogs (owner decision, 2026-10-18, retail behavior): the Options dialog and the developer console are non-modal windows (`source_ui::windows::Windows`: z-order, keyboard focus, pointer routing). The pointer goes to the topmost window whose frame is under it, else to the menu; a press raises and focuses its layer and stays with it until release; keys go to the focused layer; a modal layer inside Options (sub-dialog, its confirmation box, open list, key capture) takes every click; the focused window fades to `Frame.BgColor`, the others to `Frame.OutOfFocusBgColor` over `Frame.FocusTransitionEffectTime`. `Console::mode()` is the focused layer and `Console::set_mode` the only way to change it. Modal dialog occlusion: when a modal dialog (quit / return confirmation box, game loading dialog) is open, underlying menu buttons must not be hovered, armed, or clicked; a layer without the pointer calls `ButtonTracker::occlude(down)`. The same holds inside a dialog for upper layers (confirmation box, key capture, open popup lists via `source_ui::widgets::PopupList`): occluded layers call `ButtonTracker::occlude(down)` every frame so the rest of a click consumed above is never read as a new press below. Popup lists close or select only on release; an outside click closes without activating anything (docs/gameui.md 6b).
 - Closed captions: text only from the installed `resource/closecaption_<language>.dat` dictionaries (every copy on the search path, first holding the token wins; `source_assets::captions`), never from inline literals. Scene speech captions only its master event (`hl2_simulation::captions`) and its sound request carries `caption: false`; other sound-script emits caption in the host audio queue. The panel (`hl2_ui::closecaption`) runs on scene time, draws in background levels too (retail shows captions behind the main menu) and resolves its `ClientScheme.res` fonts among the scheme's registered installed files (DejaVu Sans for the uninstalled Tahoma/Verdana).
+- Developer commentary: `NewGameDialog` reads `hl2_complete/resource/newgamedialog.res` and `hl2_complete/resource/newgamechapterpanel.res` via `Reader::new(vfs)`, rendering the footer backing (`ImagePanel1`), `CommentaryIcon` (`resource/commentary_hl2c`), and `#HL2_Enable_Commentary` check box; checking it displays the scaled `CommentaryIcon` badge on each chapter card at `(10, 100)`. Starting a chapter with commentary checked opens a modal `MessageBox` (`380x240`, `#GameUI_CommentaryDialogTitle`, `#GAMEUI_Commentary_Console_Explanation`) that enables `commentary` and `sv_cheats` on confirmation; starting unchecked clears both. In-game active commentary nodes draw `HudCommentary` (`scripts/hudlayout.res`, `vgui/hud/icon_commentary`, speaker name, `N \ M` counter and orange progress bar) when `closecaption` is off, or route through `HudCloseCaption` when `closecaption` is on.
 
 ## 1. Design principles
 
@@ -141,7 +206,7 @@ Deficiencies found in the baseline, each tied to a requirement:
 
 | Area | Baseline defect | Decision |
 |---|---|---|
-| Main menu | Four hard-coded entries; no HL2/Episode One/Episode Two categories, spacers, Extras or Quit confirmation; New Game hard-coded `d1_trainstation_02` | Model built from `GameMenu.res` (file order out of game, `InGameOrder` in game); New Game map from `cfg/chapter1.cfg`; Quit opens a confirmation dialog |
+| Main menu | Four hard-coded entries; no HL2/Episode One/Episode Two categories, spacers, Extras or Quit confirmation; New Game hard-coded `d1_trainstation_02` | Model built from `GameMenu.res` (file order out of game, `InGameOrder` in game); New Game browser from the selected game's own `cfg/chapter*.cfg`; Quit opens a confirmation dialog |
 | Pause menu | Separate hard-coded list (Resume/Options/Developer console/Quit) | Same `GameMenu.res` model with `OnlyInGame` entries; the console stays on tilde |
 | Localization | Ad-hoc lookups of a few tokens in `gameui_english.txt` per module, hard-coded English defaults otherwise | One merged `Localization` table (all GameUI files, first file wins) with the key-name fallback |
 | Options layout | Hand-placed rectangles in a 952-line module mixing state, input and drawing | Control rectangles/labels/enabled flags from `OptionsSub*.res`; dialog size 512x406 and title from retail `GameUI.dll`; widget state separated from drawing |
@@ -170,8 +235,8 @@ overlay and list voice packs; the VFS search path itself is unchanged.
 | Options pages | `resource/optionssub{difficulty,keyboard,mouse,gamepad,audio,video}.res`, `optionssubvideogammadlg.res`, `optionssub{audio,video}thirdpartydlg.res` |
 | Key actions / defaults | `scripts/kb_act.lst`, `cfg/config_default.cfg` |
 | Gamma test image | `materials/vgui/gamma.vtf` (ImagePanel `image "gamma"`) |
-| Background map | Each game's own `scripts/chapterbackgrounds.txt` (chapter 1; `hl2` -> `background01`), read through that game's mount; the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`, `read_game_text`) |
-| New Game map | Each game's own `cfg/chapter1.cfg`, read the same way |
+| Background map | Each game's own `scripts/chapterbackgrounds.txt` (chapter 1; `hl2` -> `background01`), read through that game's mount; the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`, `GameUiResources::load_campaigns`) |
+| New Game chapters | Each game's own nonempty `cfg/chapter*.cfg`, numeric/suffix order; Start New Game loads the selected config's map |
 | Game of a map | Explicit where known: a submenu loads `(game, map)` (`Effect::MainMenuMap(GameMap)`), the saved background keeps `gameplay.background_game`, level transitions stay in the running game. A bare name (`map`, `map_background`, `--map`, `--background-map`, respawn, a background saved without its game) belongs to the game whose own folder ships `maps/<name>.bsp`, loose or in its own VPKs, searching `hl2` first, then the other `gameinfo.txt` folders (`source_assets::install::game_for_map`); names typed in a session (`map`, `map_background`, respawn) search the running game before `hl2`, command-line names do not. The map is then read through that game's mount (`Vfs::mount_game`), whose order is the `SearchPaths` block of the game's own `gameinfo.txt` (`vpk::search_paths`: custom folders, own VPKs, inherited VPKs, then loose folders). Loading a gameplay map saves the background of its chapter as the menu background (section 13); Return to main menu and the next launch show it. Pre-blurred `materials/console/<map>[_widescreen].vtf` images are keyed by `(game, map)`, so Half-Life 2's and Lost Coast's `background01` need no alias |
 | Spoken languages | `hl2/hl2_sound_vo_<language>_dir.vpk` present in the install |
 
@@ -212,7 +277,7 @@ What exists:
     running behind the main menu;
   - `--position`, `--yaw`, `--pitch`, `--fly`, `--movement-script`, `--capture-live`,
     `--capture-burst` and `--capture-monitor` without a loadable `--map` exit with an error.
-- New Game in the HALF-LIFE 2 category loads chapter 1 as gameplay. Escape on a background level
+- New Game in a game category opens its chapter browser; Start New Game loads the selected chapter as gameplay. Escape on a background level
   closes the quit box or returns from a category, but never resumes the background into gameplay.
 
 Placeholders (shown disabled; activating logs to the console): Load Game, Achievements, Workshop.
@@ -1894,3 +1959,14 @@ a bounded stack buffer rather than allocating for the new visibility queries.
 This status describes whether a setting affects its intended feature; it is not a claim
 of complete native engine or campaign parity. Owned-resource/unit and packaged evidence,
 rejected fixtures and timing limits are recorded in validation/performance docs.
+
+## Chapter selection (2026-10-27)
+
+New Game opens a non-modal three-card chapter browser for the selected game.
+Installed chapter configs, localization tokens, dialog layouts, scheme colors and
+material thumbnails supply its content through the HL2 adapter. The reusable
+`source_ui::card_browser` owns paging, selection, focus, placement and drawing. Start New Game submits the selected
+chapter's first map with explicit game identity to the asynchronous loader.
+Cancel/Escape preserve the menu category/background. All discovered chapters are
+selectable; progress locking, commentary and intro movies are unfinished. Detailed
+evidence, resource precedence, controls and limitations: [chapter-selection.md](chapter-selection.md).

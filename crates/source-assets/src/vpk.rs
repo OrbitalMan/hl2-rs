@@ -317,11 +317,33 @@ impl Vfs {
         Ok(())
     }
     pub fn read(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        self.read_layer_file(name, None)
+    }
+
+    /// Read a MOD-owned file, excluding inherited games and map-embedded resources.
+    pub fn read_game_file(&self, game: &str, name: &str) -> Result<Option<Vec<u8>>> {
+        self.read_layer_file(name, Some(&self.root.join(game)))
+    }
+
+    fn content_layers<'a>(
+        &'a self,
+        own_folder: Option<&'a Path>,
+    ) -> impl Iterator<Item = &'a Layer> {
+        self.layers.iter().filter(move |layer| {
+            let path = match layer {
+                Layer::Dir(path) => path,
+                Layer::Pak(vpk) => &vpk.path,
+            };
+            own_folder.is_none_or(|folder| path.starts_with(folder))
+        })
+    }
+
+    fn read_layer_file(&self, name: &str, own_folder: Option<&Path>) -> Result<Option<Vec<u8>>> {
         let name = normalize(name)?;
-        if let Some(d) = self.embedded.get(&name) {
+        if let Some(d) = self.embedded.get(&name).filter(|_| own_folder.is_none()) {
             return Ok(Some(d.clone()));
         }
-        for layer in &self.layers {
+        for layer in self.content_layers(own_folder) {
             match layer {
                 Layer::Dir(folder) => {
                     let p = folder.join(&name);
@@ -415,14 +437,29 @@ impl Vfs {
     /// ending in `suffix`: map pak, custom folders/VPKs, base VPKs and loose folders.
     /// Zero-byte loose placeholders are skipped (they never shadow archived files).
     pub fn list_files(&self, prefix: &str, suffix: &str) -> BTreeSet<String> {
+        self.list_layer_files(prefix, suffix, None)
+    }
+
+    /// Files belonging to one game's own mounted folders/custom packs/archives (MOD),
+    /// excluding inherited games and map-embedded content. Used for chapter discovery.
+    pub fn list_game_files(&self, game: &str, prefix: &str, suffix: &str) -> BTreeSet<String> {
+        self.list_layer_files(prefix, suffix, Some(&self.root.join(game)))
+    }
+
+    fn list_layer_files(
+        &self,
+        prefix: &str,
+        suffix: &str,
+        own_folder: Option<&Path>,
+    ) -> BTreeSet<String> {
         let wanted = |p: &str| p.starts_with(prefix) && p.ends_with(suffix);
         let mut found: BTreeSet<String> = self
             .embedded
             .keys()
-            .filter(|p| wanted(p))
+            .filter(|p| own_folder.is_none() && wanted(p))
             .cloned()
             .collect();
-        for layer in &self.layers {
+        for layer in self.content_layers(own_folder) {
             match layer {
                 Layer::Pak(vpk) => {
                     for entry in vpk.entries.keys() {
@@ -531,6 +568,84 @@ mod tests {
         std::fs::write(&p, b"bad").unwrap();
         assert!(Vpk::open(&p).is_err());
         std::fs::remove_file(p).unwrap();
+    }
+
+    #[test]
+    fn chapter_discovery_lists_only_the_games_own_nonempty_files() {
+        let root = std::env::temp_dir().join(format!("hl2-rs-own-chapters-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for folder in ["ep2/cfg", "ep2/custom/test/cfg", "hl2/cfg"] {
+            std::fs::create_dir_all(root.join(folder)).unwrap();
+        }
+        for (file, contents) in [
+            ("ep2/cfg/chapter1.cfg", "map own"),
+            ("ep2/cfg/chapter2.cfg", ""),
+            ("ep2/custom/test/cfg/chapter9a.cfg", "map custom"),
+            ("hl2/cfg/chapter14.cfg", "map inherited"),
+            ("hl2/cfg/chapter1.cfg", "map wrong"),
+        ] {
+            std::fs::write(root.join(file), contents).unwrap();
+        }
+        let archive = |game: &str, name: &str| {
+            Layer::Pak(Vpk {
+                path: root.join(game).join("test_dir.vpk"),
+                version: 2,
+                data_start: 0,
+                entries: [(
+                    name.to_owned(),
+                    Entry {
+                        crc: 0,
+                        archive: 0x7fff,
+                        offset: 0,
+                        size: 1,
+                        preload: Vec::new(),
+                    },
+                )]
+                .into(),
+            })
+        };
+        let vfs = Vfs {
+            root: root.clone(),
+            layers: vec![
+                Layer::Dir(root.join("ep2/custom/test")),
+                Layer::Dir(root.join("ep2")),
+                Layer::Dir(root.join("hl2")),
+                archive("ep2", "cfg/chapter3.cfg"),
+                archive("hl2", "cfg/chapter15.cfg"),
+            ],
+            embedded: [
+                ("cfg/chapter16.cfg".into(), vec![1]),
+                ("cfg/chapter1.cfg".into(), b"map embedded".to_vec()),
+            ]
+            .into(),
+            warnings: Vec::new(),
+        };
+        assert_eq!(
+            vfs.list_game_files("ep2", "cfg/", ".cfg"),
+            ["cfg/chapter1.cfg", "cfg/chapter3.cfg", "cfg/chapter9a.cfg"]
+                .map(String::from)
+                .into()
+        );
+        assert_eq!(
+            vfs.read("cfg/chapter1.cfg").unwrap().unwrap(),
+            b"map embedded"
+        );
+        assert_eq!(
+            vfs.read_game_file("ep2", "cfg/chapter1.cfg")
+                .unwrap()
+                .unwrap(),
+            b"map own"
+        );
+        assert!(vfs
+            .read_game_file("ep2", "cfg/chapter14.cfg")
+            .unwrap()
+            .is_none());
+        assert!(vfs
+            .read_game_file("ep2", "cfg/chapter16.cfg")
+            .unwrap()
+            .is_none());
+        assert!(vfs.list_files("cfg/", ".cfg").contains("cfg/chapter16.cfg"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

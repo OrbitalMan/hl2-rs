@@ -1,10 +1,13 @@
 //! The PC HL2 HUD layout is read from the owned game's scheme and resource files.
 //! Bucket positioning and visibility follow CHudWeaponSelection, rather than a new UI design.
+mod commentary;
+mod crosshair;
 mod font;
 mod power;
+mod quick_info;
 use font::HudFont;
+use quick_info::QuickInfoHud;
 
-use crate::gameui::localize::Localization;
 use anyhow::{Context, Result};
 use glam::{vec2, Vec2};
 use hl2_simulation::{
@@ -18,7 +21,7 @@ use source_assets::{
 use source_ui::{
     canvas::{
         draw_texture_ex, texture, Canvas, Color, DrawTextureParams, FilterMode, MutexCell, Rect,
-        Texture2D, WHITE, YELLOW,
+        Texture2D, YELLOW,
     },
     font::FontFace,
 };
@@ -919,155 +922,6 @@ impl QuickInfoState {
         Some((color, full))
     }
 }
-struct QuickInfoHud {
-    canvas: Canvas,
-    font: HudFont,
-    center: Texture2D,
-    center_rect: Rect,
-    left: String,
-    left_empty: String,
-    right: String,
-    right_empty: String,
-    normal: Color,
-    caution: Color,
-    state: MutexCell<QuickInfoState>,
-}
-impl QuickInfoHud {
-    fn load(vfs: &Vfs, fonts: &Entry, colors: &Entry, canvas: Canvas) -> Result<Self> {
-        let face = FontFace::load(
-            &vfs.read("resource/HL2crosshairs.ttf")?
-                .context("QuickInfo font missing")?,
-            canvas.clone(),
-        )?;
-        let resources = keyvalues::parse_resource(
-            &vfs.read("scripts/hud_textures.txt")?
-                .context("HUD textures missing")?,
-        )?;
-        let textures = resources
-            .first()
-            .and_then(|e| e.get("TextureData"))
-            .context("HUD TextureData missing")?;
-        let character = |name| -> Result<String> {
-            Ok(textures
-                .get(name)
-                .and_then(|e| e.get("character"))
-                .and_then(Entry::text)
-                .context("QuickInfo glyph missing")?
-                .into())
-        };
-        let center = textures
-            .get("crosshair")
-            .context("QuickInfo center missing")?;
-        let file = center
-            .get("file")
-            .and_then(Entry::text)
-            .context("QuickInfo center material missing")?;
-        Ok(Self {
-            canvas,
-            font: HudFont::read(fonts, "QuickInfo", face, 28.),
-            center: texture(vfs, file)?,
-            center_rect: Rect::new(
-                number(center, "x", 0.),
-                number(center, "y", 0.),
-                number(center, "width", 40.),
-                number(center, "height", 40.),
-            ),
-            left: character("crosshair_left_full")?,
-            left_empty: character("crosshair_left_empty")?,
-            right: character("crosshair_right_full")?,
-            right_empty: character("crosshair_right_empty")?,
-            normal: color(colors, "Normal", Color::from_rgba(255, 208, 64, 255)),
-            caution: color(colors, "Caution", Color::from_rgba(255, 48, 0, 255)),
-            state: MutexCell::new(QuickInfoState::default()),
-        })
-    }
-    fn progress(&self, full: &str, empty: &str, origin: Vec2, percentage: f32, color: Color) {
-        let height = self.font.size().round();
-        let offset = (height * percentage.clamp(0., 1.)).trunc();
-        self.font
-            .draw_cropped(empty, origin, vec2(0., offset), color);
-        self.font
-            .draw_cropped(full, origin, vec2(offset, height), color);
-    }
-    fn draw(&self, inv: &Inventory, weapons: &BTreeMap<String, Weapon>, time: f64) {
-        let Some(weapon) = weapons.get(&inv.active) else {
-            return;
-        };
-        if inv.health <= 0. || !time.is_finite() {
-            return;
-        }
-        let ammo = inv.owned.get(&inv.active).copied().unwrap_or(-1);
-        let mut state = self.state.borrow_mut();
-        let dt = state.observe(inv.health as i32, ammo, weapon.magazine, time);
-        let opacity = state.alpha.clamp(0., 255.) / 255.;
-        let x = (self.canvas.width() * 0.5).trunc();
-        let y = (self.canvas.height() * 0.5).trunc() - self.font.size().round() * 0.5;
-        self.canvas.additive(true);
-        draw_texture_ex(
-            &self.canvas,
-            &self.center,
-            x,
-            y,
-            alpha(
-                Color {
-                    a: 138. / 255.,
-                    ..self.normal
-                },
-                opacity,
-            ),
-            DrawTextureParams {
-                source: Some(self.center_rect),
-                ..Default::default()
-            },
-        );
-        let warn_health = state.warn_health;
-        if let Some((color, full)) = QuickInfoState::warning_color(
-            warn_health,
-            &mut state.health_warning,
-            time,
-            dt,
-            self.normal,
-            self.caution,
-        ) {
-            let origin = vec2(x - self.font.width(&self.left) * 2., y);
-            let color = alpha(color, opacity);
-            if full {
-                self.font.draw(&self.left, origin.x, origin.y, color);
-            } else {
-                self.progress(
-                    &self.left,
-                    &self.left_empty,
-                    origin,
-                    1. - inv.health / 100.,
-                    color,
-                );
-            }
-        }
-        let warn_ammo = state.warn_ammo;
-        if let Some((color, full)) = QuickInfoState::warning_color(
-            warn_ammo,
-            &mut state.ammo_warning,
-            time,
-            dt,
-            self.normal,
-            self.caution,
-        ) {
-            let origin = vec2(x + self.font.width(&self.right), y);
-            let color = alpha(color, opacity);
-            if full {
-                self.font.draw(&self.right, origin.x, origin.y, color);
-            } else {
-                let percentage = if weapon.magazine <= 0 {
-                    0.
-                } else {
-                    1. - ammo as f32 / weapon.magazine as f32
-                };
-                self.progress(&self.right, &self.right_empty, origin, percentage, color);
-            }
-        }
-        self.canvas.additive(false);
-    }
-}
 
 fn sprite_filter(vtf: &[u8]) -> Result<FilterMode> {
     let flags = u32::from_le_bytes(
@@ -1150,6 +1004,7 @@ pub struct WeaponHud {
     secondary_ammo_panel: PanelLayout,
     quick_info: QuickInfoHud,
     power: power::PowerHud,
+    commentary: commentary::CommentaryHud,
     /// HudDamageIndicator dmg_xpos, dmg_ypos, dmg_wide, dmg_tall1, dmg_tall2
     /// (proportional, 480-line units).
     damage_layout: [f32; 5],
@@ -1212,10 +1067,7 @@ impl WeaponHud {
     }
 
     pub fn load(vfs: &Vfs, canvas: Canvas) -> Result<Self> {
-        let scheme = keyvalues::parse_resource(
-            &vfs.read("resource/ClientScheme.res")?
-                .context("ClientScheme.res missing")?,
-        )?;
+        let (scheme, quick_info_fonts) = font::schemes(vfs)?;
         let scheme = find(&scheme, "Scheme").context("Scheme block missing")?;
         let fonts = scheme.get("Fonts").context("HUD font scheme missing")?;
         let settings = scheme
@@ -1224,7 +1076,7 @@ impl WeaponHud {
             .clone();
         let quick_info = QuickInfoHud::load(
             vfs,
-            fonts,
+            &quick_info_fonts,
             scheme.get("Colors").unwrap_or(&settings),
             canvas.clone(),
         )?;
@@ -1254,40 +1106,8 @@ impl WeaponHud {
         let animation_rules = animations(&animation_source)?;
         let animation_events = event_rules(&animation_source)?;
         let numeric_effects = MutexCell::new(NumericHudEffects::new(&settings));
-        let mut ammo_icons = BTreeMap::new();
-        let mut secondary_ammo_icons = BTreeMap::new();
-        let mut weapon_crosshairs = BTreeMap::<String, String>::new();
-        for class in [
-            "weapon_crowbar",
-            "weapon_pistol",
-            "weapon_357",
-            "weapon_smg1",
-            "weapon_ar2",
-            "weapon_shotgun",
-            "weapon_crossbow",
-            "weapon_rpg",
-            "weapon_frag",
-        ] {
-            if let Some(bytes) = vfs.read(&format!("scripts/{class}.txt"))? {
-                if let Some(weapon) = keyvalues::parse_resource(&bytes)?.first() {
-                    if let Some(textures) = weapon.get("TextureData") {
-                        for (key, icons) in [
-                            ("ammo", &mut ammo_icons),
-                            ("ammo2", &mut secondary_ammo_icons),
-                            ("crosshair", &mut weapon_crosshairs),
-                        ] {
-                            if let Some(icon) = textures
-                                .get(key)
-                                .and_then(|e| e.get("character"))
-                                .and_then(Entry::text)
-                            {
-                                icons.insert(class.into(), icon.into());
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let (ammo_icons, secondary_ammo_icons, weapon_crosshairs) =
+            commentary::load_weapon_icons(vfs)?;
         let hud_textures = keyvalues::parse_resource(
             &vfs.read("scripts/hud_textures.txt")?
                 .context("HUD textures missing")?,
@@ -1345,16 +1165,8 @@ impl WeaponHud {
         for number in 1..=4 {
             corners.push(texture(vfs, &format!("vgui/hud/8x800corner{number}"))?);
         }
-        let mut loc = Localization::default();
-        for loc_path in [
-            "resource/valve_english.txt",
-            "resource/gameui_english.txt",
-            "resource/hl2_english.txt",
-        ] {
-            if let Ok(Some(bytes)) = vfs.read(loc_path) {
-                loc.add_resource(loc_path, &bytes);
-            }
-        }
+        let loc = commentary::load_localization(vfs);
+        let commentary = commentary::CommentaryHud::load(vfs, layout);
         let captions = crate::closecaption::CaptionHud::load(
             vfs,
             scheme,
@@ -1365,6 +1177,7 @@ impl WeaponHud {
         let power = power::PowerHud::load(layout, fonts, &loc, bold.clone(), face.clone())?;
         Ok(Self {
             power,
+            commentary,
             aspect: crate::config::HudAspect::default(),
             corners,
             canvas,
@@ -1429,6 +1242,16 @@ impl WeaponHud {
             alt_label: loc.text("#Valve_Hud_AMMO_ALT"),
             captions,
         })
+    }
+
+    /// The developer commentary progress panel (`HudCommentary`), hidden when `closecaption` is on.
+    pub fn draw_commentary(
+        &self,
+        overlay: Option<&hl2_simulation::commentary::CommentaryOverlay>,
+        closecaption: bool,
+        time: f64,
+    ) {
+        self.commentary.draw(self, overlay, closecaption, time);
     }
 
     /// The closed caption panel (CHudCloseCaption::Paint): its box through the HUD's rounded
@@ -2000,83 +1823,12 @@ impl WeaponHud {
             self.canvas.additive(false);
         }
     }
-
-    pub fn draw_crosshair(&self, inv: &Inventory) {
-        if inv.health <= 0. {
-            return;
-        }
-        let Some(character) = self.weapon_crosshairs.get(&inv.active) else {
-            // CHudCrosshair::ResetCrosshair uses the installed default sprite and opaque white.
-            let (destination, source) = default_crosshair_rects(
-                vec2(self.canvas.width(), self.canvas.height()),
-                self.default_crosshair_rect,
-                self.default_crosshair.size(),
-            );
-            if self.default_crosshair_additive {
-                self.canvas.additive(true);
-            }
-            draw_texture_ex(
-                &self.canvas,
-                &self.default_crosshair,
-                destination.x,
-                destination.y,
-                WHITE,
-                DrawTextureParams {
-                    source: Some(source),
-                    dest_size: Some(destination.size()),
-                },
-            );
-            self.canvas.additive(false);
-            return;
-        };
-        self.canvas.additive(true);
-        #[cfg(windows)]
-        if let Some(glyph) = character
-            .chars()
-            .next()
-            .filter(|_| character.chars().count() == 1)
-            .and_then(|c| {
-                let range = self.crosshairs.ranges.iter().find(|range| {
-                    self.canvas.height() >= range.minimum && self.canvas.height() <= range.maximum
-                })?;
-                range.monochrome_crosshair().then_some(())?;
-                self.native_crosshairs.get(&(c, range.tall.round() as u16))
-            })
-        {
-            if let Some(texture) = &glyph.texture {
-                // Integer icon dimensions and GDI's actual cell height, not the requested
-                // height or fractional fontdue EM metrics. No rasterization occurs here.
-                let center = vec2(
-                    (self.canvas.width() * 0.5 + 0.5).trunc(),
-                    (self.canvas.height() * 0.5 + 0.5).trunc(),
-                );
-                let origin = center - vec2((glyph.advance / 2) as f32, (glyph.height / 2) as f32)
-                    + glyph.origin;
-                source_ui::canvas::draw_texture(
-                    &self.canvas,
-                    texture,
-                    origin.x,
-                    origin.y,
-                    self.crosshair_color,
-                );
-            }
-            self.canvas.additive(false);
-            return;
-        }
-        self.crosshairs.draw(
-            character,
-            (self.canvas.width() - self.crosshairs.width(character)) * 0.5,
-            (self.canvas.height() - self.crosshairs.size()) * 0.5,
-            self.crosshair_color,
-        );
-        self.canvas.additive(false);
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use source_ui::canvas::Quad;
+    use source_ui::canvas::{Quad, WHITE};
 
     #[cfg(windows)]
     #[test]

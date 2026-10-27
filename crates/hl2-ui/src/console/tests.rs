@@ -3,6 +3,7 @@ use crate::gameui::localize::Localization;
 use crate::gameui::menu::MenuCommand;
 use crate::gameui::resources::{MenuItem, Visibility};
 use crate::proportional;
+use source_ui::canvas::Rect;
 use source_ui::console::dialog::{
     DialogLayout, ENTRY_TALL, MIN_SIZE, PROPORTIONAL_BASE, SUBMIT_WIDE,
 };
@@ -12,7 +13,7 @@ use source_ui::console::panel::{
 use source_ui::input::{Input, Key};
 use source_ui::placement::CursorHint;
 use source_ui::shell;
-use source_ui::widgets::ScrollMode;
+use source_ui::{widgets::ScrollMode, windows::Layer};
 #[test]
 fn cell_metrics_rejects_missing_font() {
     assert!(CellMetrics::from_bytes(b"missing font").is_none());
@@ -924,6 +925,29 @@ fn installed_console() -> Console {
             ("ep2", "ep2_outland_01"),
             ("lostcoast", "d2_lostcoast"),
         ]),
+        new_games: test_maps(&[
+            ("hl2", "d1_trainstation_01"),
+            ("episodic", "ep1_citadel_00"),
+            ("ep2", "ep2_outland_01"),
+            ("lostcoast", "d2_lostcoast"),
+        ])
+        .into_iter()
+        .map(|(game, map)| {
+            let entries = vec![crate::gameui::new_game::Entry {
+                key: "1".into(),
+                map,
+                heading: "1".into(),
+                title: game.clone(),
+            }];
+            (
+                game,
+                crate::gameui::new_game::Catalog {
+                    entries,
+                    ..Default::default()
+                },
+            )
+        })
+        .collect(),
         ..Default::default()
     };
     let mut console = Console::default();
@@ -1055,67 +1079,6 @@ fn return_to_main_menu_confirmation_dialog_ok_unloads_to_background() {
 }
 
 #[test]
-fn background_level_main_menu_navigation_new_game_and_quit_box() {
-    let mut console = installed_console();
-    console.level_loaded(true);
-    assert_eq!(console.mode(), Mode::MainMenu);
-    console.escape();
-    assert_eq!(console.mode(), Mode::MainMenu, "nothing to resume");
-    click_row(&mut console, 0);
-    assert_eq!(console.main_menu.category(), "hl2");
-    console.escape();
-    assert_eq!(console.main_menu.category(), "main");
-    assert_eq!(console.mode(), Mode::MainMenu);
-    click_row(&mut console, 0);
-    assert_eq!(
-        click_row(&mut console, 0),
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::Map("d1_trainstation_01".into()),
-        ]
-    );
-    console.level_loaded(false);
-    assert_eq!(console.mode(), Mode::Gameplay);
-    assert_eq!(console.main_menu.category(), "main");
-    console.escape();
-    assert_eq!(console.mode(), Mode::Pause);
-
-    console.level_loaded(true);
-    click_row(&mut console, 6);
-    let (quit, kind) = console.confirm_box.clone().expect("quit confirmation");
-    assert_eq!(kind, ConfirmKind::Quit);
-    let (origin, scale, layout) = console.quit_geometry(&quit);
-    let click_btn = |console: &mut Console, button: Rect| {
-        let pointer = Some(origin + vec2(button.x + 3., button.y + 3.) * scale);
-        let _ = console.input(&Input {
-            pointer,
-            click: true,
-            held: true,
-            ..Default::default()
-        });
-        console.input(&Input {
-            pointer,
-            released: true,
-            ..Default::default()
-        })
-    };
-    assert_eq!(
-        click_btn(&mut console, layout.buttons[1]),
-        vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
-    );
-    assert!(console.confirm_box.is_none(), "Cancel closes the box");
-    assert_eq!(console.mode(), Mode::MainMenu);
-    click_row(&mut console, 6);
-    assert_eq!(
-        click_btn(&mut console, layout.buttons[0]),
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::Quit,
-        ]
-    );
-}
-
-#[test]
 fn options_open_from_the_main_menu_and_console_commands_update_config() {
     let mut console = installed_console();
     console.level_loaded(true);
@@ -1238,90 +1201,6 @@ fn loading_dialog_state_transitions_and_dismissal() {
     console.level_loaded(false);
     assert!(console.loading_dialog.is_none());
     assert_eq!(console.mode(), Mode::Gameplay);
-}
-
-#[test]
-fn episode_one_and_two_new_game_navigation_and_missing_content_error_recovery() {
-    let mut console = installed_console();
-    console.level_loaded(true);
-    assert_eq!(console.mode(), Mode::MainMenu);
-
-    // Row 1 on main menu: HL2: EPISODE ONE
-    assert_eq!(
-        click_row(&mut console, 1),
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::MainMenuMap(GameMap::new("episodic", "ep1_background01")),
-        ]
-    );
-    assert_eq!(console.main_menu.category(), "episodic");
-    console.level_loaded(true);
-
-    // Row 0 in Episode One submenu: NEW GAME
-    let effects = click_row(&mut console, 0);
-    assert_eq!(
-        effects,
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::Map("ep1_citadel_00".into()),
-        ]
-    );
-    assert!(console.is_loading());
-    assert_eq!(
-        console.loading_dialog.as_ref().unwrap().map,
-        "ep1_citadel_00"
-    );
-
-    // Graceful error handling for missing episode content:
-    // Loader reports failure, error is latched onto loading dialog.
-    console.loading_failed("owned map ep1_citadel_00.bsp not found");
-    assert!(!console.is_loading());
-    assert!(console.loading_dialog.as_ref().unwrap().is_failed());
-    assert_eq!(
-        console.loading_dialog.as_ref().unwrap().error.as_deref(),
-        Some("owned map ep1_citadel_00.bsp not found")
-    );
-
-    // Player dismisses failed dialog via Escape and returns to main menu
-    console.escape();
-    assert!(console.loading_dialog.is_none());
-    assert_eq!(console.mode(), Mode::MainMenu);
-
-    // Row 2 on main menu: HL2: EPISODE TWO
-    assert_eq!(
-        click_row(&mut console, 2),
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::MainMenuMap(GameMap::new("ep2", "ep2_background01")),
-        ]
-    );
-    assert_eq!(console.main_menu.category(), "ep2");
-    console.level_loaded(true);
-
-    // Row 0 in Episode Two submenu: NEW GAME
-    let effects = click_row(&mut console, 0);
-    assert_eq!(
-        effects,
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::Map("ep2_outland_01".into()),
-        ]
-    );
-    assert!(console.is_loading());
-    assert_eq!(
-        console.loading_dialog.as_ref().unwrap().map,
-        "ep2_outland_01"
-    );
-
-    // Missing episode content error is dismissed via Enter input
-    console.loading_failed("owned map ep2_outland_01.bsp not found");
-    let enter = Input {
-        keys: [Key::Enter].into_iter().collect(),
-        ..Default::default()
-    };
-    console.input(&enter);
-    assert!(console.loading_dialog.is_none());
-    assert_eq!(console.mode(), Mode::MainMenu);
 }
 
 #[test]
@@ -2222,77 +2101,6 @@ fn submenu_back_and_escape_preserves_background_map() {
         console.loaded_map,
         Some(GameMap::new("episodic", "ep1_background01"))
     );
-}
-
-#[test]
-fn lostcoast_navigation_and_missing_content_error_recovery() {
-    let mut console = installed_console();
-    console.set_mode(Mode::MainMenu);
-    console.background_level = true;
-    console.loaded_map = Some(GameMap::new("hl2", "background01"));
-
-    // In main menu: row 4 is EXTRAS
-    let effects = click_row(&mut console, 4);
-    assert_eq!(console.main_menu.category(), "extras");
-    assert!(
-        !effects.iter().any(|e| matches!(e, Effect::MainMenuMap(_))),
-        "entering extras does not reload background map"
-    );
-
-    // In extras: row 1 is disabled Workshop placeholder
-    assert!(!console.main_menu.entries()[1].enabled);
-    assert_eq!(console.main_menu.entries()[1].label, "WORKSHOP");
-    console.activate_menu(1);
-    assert!(console
-        .shell
-        .panel
-        .output
-        .iter()
-        .any(|line| line.contains("WORKSHOP: not implemented")));
-
-    // In extras: row 0 is HALF-LIFE 2: LOST COAST
-    let lc_effects = click_row(&mut console, 0);
-    assert_eq!(console.main_menu.category(), "lostcoast");
-    assert!(
-        lc_effects
-            .iter()
-            .any(|e| e == &Effect::MainMenuMap(GameMap::new("lostcoast", "background01"))),
-        "entering lostcoast submenu loads Lost Coast's own background01"
-    );
-    assert_eq!(
-        console.config.gameplay.background_map.as_deref(),
-        Some("background01")
-    );
-    assert_eq!(
-        console.config.gameplay.background_game.as_deref(),
-        Some("lostcoast")
-    );
-    console.level_loaded_for_map("lostcoast", "background01", true);
-
-    // In lostcoast: row 0 is NEW GAME
-    let new_game_effects = click_row(&mut console, 0);
-    assert!(
-        new_game_effects
-            .iter()
-            .any(|e| matches!(e, Effect::Map(map) if map == "d2_lostcoast")),
-        "starts loading d2_lostcoast"
-    );
-    assert!(console.is_loading());
-    assert_eq!(console.loading_dialog.as_ref().unwrap().map, "d2_lostcoast");
-
-    // Simulate missing content error
-    console.loading_failed("owned map d2_lostcoast.bsp not found");
-    assert!(!console.is_loading());
-    assert!(console.loading_dialog.as_ref().unwrap().is_failed());
-    assert_eq!(
-        console.loading_dialog.as_ref().unwrap().error.as_deref(),
-        Some("owned map d2_lostcoast.bsp not found")
-    );
-
-    // Dismiss error with Escape -> returns to menu without crash
-    console.escape();
-    assert!(console.loading_dialog.is_none());
-    assert_eq!(console.mode(), Mode::MainMenu);
 }
 
 #[test]
@@ -4906,3 +4714,5 @@ fn small_canvases_and_resizes_keep_the_minimum_size() {
     assert!(smallest.entry.x + smallest.entry.w < smallest.submit.x);
     assert!(smallest.submit.x + smallest.submit.w < smallest.size.x);
 }
+
+mod chapters;

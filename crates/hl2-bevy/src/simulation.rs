@@ -2,6 +2,8 @@
 use crate::source_direction;
 use anyhow::{Result, bail};
 use bevy::{app::RunFixedMainLoopSystems, prelude::*};
+pub(crate) mod commentary;
+pub(crate) mod movie;
 use hl2_simulation::physics::Physics;
 use modkit_core::{
     World,
@@ -320,6 +322,17 @@ impl Simulation {
             "native_convex_shapes": self.physics.native_shape_count, "native_shape_fallbacks": self.physics.native_shape_fallbacks,
             "skipped_colliders": self.physics.skipped, "dynamic_props": self.physics.dynamic.len()})
     }
+    fn request_gameplay_map(
+        &mut self,
+        ui: &mut crate::ui_host::Console,
+        map: String,
+        game: Option<String>,
+    ) {
+        ui.map_request = Some(map);
+        ui.map_request_game = game;
+        ui.background_request = false;
+        self.loading = true;
+    }
     pub(crate) fn set_fly(&mut self, fly: bool) {
         if self.fly != fly {
             self.fly = fly;
@@ -402,14 +415,12 @@ impl Simulation {
                         self.yaw.to_degrees()
                     ));
                 }
-                Effect::Map(map) => {
-                    ui.map_request = Some(map);
-                    ui.map_request_game = None;
-                    ui.background_request = false;
-                    self.loading = true;
+                Effect::ChapterMap(target) => {
+                    self.request_gameplay_map(ui, target.map, Some(target.game))
                 }
+                Effect::Map(map) => self.request_gameplay_map(ui, map, None),
                 Effect::MainMenuMap(background) => {
-                    if self.loading && !ui.background_request {
+                    if ui.map_request.is_some() && !ui.background_request {
                         ui.source
                             .log("Gameplay map load in progress; ignoring background map request");
                     } else {
@@ -447,36 +458,47 @@ impl Simulation {
                     Err(e) => ui.source.log(e),
                 },
                 Effect::Quit => ui.quit_requested = true,
-                Effect::ApplyConfig(cfg) => {
-                    self.fov = cfg.video.fov;
-                    self.vertical_fov = cfg.video.vertical_fov;
-                    self.viewmodel_fov = cfg.video.viewmodel_fov;
-                    // Only a resolution or display mode change touches the window, so applying
-                    // a mouse or audio setting never resizes, re-centres or re-modes it. The
-                    // comparison is against what the window was last given: the console has
-                    // already stored the new configuration when this effect arrives.
-                    let target = WindowSettings::of(&cfg.video);
-                    if self.applied_window != Some(target) {
-                        self.applied_window = Some(target);
-                        self.pending_video_config = Some(cfg.video.clone());
-                    }
-                    let detail = cfg.video.load_detail();
-                    let detail_changed = self.applied_detail.is_some_and(|prev| prev != detail);
-                    self.applied_detail = Some(detail);
-                    ui.source.config = *cfg;
-                    if detail_changed && !self.loading {
-                        let map = game.world.name.clone();
-                        if !map.is_empty() {
-                            ui.map_request = Some(map);
-                            ui.background_request = ui.source.background_level();
-                            self.loading = true;
-                        }
-                    }
-                }
+                Effect::ApplyConfig(cfg) => self.apply_config_effect(ui, game, &cfg),
                 Effect::PlaySound(sound) => {
                     game.sound_requests
                         .push(hl2_simulation::sounds::SoundRequest::ui(sound));
                 }
+                Effect::PlayVideo {
+                    filename,
+                    exit_command,
+                    width,
+                    height,
+                } => {
+                    movie::play_video(self, ui, game, filename, exit_command, width, height);
+                }
+            }
+        }
+    }
+
+    fn apply_config_effect(
+        &mut self,
+        ui: &mut crate::ui_host::Console,
+        game: &mut crate::gameplay::Gameplay,
+        cfg: &hl2_ui::config::Config,
+    ) {
+        self.fov = cfg.video.fov;
+        self.vertical_fov = cfg.video.vertical_fov;
+        self.viewmodel_fov = cfg.video.viewmodel_fov;
+        let target = WindowSettings::of(&cfg.video);
+        if self.applied_window != Some(target) {
+            self.applied_window = Some(target);
+            self.pending_video_config = Some(cfg.video.clone());
+        }
+        let detail = cfg.video.load_detail();
+        let detail_changed = self.applied_detail.is_some_and(|prev| prev != detail);
+        self.applied_detail = Some(detail);
+        ui.source.config = cfg.clone();
+        if detail_changed && !self.loading {
+            let map = game.world.name.clone();
+            if !map.is_empty() {
+                ui.map_request = Some(map);
+                ui.background_request = ui.source.background_level();
+                self.loading = true;
             }
         }
     }
@@ -537,6 +559,85 @@ impl Simulation {
         );
         game.request_spawn(request, &mut self.physics, self.eye, forward)
     }
+    fn apply_script_command(
+        &mut self,
+        c: Command,
+        mut game: Option<&mut crate::gameplay::Gameplay>,
+        ui: Option<&mut crate::ui_host::Console>,
+    ) -> Option<String> {
+        if let Some(eye) = c.eye {
+            self.eye = glam::Vec3::from_array(eye);
+            self.player = Player::new(self.eye);
+        }
+        if let Some(yaw) = c.yaw {
+            self.yaw = yaw.to_radians();
+        }
+        if let Some(pitch) = c.pitch {
+            self.pitch = pitch.to_radians();
+        }
+        if let Some(fov) = c.fov {
+            self.fov = fov;
+        }
+        if let Some(fly) = c.fly {
+            self.set_fly(fly);
+        }
+        if let Some(enabled) = c.dev_overlay {
+            self.dev_overlay = enabled;
+        }
+        if let Some(paused) = c.paused {
+            self.paused = paused;
+        }
+        self.input = Input {
+            forward: c.forward,
+            side: c.side,
+            yaw: self.yaw,
+            jump: c.jump,
+            crouch: c.crouch,
+            sprint: c.sprint,
+            slow: c.slow,
+            max_speed: None,
+            surface: Default::default(),
+        };
+        if self.background_level || self.frozen() {
+            // Retail ignores player input on a menu background level and under a
+            // point_viewcontrol that takes control (SDK `EnableControl(FALSE)`).
+            self.input = Input {
+                yaw: self.yaw,
+                ..Input::default()
+            };
+            if let Some(game) = game.as_deref_mut() {
+                if game.scene.commentary.enabled {
+                    game.buttons(c.primary, c.secondary);
+                    game.actions.extend(c.actions);
+                } else {
+                    game.actions
+                        .extend(c.actions.into_iter().filter(|a| a.entity_setup()));
+                }
+            }
+        } else if let Some(game) = game.as_deref_mut() {
+            game.buttons(c.primary, c.secondary);
+            game.actions.extend(c.actions);
+        }
+        if let (Some(ui), Some(game)) = (ui, game) {
+            let before = ui.source.mode();
+            for action in &c.ui {
+                self.ui_action(ui, game, action);
+            }
+            if ui.source.mode() != before {
+                self.paused = ui.source.paused();
+                self.transition = true;
+                self.jump_suppressed |= c.jump;
+                game.consume_attacks();
+            }
+        }
+        if !c.jump {
+            self.jump_suppressed = false;
+        }
+        self.input.jump &= !self.jump_suppressed;
+        self.next += 1;
+        c.label
+    }
+
     pub(crate) fn step(
         &mut self,
         mut game: Option<&mut crate::gameplay::Gameplay>,
@@ -559,72 +660,7 @@ impl Simulation {
             .filter(|c| c.tick == self.host_tick)
             .cloned()
         {
-            if let Some(eye) = c.eye {
-                self.eye = glam::Vec3::from_array(eye);
-                self.player = Player::new(self.eye);
-            }
-            if let Some(yaw) = c.yaw {
-                self.yaw = yaw.to_radians();
-            }
-            if let Some(pitch) = c.pitch {
-                self.pitch = pitch.to_radians();
-            }
-            if let Some(fov) = c.fov {
-                self.fov = fov;
-            }
-            if let Some(fly) = c.fly {
-                self.set_fly(fly);
-            }
-            if let Some(enabled) = c.dev_overlay {
-                self.dev_overlay = enabled;
-            }
-            if let Some(paused) = c.paused {
-                self.paused = paused;
-            }
-            self.input = Input {
-                forward: c.forward,
-                side: c.side,
-                yaw: self.yaw,
-                jump: c.jump,
-                crouch: c.crouch,
-                sprint: c.sprint,
-                slow: c.slow,
-                max_speed: None,
-                surface: Default::default(),
-            };
-            if self.background_level || self.frozen() {
-                // Retail ignores player input on a menu background level and under a
-                // point_viewcontrol that takes control (SDK `EnableControl(FALSE)`).
-                self.input = Input {
-                    yaw: self.yaw,
-                    ..Input::default()
-                };
-                if let Some(game) = game.as_deref_mut() {
-                    game.actions
-                        .extend(c.actions.into_iter().filter(|a| a.entity_setup()));
-                }
-            } else if let Some(game) = game.as_deref_mut() {
-                game.buttons(c.primary, c.secondary);
-                game.actions.extend(c.actions);
-            }
-            if let (Some(ui), Some(game)) = (ui.as_deref_mut(), game.as_deref_mut()) {
-                let before = ui.source.mode();
-                for action in &c.ui {
-                    self.ui_action(ui, game, action);
-                }
-                if ui.source.mode() != before {
-                    self.paused = ui.source.paused();
-                    self.transition = true;
-                    self.jump_suppressed |= c.jump;
-                    game.consume_attacks();
-                }
-            }
-            if !c.jump {
-                self.jump_suppressed = false;
-            }
-            self.input.jump &= !self.jump_suppressed;
-            label = c.label;
-            self.next += 1;
+            label = self.apply_script_command(c, game.as_deref_mut(), ui.as_deref_mut());
         }
         if (self.paused() || self.transition)
             && let Some(game) = game.as_deref_mut()
@@ -632,6 +668,9 @@ impl Simulation {
             game.consume_attacks();
         }
         if self.world_running() && (self.focused || !self.commands.is_empty()) && !self.transition {
+            if let Some(game) = game.as_deref_mut() {
+                commentary::before_gameplay_tick(self, game, ui.as_deref_mut());
+            }
             if let Some(game) = game.as_deref_mut() {
                 let direction =
                     glam::Vec3::from_array(source_direction(self.yaw, self.pitch).to_array());
@@ -706,28 +745,11 @@ impl Simulation {
                     TICK,
                 );
                 if let Some(game) = game.as_deref_mut() {
-                    game.step_sounds(&self.physics, before, feet, &self.player);
-                    if game.player_outcome(&mut self.player) {
-                        self.death_buttons_released = false;
-                        self.eye = self.player.eye();
-                    }
+                    commentary::finish_ground_step(self, game, before, feet);
                 }
             }
             if let Some(game) = game.as_deref_mut() {
-                let world = game.world.clone();
-                game.scene
-                    .update_soundscape(&world, glam::Vec3::from_array(self.eye.to_array()));
-                let states = &game.scene.states;
-                self.view_control = game.scene.view_control.view(
-                    &world,
-                    |id| states.get(id).filter(|s| !s.killed).map(|s| s.origin),
-                    glam::Vec3::from_array(self.eye.to_array()),
-                );
-                self.zoom_fov = game
-                    .scene
-                    .view_control
-                    .zoom
-                    .map(|zoom| zoom.fov_at(self.fov, game.scene.time));
+                commentary::after_gameplay_step(self, game);
             }
         }
         if self.player.dead && !self.paused() && !self.transition {
@@ -757,7 +779,9 @@ impl Simulation {
                 paused: self.paused,
                 fly: self.fly,
                 player: self.player.clone(),
-                gameplay: game.as_deref().map(|g| g.report(&self.physics)),
+                gameplay: game
+                    .as_deref()
+                    .map(|g| commentary::sample_report(g, &self.physics)),
                 console: ui.as_deref().map(|u| u.report()),
                 hull_contacts: self.physics.hull_contacts(
                     self.player.feet,
@@ -801,6 +825,7 @@ impl Plugin for MovementPlugin {
                 .in_set(MovementControlsSet),
         )
         .add_systems(FixedUpdate, fixed_step)
+        .add_systems(Update, commentary::update_commentary_skins)
         .add_systems(
             RunFixedMainLoop,
             crate::camera::present_player_view.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop),
@@ -1569,5 +1594,32 @@ mod tests {
                 .iter()
                 .any(|s| s.contains("Gameplay map load in progress"))
         );
+    }
+    #[test]
+    fn running_background_worker_does_not_drop_new_background_request() {
+        let mut sim = Simulation::new(
+            &World::default(),
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
+        sim.loading = true;
+        ui.source.start_background_loading("hl2", "background01");
+        // The campaign has consumed the first request while its worker remains active.
+        assert!(!ui.background_request);
+        sim.console_effects(
+            &mut ui,
+            &mut game,
+            vec![hl2_ui::console::Effect::MainMenuMap(
+                hl2_ui::console::GameMap::new("ep2", "ep2_background01"),
+            )],
+        );
+        assert_eq!(ui.map_request.as_deref(), Some("ep2_background01"));
+        assert_eq!(ui.map_request_game.as_deref(), Some("ep2"));
+        assert!(ui.background_request);
     }
 }

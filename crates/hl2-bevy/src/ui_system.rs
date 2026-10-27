@@ -665,3 +665,6 @@ mod tests {
         assert!(window && cursor, "menu cursor is visible");
     }
 }
+
+#[cfg(test)]
+mod loading_tests;

@@ -1,10 +1,22 @@
 # STATUS
 
-Checkpoint: 2026-10-27 (Codex desktop, GPT-6 family; exact model identifier not exposed),
-codex/blur-performance based on f7369cd. Profiled frame tails and an owned native-resolution
-guard and subsequent rendering/tier changes are committed checkpoints on this worktree branch.
-Ultra cost and complete native qualification remain open. The primary checkout
-is reserved for the owner's manual testing. Sections below are newest first.
+## Integration checkpoint (2026-10-27)
+
+Merge orbitalman/hl2-ui-chapters into orbitalman/hl2-ui, retaining chapter selection,
+asynchronous startup/loading, commentary, movie playback and HUD alignment alongside
+four-tier motion blur and the measured M1 Pro/Metal rendering improvements. Startup uses
+the existing app helper before asynchronous map loading; no feature-specific duplicate
+app setup is introduced. Earlier sections below retain each branch's historical evidence.
+
+Validation: 1,184 Rust tests pass (100 ignored), 27 Python tests, strict host/Windows-target
+Clippy, formatting and architecture pass without exception growth. Release packaging and
+owned startup stub test pass. Eight packaged groups pass: submenus, return_menu,
+chapter_selection, motion_blur_options, viewmodel_motion_blur, commentary, video, coverage.
+The initial options fixture missed the Video tab after font/layout changes; existing
+keyboard navigation replaces the pixel click, with intermediate-state assertions and an
+Advanced/Ultra persistence assertion. The focused rerun passes; rejected evidence remains
+in artifacts/merge-ui-chapters. Unrelated untracked files are outside this merge. Windows runtime, ordinary campaign playthrough
+and fresh interactive FPS measurements are NOT TESTED in this integration.
 
 ## Wrap-up: four blur tiers and measured rendering savings (2026-10-27)
 
@@ -285,6 +297,214 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
   Initial contact-sheet height was invalid and corrected. Evidence: docs/validation.md.
 - Windows/Linux runtime, all weapons/frame rates/resolutions and native comparison remain
   not tested. Next: ordinary-play owner confirmation on the isolated build.
+
+## Retail quick-info size and horizontal placement corrected (2026-10-27)
+
+- Follow-up to the vertical fix: constrain horizontal midpoint instead of merely
+  checking that arcs straddle the reticle. Preserve authored spacing and account
+  for glyph bearings; center portable reticle ink horizontally too.
+- Retained accepted retail 720p and verified 1080p captures confirm oversized
+  macOS quick-info: 75-pixel height at 720p versus retail 42. Select the installed
+  desktop QuickInfo font definition for our character-cell rasterizer; leave other
+  resource consumers and platform restrictions untouched. Corrected heights are
+  42 pixels at 720p and 63 at 1080p, with 1-2 pixel antialias fringe differences.
+- All four recorded native executable/module hashes match the current owned install.
+  References are retained captures, not a fresh native run. Exclude earlier rejected
+  mislabeled screenshots and the 1080p session lacking a module manifest.
+- 1,166 Rust tests / 100 ignored, 13 Python checks, strict Clippy/fmt/architecture,
+  Windows-target Clippy and five owned HUD tests pass. Before HUD/aspect 2/2; after
+  HUD/aspect/power 3/3 (101 s). Final retail comparison image inspected.
+- Evidence: artifacts/quickinfo-horizontal; commands and raster tolerances in
+  docs/validation.md. Native Windows runtime of this change and exact antialias/
+  color parity are not tested. Next: broader HUD comparisons against native captures.
+
+## Quick-info arcs aligned with the weapon crosshair (2026-10-27)
+
+- Center quick-info arc bitmap bounds on view center instead of nominal font height.
+  Preserve full-height clipping and share placement across full, partial and warning states.
+- Correct the portable weapon-reticle bitmap center too; native Windows GDI placement
+  remains unchanged. Split reticle and quick-info drawing into HUD child modules;
+  architecture baseline shrinks from 2,044 to 1,830 production lines in hud.rs.
+- New installed-glyph regression reproduces the old 5.54-pixel offset at 640x480.
+  Checks actual emitted arc/crosshair quads across six viewport sizes, four HUD aspect
+  choices and three health/ammo states. Portable tests cover asymmetric ascent,
+  blur and progress clipping endpoints; five owned HUD checks pass.
+- Workspace validation: 1,165 Rust tests, 100 ignored, 13 Python helper tests,
+  strict Clippy/fmt/architecture pass. Windows-target Clippy passes. Packaged HUD
+  and HUD-aspect checks pass before; HUD/HUD-aspect/power pass after (3/3, 99 s).
+  Final gameplay capture inspected; all eleven package hashes verified.
+- Evidence and retained failures: artifacts/quickinfo-layout; detailed commands in
+  docs/validation.md. Native Windows runtime, native retail raster comparison and
+  ordinary campaign playthrough are not tested. Next: broader native HUD comparisons.
+
+
+## Chapter background presentation during background loading and unclipped QuickInfo crosshair hud (2026-10-27)
+
+- Fixed background map loading presentation: when launching the game into the main menu without a gameplay map, the chapter's pre-blurred background texture (`materials/console/<background>.vtf` / `_widescreen.vtf`) is now immediately rendered alongside the `#GameUI_Loading` tip plaque in the bottom-right corner rather than showing a plain black screen.
+- Traced root causes: `start_background_loading` retained `Mode::Gameplay` which short-circuited `draw_loading_screen` to only draw the plaque, skipping background texture rendering; `Console::draw` menu background check did not treat background loading as an active menu display; and `load_stub` in `hl2-bevy` mounted base `hl2` rather than the target expansion's mounted game paths via `Vfs::mount_game`.
+- Fixed QuickInfo HUD crosshair clipping: in `source-ui::font`, updated `FontFace::draw_cropped` to crop glyphs using normalized vertical fractions `[0.0, 1.0]` of the rendered glyph texture height instead of subtracting absolute font size from cap height (`cell_height + cap) * 0.5`). Previously, `HL2crosshairs.ttf` metrics (`unitsPerEm = 1000`, `winAscent = 573`, `capHeight = 700`) shifted `glyph.y` down by ~11.1% of the character height, clipping off the bottom pixels of health and ammo brackets `( + )`.
+- Updated `QuickInfoHud::progress` to pass normalized vertical fractions (`vec2(0., p)` for empty and `vec2(p, 1.)` for full), matching Source SDK `CHudTexture::DrawSelfCropped` UV / vertex lerp cropping and preserving full bottom bracket extents.
+- In `hl2-bevy::startup`, ensured `target_map` sets `background = true` only when `--main-menu` is explicitly requested, allowing test fixtures specifying `--map <name>` without `--main-menu` to run as gameplay levels.
+- Refactored `Console::draw` in `crates/hl2-ui/src/console.rs` (reducing production lines from 219 to 21 lines), modularizing `draw_menu_buttons` and `draw_menu_titles` into `draw_menu.rs`, tightening `architecture-baseline.json`.
+- Corrected Play button pointer coordinates in `test-inputs/bevy-chapters-lostcoast.json` (`[640, 508]`), ensuring `chapter_selection` replay test clicks Play in the 600-unit layout.
+- `validate.sh`, `check_windows.sh`, and packaged replay checks (`chapter_selection`, `power_hud`, `hud`, `hud_aspect`, `submenus`, `return_menu`, `chapter_menu`) pass with 0 failures.
+
+
+## Asynchronous startup map loading with chapter background and progress UI verified (2026-10-27)
+
+- Fixed initial loading sequence when launching without `--map`: immediately presents the chapter's pre-blurred background (`materials/console/<background>.vtf` / `_widescreen.vtf`) with the localized corner loading plaque (`#GameUI_Loading`) and occluded main menu buttons/titles until background level loading completes.
+- Fixed initial loading sequence when launching with gameplay `--map`: immediately presents the target chapter's pre-blurred background with the centered modal `LoadingDialog` and segmented progress bar, smoothly transitioning to gameplay and locking the cursor on load completion.
+- Bypassed 6-second blank video blackout on interactive launch when no software/hardware video frame decoder is installed (`HAS_VIDEO_DECODER = false`).
+- Replaced synchronous map parsing in `main()` with a lightweight stub map (~5 ms setup), moving all heavy map loads to asynchronous worker threads (`hl2-owned-map-loader`).
+- Tightened `architecture-baseline.json` by extracting `next_map_request` in `campaign.rs::poll` (208 -> 179 lines), `setup` (135 -> 119 lines), and `main.rs` (1,204 -> 1,109 lines).
+- `validate.sh`, `check_windows.sh`, and packaged replay checks (`video`, `campaign`, `commentary`, `console`, `bg_compare`) pass with 0 failures.
+
+## Dialog close button scaled to retail 8x8 size (2026-10-27)
+
+- Scaled VGUI dialog close button cross to retail dimensions (`CLOSE_GLYPH_TALL = 10.`, rendering an 8x8 pixel cross, 80% of raw tall-14 raster).
+- Perfectly centered inside the 18x16 close button rect with 5px horizontal and 4px vertical padding (down from 10x10 px with 4px/3px margins).
+- Re-exported `CLOSE_GLYPH_TALL` in `source_ui::widgets`; updated owned installation verification test `owned_marlett_font_resolves_for_dialog_close_buttons`.
+- `validate.sh`, `check_windows.sh`, and packaged replay checks (`video`, `commentary`, `coverage`) pass with 0 failures.
+
+## Dialog close button Marlett font rendering restored (2026-10-27)
+
+- Restored authentic Source VGUI title bar close button rendering across all dialog frames (Options, Chapters / New Game, subdialogs, Console, Message Boxes).
+- Traced root cause of tiny close buttons to `GorDIN-Regular.ttf` Unicode multiplication sign `×` (5x5 px glyph).
+- Implemented retail `vgui_controls::FrameButton` behavior: resolved `"Marlett"` font (tall 14 in `SourceScheme.res`, loaded from `resource/marlett.ttf`) and rendered glyph `'r'` centered inside the `18x16` button rectangle with +1px pressed offset and fallback symbol support.
+- Modularized `crates/source-ui/src/widgets/frame.rs` and `crates/hl2-ui/src/console/fonts.rs`, reducing `widgets.rs` to 2,381 lines and `Console::load` to 98 lines (within the 100-line limit), tightening `architecture-baseline.json`.
+- Unit tests and owned test `owned_marlett_font_resolves_for_dialog_close_buttons` pass; `validate.sh`, `check_windows.sh`, and packaged replay checks (`video`, `commentary`, `coverage`) pass with 0 failures.
+
+## Movie playback (playvideo, playvideo_exitcommand) and startup video sequence verified (2026-10-27)
+
+- Verified movie playback commands `playvideo` and `playvideo_exitcommand` and startup video sequence across `source-assets`, `hl2-ui`, and `hl2-bevy`.
+- Container parser reads Bink 1 headers (`BIKi`, `BIKb`, `BIKf`, `BIKg`, `BIKh`), frame dimensions, frame rates, and durations.
+- Console commands support path normalization (`media/<filename>.bik`), modal blackout, letterbox/pillarbox aspect framing, elapsed time tracking, and skip key inputs (Escape, Space, Enter, Backquote/Tilde, and mouse click).
+- Retail fallback invariant verified: missing or unplayable videos immediately execute the exit command and log `Unable to play video: %s`.
+- Audio output is muted during active video playback and unmuted upon completion.
+- Startup video sequence loads `StartupVids.txt` (default `media/valve.bik`), skippable with `--novid` / `-novid` or during unattended runs.
+- Packaged replay check `video` (`test-inputs/bevy-video.json`) and owned installed video parsing passed; `validate.sh` and `check_windows.sh` passed.
+
+## Developer commentary mode verified (2026-10-27)
+
+- Verified developer commentary mode across GameUI, simulation, HUD, and host runtime.
+- Chapter browser integrates the `#HL2_Enable_Commentary` footer checkbox, commentary card badge (`materials/vgui/resource/commentary_hl2c.vtf`), and the commentary explanation confirmation box (`#GameUI_CommentaryDialogTitle`, `#GAMEUI_Commentary_Console_Explanation`).
+- In-game `point_commentary_node` balloons support raycast hovering, `+use` playback toggle, sound cue dispatch, caption dictionary lookup, Hermite camera viewposition override, and secondary-attack (`+attack2`) node teleportation.
+- Balloon skin dynamically updates to `models/extras/speech_info_used` once played.
+- Player is immune to damage while commentary mode is enabled.
+- `HudCommentary` displays progress bar, speaker name, node count, and audio/caption status.
+- Zero per-frame cost when commentary is disabled.
+- Packaged replay check `commentary` (`test-inputs/bevy-lostcoast-commentary.json` on `d2_lostcoast`) and `coverage` passed; `validate.sh` and `check_windows.sh` passed.
+
+
+## Chapter browser layout/fonts, submenu background retention, and loading screen backdrop verified (2026-10-27)
+
+- Normalized `CardBrowser` and `Catalog::browser_layout` card geometry to `168x146` with a
+  symmetric `8px` `LevelPicBorder` (`0, 44, 168, 102`) around `LevelPic` (`8, 52, 152, 86`),
+  aligning all three cards with the `548px` divider rules and clamping label widths to `168px`.
+- Resolved `Default` (`GorDIN` Regular 400) and `UiBold` (`GorDIN` Bold 700) from
+  `resource/SourceScheme.res` in `Console::load`, centered `FontFace` ascent using
+  `OS/2.sCapHeight` when present, snapped `FontFace::draw_cell_outlined` to integer pixels,
+  and colored selected card headings/titles with `SelectionColor` (orange) and unselected
+  cards with `FgColor` (white).
+- Preserved an already-loaded chapter background from the same game when re-entering that
+  game's submenu (`Console::show_category`), and drew the target map's pre-blurred chapter
+  background (`Console::loading_background`) full-screen behind the modal `LoadingDialog`
+  with menu titles/buttons hidden during gameplay map loads.
+- `validate.sh`, `check_windows.sh`, owned-install font/catalog tests, and packaged
+  `submenus`, `return_menu`, and `chapter_selection` replays pass (3/3 checks, 0 failures).
+
+
+## Background loading now waits before showing controls (2026-10-27)
+
+- Production package fa4a000 supersedes the earlier interactive-loading policy. Hide menu
+  titles/buttons and dialogs, retain owned loading backdrop/localized plaque, gate pointer,
+  keyboard, Escape, console toggle and direct menu/chapter opening. Restore windows and
+  chapter selection after success/failure; consume hidden held activation.
+- Further pinned GameUI analysis traces loading state to InstantHideMainMenu and menu/title
+  alpha zero. Published SDK Panel::SetAlpha corroborates the alpha helper. The earlier
+  interactive-menu assumption was unsupported. Native retail timing remains not tested.
+- validate.sh: 1,145 Rust tests / 94 ignored, 13 Python, strict Clippy/fmt/architecture pass.
+  Windows-target Clippy, owned per-frame input wait/restore and actual asynchronous worker
+  wait/completion tests pass. Eleven package hashes verified.
+- Packaged submenus/return/chapter_selection/menu_options/coverage: five groups, zero failures,
+  270 s. Restored browser captures inspected. Controlled attached windowed report records
+  hidden controls at request and restored controls after completion; it exited normally.
+- Three isolated alternating Metal 1024x768 pairs: prior/current browser 18.693/18.743 ms,
+  HUD CPU 0.1550/0.1581 ms, slightly overlapping ranges; no causal performance claim.
+- Actual transient GPU wait-screen capture remains not tested: replay capture counters skip
+  loading, and computer use could not bind the unbundled binary. Rejected evidence retained;
+  canvas-quad tests verify hidden rendering. Final physics/GPU install can still hitch.
+- Evidence: artifacts/chapter-loading-gate; commands/limits in docs/validation.md and
+  docs/performance.md. Native Windows/Linux execution and ordinary campaign play not tested.
+
+
+## Dialog/background loading fixes verified (2026-10-27)
+
+- Production source/package 6019af3, following lifetime fix 5a70c90. Eleven package hashes
+  verified. Before capture reproduces the confirmation-shaped hole; fixed capture is intact.
+- Closing a browser preserves its background worker. A newer background stays queued;
+  superseded results cannot install or dismiss newer loading UI. Chapter launch resets
+  background presentation. Rapid return to the current background reuses its installed world.
+- Runtime map changes retain GameUI; they no longer rebuild and discard fonts, menus and
+  thumbnails. No new dependency, render pass or per-frame file access.
+- validate.sh passes: 1,143 Rust tests / 94 ignored, 13 Python, strict Clippy/fmt/architecture.
+  Windows-target Clippy passes. Owned native-input and actual decoding-worker browser
+  interaction/scene-replacement tests pass; final strengthened owned test takes 11.30 s.
+- Initial fix/resource-reuse package: five replay groups, zero failures/290 s, including all
+  four expansion chapter launches. Final committed package: affected submenus/return/coverage
+  groups, zero failures/111 s. Evidence and rejected assumptions: artifacts/chapter-bugs;
+  detailed commands in docs/validation.md.
+- Three isolated alternating Metal 1024x768 pairs: prior/fixed browser 18.947/18.878 ms,
+  overlapping ranges; no measured steady-state regression or established speedup.
+- Final physics/GPU installation can still hitch. Zero-hitch loading, native retail input
+  responsiveness, Windows/Linux runtime and ordinary campaign play remain not tested.
+  Native/static resource findings and their limits: docs/gameui.md; timing: docs/performance.md.
+- Next: profile individual installation phases/input latency if remaining stalls reproduce;
+  keep media deferred. Baseline invalid-entity command warnings remain outside this fix.
+
+
+## Portability / dependency declaration checkpoint (2026-10-27)
+
+- Owner deferred movies/commentary before runtime source or Cargo dependencies were added.
+  No FFmpeg or Rust decoder runtime dependency exists in this checkout.
+- README now distinguishes packaged runtime, platform system libraries, optional Linux Browse
+  portal/Zenity integration and build/test tools. AGENTS requires cross-platform runtime and
+  disclosure of separately installed runtime prerequisites.
+- Windows CI preserved; native Ubuntu 24.04/macOS 15 source validation configured. Hosted
+  jobs have not run; native Linux build/runtime remain not tested, with no local Linux executor.
+- Audited subprocess calls and native linkage: Windows registry discovery uses built-in reg,
+  setup relaunches the same executable; packaged macOS links only system libraries/frameworks.
+  Workflow YAML/matrix, architecture/whitelist, 13 Python tests, fmt, POSIX syntax and strict
+  Windows-target Clippy pass. Runtime unchanged; no gameplay rebuild/frame-time rerun.
+- Next: obtain hosted CI results before upgrading Linux's status; media work stays deferred.
+
+
+## Chapter selection / shared card browser verified (2026-10-27)
+
+- Runtime source/package: 7171e3f. New Game opens chapter selection; Start loads the selected
+  chapter's first map with explicit game identity. Installed MOD configs, localized tokens,
+  layouts, scheme colors and thumbnail materials supply all content. All 28 entries across
+  base/Episode One/Episode Two/Lost Coast are available (15/5/7/1, base includes credits).
+- source-ui::card_browser owns reusable geometry, paging, selection/focus/capture, placement
+  and drawing, returning a card index. hl2-ui keeps chapter metadata, retail resource/token
+  interpretation and game/map conversion. No new dependency edges or toolkit filesystem access.
+- validate.sh: 1,135 Rust tests/93 ignored +13 Python, architecture, strict Clippy/fmt;
+  Windows-target Clippy and owned catalog test pass. Toolkit has five browser tests; hl2-ui 302.
+- Committed release package: eleven hashes verified. Packaged submenus/chapter_selection/
+  menu_options/coverage: four groups, zero failures, 199 s. All four pointer-selected chapter
+  maps reach Gameplay in the correct game. Cancel/reopen, resource counts and 9a order pass.
+  All final captures inspected; extraction changes zero of 139,040 opaque thumbnail pixels.
+- Three isolated runs/state: prior/new closed-browser frame 20.187/20.138 ms (overlapping
+  ranges), open browser 18.703 ms with the base menu faded/outlines suppressed. No regression
+  measured in this scene or FPS guarantee. No new render pass/per-frame asset reads/card-list
+  allocation. Detailed evidence and retained rejected attempts: validation/performance docs.
+- Native UI comparison, Windows/Linux runtime, other UI languages and ordinary campaign are
+  not tested. Progress locking/commentary/intro movies/retail scroll animation are unfinished;
+  captured backgrounds still contain unfinished world/material rendering. Requested chapter
+  selection and selected-map loading are complete. Next: separately bounded native UI parity.
+
+
+ Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. PR readiness maintenance findings are fixed; runtime behavior is unchanged. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
 
 ## Windows CI test portability (2026-10-26)
 

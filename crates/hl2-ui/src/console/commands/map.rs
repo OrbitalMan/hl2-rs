@@ -3,7 +3,7 @@
 
 use super::{Outcome, Spec};
 use crate::console::{Console, Effect, Mode};
-use source_ui::console::command::{parse, Invalid};
+use source_ui::console::command::{flag, parse, Invalid};
 
 pub(super) fn map(console: &mut Console, spec: &'static Spec, args: &[String]) -> Outcome {
     if args.len() != 1 {
@@ -111,6 +111,22 @@ pub(super) fn set_skill(console: &mut Console, arg: &str) -> Result<(), Invalid>
         return Err(Invalid::Usage);
     }
     console.config.gameplay.skill = skill;
+    Ok(())
+}
+
+pub(super) fn commentary_value(console: &Console) -> Option<String> {
+    Some(
+        if console.config.gameplay.commentary {
+            "1"
+        } else {
+            "0"
+        }
+        .into(),
+    )
+}
+
+pub(super) fn set_commentary(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.gameplay.commentary = flag(arg)?;
     Ok(())
 }
 

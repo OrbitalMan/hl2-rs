@@ -84,12 +84,9 @@
       {
         "action": "input",
         "input": {
-          "pointer": [
-            702,
-            215
-          ],
-          "click": true,
-          "held": true
+          "keys": [
+            "tab"
+          ]
         }
       }
     ]
@@ -100,11 +97,61 @@
       {
         "action": "input",
         "input": {
-          "pointer": [
-            702,
-            215
-          ],
-          "released": true
+          "keys": [
+            "right"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "tick": 62,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": [
+            "right"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "tick": 63,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": [
+            "right"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "tick": 64,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": [
+            "right"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "tick": 65,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": [
+            "right"
+          ]
         }
       }
     ],

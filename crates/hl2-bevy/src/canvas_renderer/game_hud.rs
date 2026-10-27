@@ -17,6 +17,13 @@ pub(super) fn draw(hud: &Hud, game: &Gameplay, ui: &Console) {
     );
     if !ui.source.paused() {
         hud.source.draw_crosshair(&game.inventory);
+        if game.scene.commentary.enabled {
+            hud.source.draw_commentary(
+                game.scene.commentary.active_overlay().as_ref(),
+                ui.source.config.audio.captions != hl2_ui::config::Captions::None,
+                game.scene.time,
+            );
+        }
     }
     hud.source.draw_power(
         &game.inventory,

@@ -69,9 +69,16 @@ impl FontFace {
                 (metrics.ascent, metrics.ascent - metrics.descent)
             },
             |table| {
-                let ascent = f32::from(table.windows_ascender()) / units;
+                let win_ascent = f32::from(table.windows_ascender()) / units;
                 let descent = f32::from(table.windows_descender()).abs() / units;
-                (ascent, ascent + descent)
+                let cell_height = win_ascent + descent;
+                let ascent = face
+                    .capital_height()
+                    .filter(|&cap| cap > 0)
+                    .map_or(win_ascent, |cap| {
+                        (cell_height + f32::from(cap) / units) * 0.5
+                    });
+                (ascent, cell_height)
             },
         );
         Ok(Self {
@@ -150,6 +157,18 @@ impl FontFace {
         self.glyphs.borrow_mut().insert(key, glyph.clone());
         glyph
     }
+    /// Cached bitmap bounds relative to the character-cell origin, including font effects.
+    /// Symbol HUDs can center their visible glyph rather than assuming text ascent symmetry.
+    pub fn glyph_bounds(&self, character: char, size: f32, effects: (u16, u16)) -> Rect {
+        let glyph = self.glyph(
+            character,
+            size.round().clamp(1., 1024.) as u16,
+            effects.0.min(64),
+            effects.1,
+        );
+        let dimensions = glyph.texture.as_ref().map_or(Vec2::ZERO, Texture2D::size);
+        Rect::new(glyph.x, glyph.y, dimensions.x, dimensions.y)
+    }
     pub fn draw(
         &self,
         value: &str,
@@ -186,7 +205,8 @@ impl FontFace {
         self.width_em(value, cell / self.cell_height)
     }
     /// Draws `value` with an outline/border along the letter edge path with its character cell's
-    /// top-left corner at `top_left`. Glyphs are rasterized at a whole-pixel EM and scaled.
+    /// top-left corner at `top_left`. Glyphs are rasterized at a whole-pixel EM and snapped to
+    /// whole pixels so 1:1 glyph bitmaps do not blur across subpixels.
     pub fn draw_cell_outlined(
         &self,
         value: &str,
@@ -195,13 +215,12 @@ impl FontFace {
         color: Color,
         outline: TextOutline,
     ) {
-        let em = (cell / self.cell_height).max(1.);
-        let raster = em.round().clamp(1., 1024.);
+        let raster = (cell / self.cell_height).round().clamp(1., 1024.);
         self.draw_baseline_outlined(
             value,
-            top_left + Vec2::new(0., (self.ascent * em).round()),
+            (top_left + Vec2::new(0., self.ascent * raster)).round(),
             raster,
-            em / raster,
+            1.0,
             color,
             outline,
         );
@@ -223,14 +242,28 @@ impl FontFace {
     ) {
         let mut pen = origin;
         let mut glyphs = Vec::with_capacity(value.len());
+        let unit_scale = (scale - 1.0).abs() < 1e-3;
         for c in value.chars() {
             let glyph = self.raster(c, em, 0, 0);
             if let Some(texture) = &glyph.texture {
-                let pos = vec2(
-                    pen.x + glyph.x * scale,
-                    pen.y + (glyph.y - self.ascent * em) * scale,
-                );
-                glyphs.push((texture.clone(), pos, texture.size() * scale));
+                let (pos, size) = if unit_scale {
+                    (
+                        vec2(
+                            (pen.x + glyph.x).round(),
+                            (pen.y + glyph.y - self.ascent * em).round(),
+                        ),
+                        texture.size(),
+                    )
+                } else {
+                    (
+                        vec2(
+                            pen.x + glyph.x * scale,
+                            pen.y + (glyph.y - self.ascent * em) * scale,
+                        ),
+                        texture.size() * scale,
+                    )
+                };
+                glyphs.push((texture.clone(), pos, size));
             }
             pen.x += glyph.advance * scale;
         }
@@ -283,6 +316,8 @@ impl FontFace {
     pub fn draw_baseline(&self, value: &str, origin: Vec2, em: f32, scale: f32, color: Color) {
         self.draw_baseline_outlined(value, origin, em, scale, color, TextOutline::NONE);
     }
+    /// Draws `value` vertically cropped between normalized fractions `fraction.x` and `fraction.y`
+    /// (both in `[0.0, 1.0]`) of the glyph's bitmap height.
     pub fn draw_cropped(
         &self,
         value: &str,
@@ -290,7 +325,7 @@ impl FontFace {
         size: f32,
         effects: (u16, u16),
         color: Color,
-        rows: Vec2,
+        fraction: Vec2,
     ) {
         let (blur, scanlines) = effects;
         let size = size.round().clamp(1., 1024.) as u16;
@@ -298,8 +333,9 @@ impl FontFace {
         for c in value.chars() {
             let glyph = self.glyph(c, size, blur.min(64), scanlines);
             if let Some(texture) = &glyph.texture {
-                let first = (rows.x - glyph.y).clamp(0., texture.height());
-                let last = (rows.y - glyph.y).clamp(0., texture.height());
+                let th = texture.height();
+                let first = (fraction.x.clamp(0., 1.) * th).round();
+                let last = (fraction.y.clamp(0., 1.) * th).round();
                 if last > first {
                     draw_texture_ex(
                         &self.canvas,
@@ -393,5 +429,74 @@ mod tests {
         let fg_count = quads.iter().filter(|q| q.color == WHITE).count();
         assert_eq!(outline_count, 8);
         assert_eq!(fg_count, 1);
+    }
+
+    #[test]
+    fn symbol_bounds_center_full_and_split_glyphs_despite_text_ascent() {
+        let canvas = Canvas::default();
+        let mut font = FontFace::load(
+            include_bytes!("../assets/fonts/ProggyClean.ttf"),
+            canvas.clone(),
+        )
+        .unwrap();
+        // A symbol's ink need not be symmetric around its nominal text cell.
+        font.ascent += 0.3;
+        for size in [16., 28., 56.] {
+            for effects in [(0, 0), (2, 0)] {
+                let bounds = font.glyph_bounds('(', size, effects);
+                let origin = vec2(100., 240. - bounds.center().y);
+                font.draw("(", origin.x, origin.y, size, effects, WHITE);
+                let full = canvas.drain();
+                assert_eq!(full.len(), 1);
+                assert_eq!(full[0].destination.center().y, 240.);
+                for split in [0., 0.25, 0.5, 0.75, 1.] {
+                    font.draw_cropped("(", origin, size, effects, WHITE, vec2(0., split));
+                    font.draw_cropped("(", origin, size, effects, WHITE, vec2(split, 1.));
+                    let pieces = canvas.drain();
+                    assert_eq!(pieces[0].destination.y, full[0].destination.y);
+                    let last = pieces.last().unwrap().destination;
+                    assert_eq!(
+                        last.y + last.h,
+                        full[0].destination.y + full[0].destination.h
+                    );
+                    if pieces.len() == 2 {
+                        assert_eq!(pieces[0].destination.y + pieces[0].destination.h, last.y);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn font_draw_cropped_uses_normalized_fractions_without_bottom_truncation() {
+        let canvas = Canvas::default();
+        let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");
+        let font = FontFace::load(font_bytes, canvas.clone()).expect("load font");
+
+        // Full vertical span (0.0 to 1.0) must render the full glyph height
+        font.draw_cropped("A", vec2(10., 20.), 16., (0, 0), WHITE, vec2(0., 1.));
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1);
+        let quad = &quads[0];
+        let th = quad.texture.as_ref().unwrap().height();
+        assert_eq!(quad.source.y, 0.);
+        assert_eq!(quad.source.h, th);
+        assert_eq!(quad.destination.h, th);
+
+        // Half vertical span (0.0 to 0.5) must render top half
+        font.draw_cropped("A", vec2(10., 20.), 16., (0, 0), WHITE, vec2(0., 0.5));
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].source.y, 0.);
+        assert_eq!(quads[0].source.h, (0.5 * th).round());
+        assert_eq!(quads[0].destination.h, (0.5 * th).round());
+
+        // Bottom half (0.5 to 1.0) must render bottom half through th
+        font.draw_cropped("A", vec2(10., 20.), 16., (0, 0), WHITE, vec2(0.5, 1.));
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].source.y, (0.5 * th).round());
+        assert_eq!(quads[0].source.h, th - (0.5 * th).round());
+        assert_eq!(quads[0].destination.h, th - (0.5 * th).round());
     }
 }

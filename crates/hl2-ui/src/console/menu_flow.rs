@@ -93,7 +93,7 @@ impl Console {
     pub fn dim_overlay_alpha(&self, time: f64) -> f32 {
         let menu_open = matches!(
             self.mode,
-            Mode::MainMenu | Mode::Pause | Mode::Options | Mode::Console
+            Mode::MainMenu | Mode::Pause | Mode::Options | Mode::NewGame | Mode::Console
         );
         let is_mid_gameplay =
             !self.background_level && matches!(self.base, Mode::Pause | Mode::Gameplay);
@@ -155,6 +155,7 @@ impl Console {
             self.background_transition.finish();
         }
         self.loading_dialog = None;
+        self.loading_background = None;
         self.loading_progress.reset();
         self.background_level = background;
         // A pending keep-video confirmation outlives the load: closing it would keep the change.
@@ -214,16 +215,68 @@ impl Console {
         }
     }
 
-    /// The chapter `game`'s `map` belongs to: from the index, or worked out for that game now when
-    /// the index is not built yet.
+    /// The chapter `game`'s `map` belongs to: first matching a chapter's starting map, then from
+    /// the background-built transition index, or worked out for that game when the index is not
+    /// built yet.
     fn chapter_of(&self, game: &str, map: &str) -> Option<String> {
         use crate::gameui::chapters;
+        if let Some(chapters) = self.gameui.chapters.get(game) {
+            if let Some(ch) = chapters.iter().find(|c| {
+                c.start
+                    .as_deref()
+                    .is_some_and(|s| s.eq_ignore_ascii_case(map))
+            }) {
+                return Some(ch.key.clone());
+            }
+        }
         if let Some(found) = self.chapter_index.get(game, map) {
             return found.map(str::to_owned);
         }
         let root = self.gameui.install_root.as_ref()?;
         let list = self.gameui.chapters.get(game)?;
         chapters::assign(&chapters::map_links(root, game), list).remove(&map.to_ascii_lowercase())
+    }
+
+    /// Resolves the chapter background map for `game`'s `map` without blocking on unindexed BSP
+    /// traversal: checks chapter start maps and the transition index first, then falls back to an
+    /// active background from the same game or the game's chapter 1 background.
+    pub(super) fn chapter_background_for(&self, game: &str, map: &str) -> Option<GameMap> {
+        let chapter_key = self
+            .gameui
+            .chapters
+            .get(game)
+            .and_then(|chapters| {
+                chapters
+                    .iter()
+                    .find(|c| {
+                        c.start
+                            .as_deref()
+                            .is_some_and(|s| s.eq_ignore_ascii_case(map))
+                    })
+                    .map(|c| c.key.as_str())
+            })
+            .or_else(|| self.chapter_index.get(game, map)?);
+        if let Some(ch) = chapter_key.and_then(|key| {
+            self.gameui
+                .chapters
+                .get(game)?
+                .iter()
+                .find(|c| c.key == key)
+        }) {
+            return Some(GameMap::new(game, &ch.background));
+        }
+        if self.background_level {
+            if let Some(loaded) = self.loaded_map.as_ref().filter(|m| m.game == game) {
+                return Some(loaded.clone());
+            }
+        }
+        if let Some(saved) = self.background().filter(|b| b.game == game) {
+            return Some(saved);
+        }
+        self.gameui
+            .background_maps
+            .get(game)
+            .map(|bg| GameMap::new(game, bg))
     }
 
     /// The menu background of the running map: the background of the chapter it belongs to in its
@@ -256,10 +309,21 @@ impl Console {
             .or_else(|| self.background())
     }
 
-    /// Shows a game's menu category over that game's own chapter 1 background, loading it
-    /// unless it is already the loaded background level.
+    /// Shows a game's menu category over that game's background. When a background level from any
+    /// chapter of the same game is already active, keeps it without reloading chapter 1 (matching
+    /// retail `SwitchExpansion`); otherwise loads that game's chapter 1 background.
     fn show_category(&mut self, category: &str) -> Vec<Effect> {
         let game = self.gameui.category_game(category).to_owned();
+        if self.background_level
+            && self
+                .loaded_map
+                .as_ref()
+                .is_some_and(|loaded| loaded.game == game)
+            && !self.background_transition.is_active()
+        {
+            self.background_transition.set_displayed_category(&game);
+            return Vec::new();
+        }
         let Some(map) = self.gameui.background_maps.get(&game).cloned() else {
             self.background_transition.set_displayed_category(category);
             return Vec::new();
@@ -267,11 +331,6 @@ impl Console {
         let background = GameMap::new(game, map);
         self.set_background(Some(background.clone()));
         let _ = self.config.save();
-        if self.background_level && self.loaded_map.as_ref() == Some(&background) {
-            self.background_transition
-                .set_displayed_category(&background.game);
-            return Vec::new();
-        }
         self.start_background_loading(&background.game, &background.map);
         vec![Effect::MainMenuMap(background)]
     }
@@ -282,6 +341,7 @@ impl Console {
         serde_json::json!({
             "x": g.menu.x, "y": g.menu.y, "font_tall": g.font_tall, "item_tall": g.item_tall,
             "row_wide": g.row_wide, "canvas": [self.canvas.width(), self.canvas.height()],
+            "visible": !self.is_background_loading(),
         })
     }
 
@@ -306,6 +366,7 @@ impl Console {
             let kind = match kind {
                 ConfirmKind::Quit => "quit",
                 ConfirmKind::ReturnToMainMenu => "return_to_main_menu",
+                ConfirmKind::StartCommentary(_) => "start_commentary",
                 ConfirmKind::KeepVideo(_) => "keep_video",
             };
             serde_json::json!({"kind": kind, "text": confirm.text})
@@ -343,6 +404,10 @@ impl Console {
                         }
                         ConfirmKind::KeepVideo(_) => {
                             self.reset_menu_interaction();
+                            return effects;
+                        }
+                        ConfirmKind::StartCommentary(target) => {
+                            effects.extend(self.start_chapter(target, true));
                             return effects;
                         }
                         ConfirmKind::ReturnToMainMenu => {
@@ -488,6 +553,9 @@ impl Console {
     }
 
     pub fn activate_menu(&mut self, index: usize) -> Vec<Effect> {
+        if self.is_background_loading() {
+            return Vec::new();
+        }
         let gameui = self.gameui.clone();
         let loc = &gameui.localization;
         let outcome = match self.base {
@@ -509,14 +577,7 @@ impl Console {
                 self.quit_placement.reset();
                 self.confirm_box = Some((crate::gameui::menu::quit_box(loc), ConfirmKind::Quit));
             }
-            // Starting a game closes the windows (Options without applying).
-            MenuOutcome::NewGame(map) => {
-                self.shell.windows.clear();
-                self.sync_mode();
-                self.clear_menu_hover();
-                self.start_loading(&map);
-                return vec![Effect::Map(map)];
-            }
+            MenuOutcome::NewGame(game) => self.open_chapters(&game),
             MenuOutcome::ReturnToMainMenu => {
                 self.reset_menu_interaction();
                 self.quit_placement.reset();

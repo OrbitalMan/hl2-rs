@@ -239,6 +239,139 @@ remain 1.25 frames/12%. Evidence: artifacts/advanced-blur-flicker/timing-summary
 performance-summary.json, scripts and per-run logs/reports. Timing runs were separate from captures, image analysis and builds; no overlapping
 capture/build timing round is included.
 
+## Retail quick-info size and horizontal centering (2026-10-27)
+
+Before/after/after/before packaged runs on Metal / Apple M1 Pro, default settings,
+1280x720 d1_trainstation_02 HUD fixture, background/muted, profiling enabled.
+No concurrent builds, replays or image analysis; only brief documentation writes.
+120 warm-up frames, 148-151 measured frames per run. Mean frame times:
+18.9647 ms before (range 18.6965-19.2329), 19.0175 ms after (18.7215-19.3136).
+HUD CPU means: 0.08457 -> 0.07553 ms. The ranges overlap; +0.0528 ms overall
+cannot establish a causal regression, and the lower HUD mean is not a speed claim.
+
+The change preserves quad counts and arc spacing. Glyph bounds stay cached; no
+new render pass, per-frame allocation or file access is introduced. Font-profile
+selection parses the already-read scheme once more during load, never in a frame
+system. Reproduce with artifacts/quickinfo-horizontal/benchmark.py; paired reports,
+packages and timing-summary.json are retained. This bounded replay does not establish
+sustained FPS or exact native renderer performance.
+
+## Quick-info symbol placement (2026-10-27)
+
+Metal / Apple M1 Pro, packaged before/after builds, default settings, 1280x720,
+controlled d1_trainstation_02 HUD replay, profiling enabled, background and muted.
+The final reverse-order pair measured 18.65495 ms/frame before and 18.66357 ms/frame
+after (+0.00862 ms); HUD CPU means were 0.07757 and 0.07479 ms. Each run used
+120 warm-up frames and 152/154 measured frames. This short pair does not establish
+a speedup or isolate a causal cost; no material regression is evident in this sample.
+
+An earlier pair overlapped documentation/architecture checks and is retained in
+the aggregate report, excluded from the comparison above. The change queries
+cached glyph geometry, adds no render pass or frame file access and does not
+change glyph sizes or counts. Exact native rasterization and sustained FPS
+are not established. Reproduce using artifacts/quickinfo-layout/benchmark.py;
+individual reports, timing-summary.json and prior/final package copies are retained.
+
+## Background-loading wait policy (2026-10-27)
+
+Packages 6019af3 (prior) and fa4a000 (wait gate), Metal on Apple M1 Pro, default
+settings, 1024x768 hl2/background01 with chapter browser open. Three isolated pairs
+ordered prior/current, current/prior, prior/current. No concurrent builds, replays,
+windowed test or image analysis. The benchmark waits for all validation processes
+to finish. Same perf-browser.json fixture, host tick 1100, 2000-frame safety cap,
+120 warm-up frames, 751–759 measured frames/run (about 14 seconds after warm-up).
+All six runs complete in NewGame; the current package reports menu.visible=true.
+
+| Package | Mean frame | Run range | HUD/UI CPU mean |
+| --- | ---: | ---: | ---: |
+| Prior | 18.693 ms | 18.672–18.709 ms | 0.1550 ms |
+| Wait gate | 18.743 ms | 18.705–18.773 ms | 0.1581 ms |
+
+The ranges overlap slightly. The +0.051 ms frame / +0.0031 ms HUD means do not
+isolate a causal cost or establish a speedup. The gate adds simple state checks,
+no render pass, allocation or asset access. During the wait, it omits menu/title
+and window painting. This is a steady-state cost check; worker-load input latency,
+wait-state GPU cost and final physics/GPU installation stalls are not measured.
+The policy makes users wait instead of claiming responsive controls under load.
+
+Reproduce with artifacts/chapter-loading-gate/benchmark.py; retained package metadata,
+individual timing reports/logs, timing-summary.json and timing-aggregate.json identify
+all samples. The prior copy is the retained 6019af3 package. Other native platforms,
+retail frame/input latency and sustained FPS guarantees remain not tested.
+
+## Chapter/loading bug fixes (2026-10-27)
+
+Prior package `7171e3f`, fixed production source/package `6019af3`, Metal on Apple
+M1 Pro, 1024x768 default settings, live hl2/background01 with the browser open.
+Three alternating pairs (prior/current, current/prior, prior/current), no concurrent
+builds, replays or image analysis. Use the same perf-browser.json fixture as the
+chapter benchmark: finish host tick 1100, 2000-frame safety cap, profiling enabled,
+120 warm-up frames. All six scripts finish with NewGame mode and 728–757 measured
+frames per run (about 14 seconds after warm-up).
+
+| Package | Mean frame | Run range | HUD/UI CPU mean |
+| --- | ---: | ---: | ---: |
+| Prior | 18.947 ms | 18.692–19.404 ms | 0.1670 ms |
+| Fixed | 18.878 ms | 18.698–19.079 ms | 0.1615 ms |
+
+Ranges overlap; the 0.069 ms difference does not establish a speedup. No steady
+browser-frame regression is measured in this scene. No new render pass is added.
+The runtime loader no longer reconstructs an unused GameUI: chapter thumbnails,
+menu resources and fonts stay owned by the existing console. That avoids redundant
+worker work, but this steady-state benchmark does not isolate loading latency,
+input latency, GPU time or peak installation stalls. Physics construction and GPU
+resource installation still run on the main thread and can hitch. Zero-hitch
+loading and sustained FPS guarantees remain not tested.
+
+Reproduction and evidence: artifacts/chapter-bugs/finish_validation.py waits for
+packaged checks/build completion, repeats the affected committed-package replays,
+then runs the six isolated processes against retained package copies. It resets
+only each copy's own config. timing-summary.json, timing-aggregate.json, individual
+timing reports/logs, package-hashes.json and prior/current copies are retained there.
+
+## Chapter browser (2026-10-27)
+
+Packaged Metal on Apple M1 Pro, 1024x768, default settings, live hl2/background01.
+Prior package: d7dbc5b; final source package: 7171e3f. Three runs per build/state,
+ordered prior idle/current idle/current browser, reversed for the middle round.
+No concurrent builds, replays or image analysis. Each scripted run finishes at
+host tick 1100 with a 2000-frame safety cap, profiling enabled and no capture.
+All reports confirm completion, the intended UI mode and at least 684 measured
+frames after 120 warm-up frames (ranges 684–761; roughly 14 measured seconds).
+
+| Package/state | Mean frame | HUD/UI CPU mean |
+| --- | ---: | ---: |
+| Prior, browser closed | 20.187 ms | 0.2786 ms |
+| New, browser closed | 20.138 ms | 0.2748 ms |
+| New, browser open | 18.703 ms | 0.1562 ms |
+
+Closed-browser frame ranges overlap: prior 20.011–20.429 ms, new
+19.912–20.486 ms. No closed-browser regression is measured in this scene; the
+0.048 ms difference does not establish a speedup. Open-browser frames range
+18.671–18.757 ms. Opening the window also fades the underlying menu and suppresses
+its outlines, so this is a different UI workload, not an isolated widget cost or
+proof that extra UI makes every scene faster. HUD CPU includes the whole HUD/UI
+scope; its profiler warm-up/history window differs from the frame benchmark.
+GPU-only widget time and sustained FPS guarantees are not established.
+
+The browser adds no render pass. Cards, textures, layout values and ellipsized
+labels are prepared once; input/drawing do no asset reads or card-list allocation.
+Closed windows do no card rendering. The toolkit extraction also avoids cloning
+an extra decoded-thumbnail catalog while preparing textures.
+
+Reproduce from the matching package copies with:
+
+```sh
+python3 artifacts/chapter-menu/benchmark.py
+```
+
+The script runs muted/background copies with their own default config, alternates
+all nine runs, and asserts completion/mode/sample count. Scripts perf-idle.json
+and perf-browser.json, timing-summary.json, timing-aggregate-toolkit.json and all
+nine reports/logs are retained in artifacts/chapter-menu. The earlier pre-toolkit
+measurements are retained in before-toolkit and excluded from this table. Native
+visual comparison and Windows/Linux runtime remain not tested.
+
 
 ## Stronger Advanced weapon silhouette blur (2026-10-26)
 

@@ -19,6 +19,8 @@ pub enum Effect {
     },
     Setang(glam::Vec3),
     Map(String),
+    /// Start an installed chapter in its selected game.
+    ChapterMap(GameMap),
     Fire {
         target: String,
         input: String,
@@ -38,6 +40,13 @@ pub enum Effect {
     ViewmodelTweakReset,
     /// Play a UI sound cue (e.g. button hover or release activation).
     PlaySound(String),
+    /// Play a full-screen video file (Bink `.bik`) with optional exit command upon completion or skip.
+    PlayVideo {
+        filename: String,
+        exit_command: Option<String>,
+        width: Option<u32>,
+        height: Option<u32>,
+    },
 }
 
 /// A map of one installed game, named by the game's installation folder (`hl2`, `episodic`,

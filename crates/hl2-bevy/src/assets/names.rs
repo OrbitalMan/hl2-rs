@@ -46,3 +46,42 @@ pub(super) fn rendered_material_names(world: &World) -> BTreeSet<String> {
     }
     names
 }
+
+pub(super) fn map_material_names(
+    world: &World,
+    effects: &crate::effects::PreparedEffects,
+    weapon_models: &[String],
+    gameplay: &crate::gameplay::Gameplay,
+) -> BTreeSet<String> {
+    let mut names = rendered_material_names(world);
+    names.insert(crate::shadows::BLOB_MATERIAL.to_owned());
+    if gameplay.scene.commentary.enabled {
+        names.insert(hl2_simulation::commentary::SPEECH_MAT_USED.to_owned());
+    }
+    names.extend(
+        effects
+            .models
+            .values()
+            .flatten()
+            .map(|s| s.material.clone()),
+    );
+    for model in weapon_models {
+        if let Some(surfaces) = world
+            .model_assets
+            .get(&format!("{}#0", model.to_lowercase()))
+        {
+            names.extend(surfaces.iter().map(|s| s.material.clone()));
+        }
+    }
+    for weapon in gameplay.weapons.values() {
+        for skin in 0..2 {
+            if let Some(surfaces) = world
+                .model_assets
+                .get(&format!("{}#{skin}", weapon.viewmodel.to_lowercase()))
+            {
+                names.extend(surfaces.iter().map(|s| s.material.clone()));
+            }
+        }
+    }
+    names
+}

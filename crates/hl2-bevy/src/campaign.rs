@@ -27,6 +27,8 @@ struct Request {
     /// Load as the main-menu background level (menu shown, HUD hidden).
     background: bool,
 }
+mod loading;
+
 type ResultSlot = Arc<Mutex<Option<Result<assets::LoadedMap, String>>>>;
 struct Job {
     request: Request,
@@ -44,6 +46,7 @@ pub struct Campaign {
     loading_frames: u64,
 }
 impl Campaign {
+    #[cfg(test)]
     pub fn new(loaded: &assets::LoadedMap) -> Self {
         let name = loaded.world.name.clone();
         Self {
@@ -74,6 +77,42 @@ type Host<'w> = (
     ResMut<'w, gameplay::Gameplay>,
     ResMut<'w, simulation::Simulation>,
 );
+fn next_map_request(
+    options: &Options,
+    campaign: &Campaign,
+    ui: &mut ui_host::Console,
+    game: &mut gameplay::Gameplay,
+) -> Option<Request> {
+    let background = std::mem::take(&mut ui.background_request);
+    let requested_game = ui.map_request_game.take();
+    let current_game = campaign.loaded_map.as_ref().map(|m| m.game.clone());
+    // Menu backgrounds name their game and level transitions stay in the running game;
+    // a bare map name (`map`, `--map`, respawn) loads in the game that ships it.
+    ui.map_request
+        .take()
+        .map(|map| Request {
+            game: requested_game.unwrap_or_else(|| {
+                source_assets::install::game_for_map(&options.game, &map, current_game.as_deref())
+                    .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned())
+            }),
+            map,
+            landmark: String::new(),
+            direct: true,
+            background,
+        })
+        .or_else(|| {
+            game.scene.transition.take().map(|(map, landmark)| Request {
+                map,
+                game: current_game
+                    .clone()
+                    .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned()),
+                landmark,
+                direct: false,
+                background: false,
+            })
+        })
+}
+
 pub fn poll(
     mut commands: Commands,
     (options, mut campaign, mut ui, mut game, mut sim): Host,
@@ -83,51 +122,14 @@ pub fn poll(
     status: Res<Status>,
 ) {
     if let Some(job) = &campaign.job {
-        // Setting a background map must never interrupt an ongoing gameplay map load.
-        if !job.request.background && ui.background_request {
-            ui.source
-                .log("Gameplay map load in progress; background map request ignored");
-            ui.background_request = false;
-            ui.map_request = None;
-            ui.map_request_game = None;
-        }
+        loading::preserve_gameplay_request(&job.request, &mut ui);
     } else {
-        let background = std::mem::take(&mut ui.background_request);
-        let requested_game = ui.map_request_game.take();
-        let current_game = campaign.loaded_map.as_ref().map(|m| m.game.clone());
-        // Menu backgrounds name their game and level transitions stay in the running game;
-        // a bare map name (`map`, `--map`, respawn) loads in the game that ships it.
-        let request = ui
-            .map_request
-            .take()
-            .map(|map| Request {
-                game: requested_game.unwrap_or_else(|| {
-                    source_assets::install::game_for_map(
-                        &options.game,
-                        &map,
-                        current_game.as_deref(),
-                    )
-                    .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned())
-                }),
-                map,
-                landmark: String::new(),
-                direct: true,
-                background,
-            })
-            .or_else(|| {
-                game.scene.transition.take().map(|(map, landmark)| Request {
-                    map,
-                    game: current_game
-                        .clone()
-                        .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned()),
-                    landmark,
-                    direct: false,
-                    background: false,
-                })
-            });
-        let Some(request) = request else {
+        let Some(request) = next_map_request(&options, &campaign, &mut ui, &mut game) else {
             return;
         };
+        if loading::reuse_background(&request, &campaign, &mut ui, &mut sim) {
+            return;
+        }
         let result: ResultSlot = Arc::new(Mutex::new(None));
         let output = result.clone();
         let map = request.map.clone();
@@ -157,25 +159,20 @@ pub fn poll(
             sim.loading_failed();
             return;
         }
-        if request.background {
-            ui.source
-                .start_background_loading(&request.game, &request.map);
-        } else {
-            ui.source.start_loading(&request.map);
-        }
+        loading::start(&request, &mut ui);
         sim.loading = true;
         campaign.job = Some(Job { request, result });
     }
-    campaign.loading_frames += 1;
-    ui.source.update_loading();
-    let result = campaign
-        .job
-        .as_ref()
-        .and_then(|j| j.result.try_lock().ok()?.take());
-    let Some(result) = result else {
+    let Some((job, result)) = loading::completed(&mut campaign, &mut ui) else {
         return;
     };
-    let job = campaign.job.take().expect("completed map job");
+    if loading::superseded(&job.request, &mut ui) {
+        if let Err(error) = result {
+            ui.source.log(&error);
+            campaign.failures.push(error);
+        }
+        return;
+    }
     let mut loaded = match result {
         Ok(loaded) => loaded,
         Err(error) => {
@@ -249,9 +246,13 @@ pub fn poll(
         commands.entity(entity).despawn();
     }
     sim.change_map(&loaded.world, eye, job.request.direct);
+    sim.background_level = job.request.background;
     if job.request.direct {
         if let Some(yaw) = options.yaw {
             sim.yaw = yaw;
+        }
+        if options.pitch != 0. {
+            sim.pitch = options.pitch;
         }
         if options.fly {
             sim.fly = true;
@@ -270,7 +271,7 @@ pub fn poll(
     }
     ui.source
         .log(format!("Loaded {}/{}", loaded.game, loaded.world.name));
-    let _unused_new_console = crate::install_map(
+    crate::install_map(
         loaded,
         &mut commands,
         (
@@ -437,7 +438,8 @@ mod tests {
             assert!(sim.loading());
         }
 
-        // 4. Update the Bevy app in a loop until the background map loader thread finishes
+        // Check the menu wait after the worker consumes the pending-request flag.
+        loading::exercise_menu_wait_during_worker(&mut app);
         let mut completed = false;
         for _ in 0..100 {
             app.update();

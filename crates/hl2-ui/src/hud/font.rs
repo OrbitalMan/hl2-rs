@@ -1,8 +1,31 @@
 //! Installed HUD font ranges and rendering.
-use super::number;
+use super::{find, number};
+use anyhow::{Context, Result};
 use glam::{vec2, Vec2};
-use source_assets::keyvalues::Entry;
+use source_assets::{
+    keyvalues::{self, Entry},
+    vpk::Vfs,
+};
 use source_ui::{canvas::Color, font::FontFace};
+
+/// Quick-info uses the Windows character-cell raster contract on every host.
+/// Select its desktop font definition locally; leave all other resource conditions native.
+pub(super) fn schemes(vfs: &Vfs) -> Result<(Vec<Entry>, Entry)> {
+    let bytes = vfs
+        .read("resource/ClientScheme.res")?
+        .context("ClientScheme.res missing")?;
+    let scheme = keyvalues::parse_resource(&bytes)?;
+    let desktop = keyvalues::parse_resource_with_condition(&bytes, |condition| match condition {
+        "[$OSX]" => Ok(false),
+        "[!$OSX]" => Ok(true),
+        other => keyvalues::resource_condition(other),
+    })?;
+    let fonts = find(&desktop, "Scheme")
+        .and_then(|s| s.get("Fonts"))
+        .context("HUD font scheme missing")?
+        .clone();
+    Ok((scheme, fonts))
+}
 
 pub(super) struct FontRange {
     pub(super) minimum: f32,
@@ -92,9 +115,9 @@ impl HudFont {
     pub(super) fn width(&self, value: &str) -> f32 {
         self.face.width(value, self.size())
     }
-    pub(super) fn draw_cropped(&self, value: &str, origin: Vec2, rows: Vec2, color: Color) {
+    pub(super) fn draw_cropped(&self, value: &str, origin: Vec2, fraction: Vec2, color: Color) {
         self.face
-            .draw_cropped(value, origin, self.size(), self.effects(), color, rows);
+            .draw_cropped(value, origin, self.size(), self.effects(), color, fraction);
     }
 }
 
