@@ -1,5 +1,13 @@
 # Design
 
+## Research plan: bounded file-backed native scene recording (2026-10-27)
+
+The next native research step replaces the two capped REA message captures with a private rotating file recorder. First validate the recorder on an authored x86 fixture beyond 16 MiB, including raw read ranges, complete call pairs, generation brackets, explicit finish witnesses, failure rejection and measured hook overhead. Keep the original captures and their continuity failures unchanged.
+
+After fixture acceptance, adapt the existing byte-bound function-entry observer in a new private root and execute its actual source in the deterministic scope/generation harness. Limit the next native run to the opening first-map scenes, preserve all raw sources and native clocks, and compare selected milestones with a fresh never-attached control. This establishes only the measured callback/event/state window; animation selection, audible dialogue, camera fidelity, complete campaign behavior and Rust parity require separate evidence. No Rust implementation or optimization follows from fixture timings.
+
+This bounded plan now passes fixture and finite native/control verification. All39+11 opening tuples reach callback entry, including a LookAt from a channel marked inactive in the authoring catalogue. Preserve separate actor/channel/event authoring flags and observed callback/effect state; the combined enabled flag is not sufficient to infer retail callback omission. Endline OnCompletion can occur with playing still set, so output completion must remain distinct from playback/ownership cleanup. The next research step binds the exact retail registration path and actual actor animation fields; it does not authorize a Rust change from callback evidence alone.
+
 ## Research contract: instruction probes and field boundaries (2026-10-24)
 
 Use documented function-callback probes at interior instructions and function-call listeners at actual entries. A disposable 32-bit baseline/negative/probe fixture demonstrates the distinction: a call listener without a leave callback still traps returns and can alter a saved register, consistent with [Frida's listener/probe distinction](https://frida.re/docs/gum/class.Interceptor.html). Preserve failed captures and audit earlier loaded-script sources; timing perturbation alone is insufficient. Retain raw relocated-prefix equality, source hashes, process creation/module identity, state and owned cleanup. Give each guard stage a separate output path. AX's overwritten original snapshot is a retained limitation, with independent identity/prefix records still available.

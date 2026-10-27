@@ -1,5 +1,15 @@
 # Local validation — 2026-10-05
 
+## File recorder, opening tuples and passive timing control (2026-10-27)
+
+`C:/Python310/python.exe -B ../../work/publishing/seal-research-recorder-20261027.py verify BJ BK BL BM` passes four closed inventories:309/121/85/89 files and0/19/1/3 external bindings. BL is a sealed failed diagnostic, not a successful control. BJ's verify.py/verify_variants.py/check_controls.py check30,002 records,15,000 native fixture pairs,90,000 raw reads and16 negative controls. Fixture medians: baseline0.01036us, empty hook0.518us, hex recorder1579.996us, binary recorder198.167us per call; these are not native HL2 performance measurements.
+
+BK/verify_trace.py checks388 records/134 pairs/5,030 raw reads/1,397,556 bytes, whole-file envelopes and a closed finish witness with no drops/open calls. Starting at seq83 checks the disclosed fresh-map epoch:306 records/108 pairs/4,017 reads/1,102,760 bytes. compare_authored.py matches39+11 exact event tuples, including the combined-disabled LookAt; check_controls.py rejects10 corruptions. Actual observer source passes19 offline scope/generation checks before native load. No callbacks or missing prefixes are manufactured from a provider summary.
+
+BM/verify.py accepts4,138 of4,143 samples, checks62,710 reads/15,072,408 bytes and preserves five null-slot reload exclusions. Maximum measured acquisition gap0.348107s. G-Man playing rises within[10.2299995,10.2600002] and clears[70.4249954,70.4550018]; endline rises[93.1650009,93.1949997] and clears[98.3549957,98.3849945]. Three instrumented callback/state milestones fit those brackets. Endline output completion occurs while playing1; BK ends before that run clears playing. These are non-atomic raw-state observations, not a full timing-fidelity or hook-overhead result.
+
+All three owned native processes close with exit0 and unchanged checked installed settings; the Frida session closes and process-specific audio finishes. BK's finalized129.97s stereo44100Hz waveform is nonzero; no dialogue listening/identity/mix fidelity was tested. No Rust tests/builds apply to this documentation milestone. Original16 gaps/four missing scene procedures and first_map_finished:false remain.
+
 ## Controlled first-map route and partial capture audits (2026-10-26)
 
 `C:/Python310/python.exe -B ../../work/hl2-decompiled/firstmap-natural-progression-20261026bf/verify.py` passes 79 player snapshots,60 motion files/5976 samples,54574 raw reads/17597584 bytes,53 serialized requests, storage threshold(-3360.154,-29.031,-31.969), finalized demo/audio headers and native exit0/settings unchanged. It explicitly returns frida_trace_complete:false, fresh_never_attached_control:false, first_map_finished:false and rust_parity_tested:false. This validates bounded raw/route/cleanup integrity, not entire-map fidelity.

@@ -1,5 +1,13 @@
 # Sources and native research
 
+## File-backed opening events and authoring-flag boundary (2026-10-27)
+
+Private BJ validates a bounded rotating file recorder beyond the old message cap, including complete raw binary ranges, call pairs, native deterministic fixture results and explicit finish witnesses. Binary storage improves this fixture's median cost roughly eightfold; no native HL2 overhead or solver optimization follows. BK's actual adapted observer passes the deterministic scope/generation harness before loading.
+
+The guarded native fresh-map interval retains every authored type/start/end tuple for the 39-event G-Man opening and 11-event train endline, without tuple ambiguity. One endline LookAt is on an authored inactive channel but still reaches callback entry and actor lookup. The catalogue's actor/channel/event combined enabled field describes authoring metadata; this observation rejects treating it as sufficient evidence of callback absence. It does not establish actual LookAt application or a universal rule for inactive records.
+
+BM supplies a fresh never-attached VM_READ control with raw clocks, controller identity and scene flags. Three native milestones fit its playing-transition brackets. Endline OnCompletion is observed at scene4.499999 with playing still1; the control remains playing at the same scene time and clears it later. Keep output completion, playback state and eventual ownership cleanup distinct. BK ends during that tail. BL's earlier passive guard failure stays rejected. Full audiovisual/animation/camera behavior and Rust parity remain open; first_map_finished:false.
+
 ## Native scene AV windows and motion-controller phases (2026-10-26)
 
 Private BF retains a controlled normal-input train-to-storage route, three PID-specific audio segments and a native demo. No forced scene inputs, teleport or synthetic actor setup drove progression. The accepted fresh opening window binds G-Man OnStart/Trigger1/Trigger2/Completion and passenger endline OnStart. Later capped captures retain finite scene/event/output groups, including security03 Trigger3 and Completion, but do not establish a continuous scene timeline. REA6.8's cumulative Frida message cap is fixed at16MiB; both attempts hit it and the approach stopped. Raw failures and the pre-load observer-generation fix remain retained.

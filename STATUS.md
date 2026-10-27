@@ -1,5 +1,15 @@
 # STATUS
 
+## Finite opening callbacks and passive control (2026-10-27)
+
+The new private file recorder passes an authored x86 fixture beyond REA's 16 MiB message cap: 30,002 records, 15,000 closed pairs and 90,000 raw reads. Binary sidecars reduce median fixture cost from about 1.58 ms to 0.20 ms per recorded call. This is fixture performance, not native HL2 overhead or a long-capture guarantee.
+
+A guarded native opening run retains 388 contiguous records/134 closed pairs/5,030 raw reads with no drops or open calls at finish. Its fresh-map window matches all 39 G-Man and 11 endline authored event type/start/end tuples, including one LookAt on a channel marked inactive by the static catalogue. Do not infer callback omission from the catalogue's combined enabled flag; actual LookAt application remains untested.
+
+A fresh never-attached control passes 4,143 samples, with five map-reload samples explicitly excluded. Three scene-state milestones agree with the instrumented run's native-clock brackets. Endline OnCompletion occurs while playing is still set; the control corroborates a later playing-clear transition. The instrumented recorder ends during that tail, so full endline ownership cleanup is not observed there. The first passive sampler's guard failure remains a separate rejected attempt.
+
+BJ/BK/BL/BM seals pass 309/121/85/89 retained files. All three owned native processes exit 0 with checked installed settings unchanged; the observer is detached and process-audio recorder ended. Native bodies, recordings and tools remain private. No Rust changes/builds or parity test. First_map_finished:false; original 16 gaps/four missing scene-index entries remain. Next trace the inactive-channel callback through retail actor registration and bind actual actor animation fields before measuring animation. Private checkpoint: work/publishing/research-followup-continuation-20261027bm.md.
+
 ## Native first-map route/audio and immediate grab velocity (2026-10-26)
 
 New private BF controlled-input traversal reaches storage after train exit, customs, the security pen and Barney's room: 79 player snapshots, 60 motion files/5976 samples and 53 serialized requests. Raw integrity checks pass 54574 read occurrences/17597584 bytes. The owned native process exits 0 with installed settings unchanged; both Frida sessions are closed. Three process-specific audio segments and a native demo are retained privately. Waveforms are not proof of dialogue identity or 1:1 mixing.

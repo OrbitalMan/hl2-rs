@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-27: file-backed opening callbacks and fresh passive control
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents. Claude owns Rust implementation.
+
+**Changed / Why:** Replaced the twice-capped message-capture approach with a private rotating file/binary recorder validated on an authored x86 fixture. Collected a finite native opening-event window and a separate never-attached passive control. Preserved the failed first control sampler and all historical evidence.
+
+**Tested how / Result:** Fixture verifiers pass 30,002 records/15,000 pairs/90,000 reads and 16 rejection controls; binary recording measures about 0.20 ms/call versus 1.58 ms/call for hex/JSON on this fixture. Actual adapted observer passes 19 offline scope/generation checks and 10 event-verifier rejection controls. Native trace passes 388 records/134 pairs/5,030 reads; its fresh epoch matches all 39+11 authored tuples. Passive control passes 4,138 of 4,143 samples, with five null-slot reload exclusions, and corroborates three clock-bracketed milestones. Four private seals pass 309/121/85/89 files. All owned native runs exit 0/settings unchanged, Frida detached and process-audio capture finished. Documentation/whitelist checks apply; no Rust build is needed.
+
+**Still broken or not tested / Next:** The static combined enabled flag does not imply callback omission: one inactive-channel LookAt reaches the native callback. Actual effect remains untested. Endline OnCompletion precedes playing-clear; the instrumented run stops during that tail. No actual sequence/cycle/flex/layer/root, audible-line/mix/camera fidelity, ordinary first-map completion or Rust parity. Original16 gaps/four missing scene procedures remain; first_map_finished:false. Next bind retail event registration and actor animation fields. Private checkpoint research-followup-continuation-20261027bm.md.
+
 ## 2026-10-27 session 33: friendly immunity for projectiles, dropped weapons, shotgun punch
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
