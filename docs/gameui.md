@@ -76,6 +76,8 @@ portrait, odd dimensions, every HUD aspect frame and retained retail size refere
 
 ### Background vs Gameplay Loading UI/UX & Transition State Sequence
 
+- Menu background projection uses the authored 75-degree 4:3 reference and existing aspect-ratio crop; gameplay FOV, vertical-FOV overrides and weapon/env zoom do not change it. Fit Display supplies the actual internal game-frame aspect, not the configured resolution or outer window aspect.
+
 - Before revealing a newly installed background, the host processes due zero-time map-spawn I/O and resolves its authored camera through the same view resolver as ordinary simulation ticks. This prevents exposing the player spawn view for one frame. Authored delays and fixed/script clocks are preserved; no timed loading delay is added. Diagnostic captures include a separate `-installed.png` image of this exact handoff frame.
 
 - Gameplay map loading uses the full modal centered `LoadingDialog` (380 x 112) with a segmented progress bar and localized stage reports (`#GameUI_LoadingFilename`, `#LoadingProgress_*`), blocking clicks to underlying menus.

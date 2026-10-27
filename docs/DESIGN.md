@@ -1,5 +1,15 @@
 # Design
 
+## Background projection independent of gameplay (2026-10-28)
+
+Correct the previous follow-up: stabilizing a saved gameplay FOV was the wrong menu policy.
+Use the authored 75-degree 4:3 background reference and preserve existing aspect cropping;
+ignore gameplay horizontal/vertical FOV and weapon/env zoom in background projection.
+The older a7f071e3/be113848 paths also consume player FOV; history does not establish Fit
+Display as the cause. Add geometry tests against the artwork crop, setting independence,
+Fit Display's actual internal resolution, and first-view/fixed-tick stability. Verify and
+commit this bounded correction without unrelated projection refactoring.
+
 ## Preserve configured FOV on background reveal (2026-10-27)
 
 The authored camera is now initialized before reveal, but inventory FOV still starts at

@@ -1,5 +1,26 @@
 # Local validation — 2026-10-05
 
+## Background projection independence and Fit Display (2026-10-28)
+
+The previous follow-up initialized the saved player FOV, stabilizing an incorrect dependency.
+Background projection now ignores gameplay FOV, vertical overrides and zoom, using the authored
+75-degree 4:3 reference with the existing aspect adaptation. Gameplay remains adjustable.
+The inspected a7f071e3/be113848 paths also consume player FOV; no Fit Display regression date
+is established. The prior inventory workaround is removed.
+
+New host tests cover FOV/zoom independence at portrait, square, 5:4, 4:3, 16:10, 16:9,
+21:9 and 32:9; projection-ray equivalence with artwork crops at portrait/square/4:3/16:9/
+ultrawide; and actual Fit Display frame.size_for/aspect changes across landscape, portrait,
+ultrawide and 4:3 windows. The first-view/tick lifecycle test asserts the menu invariant.
+These are geometry/component tests, not interactive window-drag or native-image comparisons.
+
+validate.sh passes (1,190 Rust / 100 ignored, 27 Python, strict Clippy/fmt/architecture), as
+does check_windows.sh and release packaging. NO_BUILD=1 ONLY='background_fov background_reveal
+coverage' python3 scripts/checks/replays.py passes all three groups. Paired 75/110 player FOV
+and 0/90 vertical overrides change only 521 pixels at 4:3 and 9 at 16:9, in animated details.
+Logs/captures remain in artifacts/background-projection and artifacts/replays. Windows runtime,
+interactive Fit Display resizing, every background artwork and native visual parity NOT TESTED.
+
 ## Nondefault background FOV at reveal (2026-10-27)
 
 Background preparation now copies configured FOV into inventory before the initial camera

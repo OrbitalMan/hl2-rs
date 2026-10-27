@@ -1,5 +1,28 @@
 # MODLOG
 
+## 2026-10-28 Fix: isolate authored background projection from gameplay FOV
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.
+**Changed:** Background projection uses the authored 75-degree 4:3 reference and existing
+aspect crop; gameplay FOV/vertical overrides and zoom no longer affect it. Remove the
+previous inventory-FOV initialization workaround and replace its test with the correct
+background invariant. Add setting-independence, artwork-ray/crop and Fit Display resize
+coverage, plus packaged 4:3/16:9 FOV comparisons. No new per-frame work or dependency.
+**Why:** The preceding follow-up stabilized the wrong policy. Both inspected a7f071e3 and
+be113848 paths also consumed player FOV; this does not establish Fit Display as the cause.
+**Tested how:** validate.sh: 1,190 Rust pass, 100 ignored; 27 Python, strict Clippy/fmt/
+architecture. check_windows.sh and release packaging pass. background_reveal/background_fov/
+coverage packaged groups pass; 75 versus 110 horizontal and 0 versus 90 vertical settings
+change only 521 pixels at 4:3 and 9 at 16:9, in animated details. The initial guard rejected
+a glob import in the separate tests file; explicit imports fix it without baseline growth.
+**Result:** Background setting independence is verified across portrait, square, 5:4, 4:3,
+16:10, 16:9, 21:9 and 32:9. Crop-ray tests cover portrait/square/4:3/16:9/ultrawide; actual
+Fit Display internal-size/aspect transitions are tested. Evidence: artifacts/background-projection.
+**Still broken or not tested:** Interactive Fit Display window dragging, native visual parity,
+Windows runtime and every installed background artwork NOT TESTED. Existing aspect rules
+are preserved; this is not a new projection/cropping policy or exhaustive campaign audit.
+**Next:** Owner confirmation; stop at this verified checkpoint with 99% weekly usage reported.
+
 ## 2026-10-27 Fix: initialize saved background FOV before reveal
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.

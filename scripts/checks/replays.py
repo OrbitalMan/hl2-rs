@@ -616,6 +616,23 @@ def check_background_reveal():
     holds("no spawn-view flash before the menu camera", changes["changed"] < 1024 * 768 * 0.05, changes)
 
 
+def check_background_fov_independence():
+    """Background projection ignores saved gameplay FOV and vertical-FOV overrides."""
+    for width, height in [(1024, 768), (1280, 720)]:
+        results = []
+        for fov, vertical in [(75.0, 0.0), (110.0, 90.0)]:
+            if CONFIG.exists():
+                CONFIG.unlink()
+            settings(video={"fov": fov, "vertical_fov": vertical, "hdr": "none",
+                            "hdr_migrated": True, "advanced": {"motion_blur": False}})
+            name = f"background_fov_{width}_{int(fov)}"
+            results.append(game(name, "--map", "background01", "--main-menu",
+                                "--width", str(width), "--height", str(height), "--frames", "30"))
+        changes = pixel_changes(results[0].capture, results[1].capture, threshold=35)
+        holds("gameplay settings do not reframe the background",
+              changes["changed"] < width * height * 0.02, changes)
+
+
 def check_bg_compare():
     """Each game's chapter 1 background at 1024x768, FOV 75 (compare with the retail images)."""
     for game_, map_ in (("hl2", "background01"), ("episodic", "ep1_background01"),
@@ -1675,6 +1692,7 @@ CHECKS = [
     Check("captions", check_captions, "shared"),
     Check("bg_compare", check_bg_compare, "shared"),
     Check("background_reveal", check_background_reveal, "shared"),
+    Check("background_fov", check_background_fov_independence, "shared"),
     Check("save_config", check_save_config, "shared"),
     Check("console", check_console, "shared"),
     Check("console_map", check_console_map, "shared"),

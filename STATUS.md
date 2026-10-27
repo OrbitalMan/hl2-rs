@@ -1,5 +1,17 @@
 # STATUS
 
+## Background projection policy corrected (2026-10-28)
+
+Supersedes the previous saved-FOV handoff workaround: menu projection is fixed to the authored
+75-degree 4:3 reference with existing aspect crop, independent of player FOV/vertical overrides
+and zoom. Both older inspected commits share player-FOV coupling; Fit Display causality is
+not established. Three new camera tests cover setting independence, artwork crop rays and
+Fit Display internal-aspect changes; first-view/tick stability test uses the corrected policy.
+Full validation (1,190 Rust / 100 ignored, 27 Python), Windows-target checks and three packaged
+groups pass. At 4:3/16:9, changing gameplay FOV/vertical overrides changes only 521/9 pixels
+in animated details. Evidence: artifacts/background-projection. Interactive window resizing,
+native parity, Windows runtime and every background artwork NOT TESTED.
+
 ## Background FOV handoff follow-up (2026-10-27)
 
 Initialize the new background inventory's default FOV before reveal, matching the configured

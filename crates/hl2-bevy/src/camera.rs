@@ -29,7 +29,8 @@ pub fn world_fov(
     if background_level {
         let widest = hl2_ui::tuning::widest_design_aspect();
         let scale = (aspect / widest).max(1.);
-        2. * ((view_degrees.to_radians() / 2.).tan() / ((4. / 3.) * scale)).atan()
+        // Authored menu artwork uses the 75-degree 4:3 reference, never player FOV/zoom.
+        2. * ((75f32.to_radians() / 2.).tan() / ((4. / 3.) * scale)).atan()
     } else {
         crate::video::vertical_fov_with(view_degrees, default_degrees, aspect, vertical)
     }
@@ -265,3 +266,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "camera/background_tests.rs"]
+mod background_tests;

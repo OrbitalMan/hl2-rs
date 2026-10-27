@@ -4,8 +4,6 @@ use crate::gameplay::Gameplay;
 
 impl Simulation {
     pub(crate) fn prepare_background_view(&mut self, game: &mut Gameplay) {
-        // Match the fixed tick before the first camera presentation, including saved FOV.
-        game.inventory.fov.default_fov = self.fov;
         game.scene.tick(&game.world, self.player.feet, 0.);
         self.refresh_scripted_view(game);
     }
@@ -74,16 +72,24 @@ mod tests {
     }
 
     #[test]
-    fn background_reveal_already_uses_the_configured_player_fov() {
+    fn background_projection_is_stable_across_player_fov_initialization() {
         for fov in [75., 87.3083, 90.] {
             let (mut sim, mut game) = background(0.);
             sim.fov = fov;
             sim.prepare_background_view(&mut game);
-            let first = game.inventory.view_fov(game.scene.time);
-            assert_eq!(first, fov);
-            // The first ordinary fixed tick must not change the value used to present.
+            let projection = |game: &Gameplay| {
+                crate::camera::world_fov(
+                    game.inventory.view_fov(game.scene.time),
+                    fov,
+                    16. / 9.,
+                    90.,
+                    true,
+                )
+            };
+            let first = projection(&game);
             game.inventory.fov.default_fov = sim.fov;
-            assert_eq!(game.inventory.view_fov(game.scene.time), first);
+            assert_eq!(projection(&game), first);
+            assert_eq!(first, crate::video::vertical_fov_for(75., 4. / 3.));
             assert_eq!(game.scene.time, 0.);
             assert_eq!(sim.host_tick, 0);
         }
