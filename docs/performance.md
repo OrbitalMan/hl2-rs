@@ -1,5 +1,49 @@
 # Performance measurements - 2026-10-05
 
+## Chapter browser (2026-10-27)
+
+Packaged Metal on Apple M1 Pro, 1024x768, default settings, live hl2/background01.
+Prior package: d7dbc5b; final source package: 7171e3f. Three runs per build/state,
+ordered prior idle/current idle/current browser, reversed for the middle round.
+No concurrent builds, replays or image analysis. Each scripted run finishes at
+host tick 1100 with a 2000-frame safety cap, profiling enabled and no capture.
+All reports confirm completion, the intended UI mode and at least 684 measured
+frames after 120 warm-up frames (ranges 684–761; roughly 14 measured seconds).
+
+| Package/state | Mean frame | HUD/UI CPU mean |
+| --- | ---: | ---: |
+| Prior, browser closed | 20.187 ms | 0.2786 ms |
+| New, browser closed | 20.138 ms | 0.2748 ms |
+| New, browser open | 18.703 ms | 0.1562 ms |
+
+Closed-browser frame ranges overlap: prior 20.011–20.429 ms, new
+19.912–20.486 ms. No closed-browser regression is measured in this scene; the
+0.048 ms difference does not establish a speedup. Open-browser frames range
+18.671–18.757 ms. Opening the window also fades the underlying menu and suppresses
+its outlines, so this is a different UI workload, not an isolated widget cost or
+proof that extra UI makes every scene faster. HUD CPU includes the whole HUD/UI
+scope; its profiler warm-up/history window differs from the frame benchmark.
+GPU-only widget time and sustained FPS guarantees are not established.
+
+The browser adds no render pass. Cards, textures, layout values and ellipsized
+labels are prepared once; input/drawing do no asset reads or card-list allocation.
+Closed windows do no card rendering. The toolkit extraction also avoids cloning
+an extra decoded-thumbnail catalog while preparing textures.
+
+Reproduce from the matching package copies with:
+
+```sh
+python3 artifacts/chapter-menu/benchmark.py
+```
+
+The script runs muted/background copies with their own default config, alternates
+all nine runs, and asserts completion/mode/sample count. Scripts perf-idle.json
+and perf-browser.json, timing-summary.json, timing-aggregate-toolkit.json and all
+nine reports/logs are retained in artifacts/chapter-menu. The earlier pre-toolkit
+measurements are retained in before-toolkit and excluded from this table. Native
+visual comparison and Windows/Linux runtime remain not tested.
+
+
 ## Stronger Advanced weapon silhouette blur (2026-10-26)
 
 Packaged Metal / Apple M1 Pro, 1024x768, HDR None, MSAA off, VSync off, muted background

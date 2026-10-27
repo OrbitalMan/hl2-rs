@@ -1,5 +1,39 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: chapter browser packaged evidence
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Completed committed-package validation and recorded screenshots, typed chapter
+loads, resource coverage, rejected attempts and isolated before/after timing. Runtime/source
+implementation is 7171e3f; this checkpoint changes documentation only.
+
+**Why:** Unit checks alone do not verify the reusable browser's presentation, expansion
+identity or asynchronous loader completion, and menu additions must be measured.
+
+**Tested how:** validate.sh: 1,135 Rust tests/93 ignored, 13 Python, strict Clippy/fmt and
+architecture; Windows-target strict Clippy and explicit owned catalog test pass. Release
+package has eleven matching executable/shader hashes. Packaged submenus/chapter_selection/
+menu_options/coverage pass: four groups, zero failures, 199 s. Four previews plus four
+pointer-driven chapter loads check cancellation/reopening, localization/thumbnails, 9a
+ordering, selected map/game and Gameplay completion without loader failures. All four final
+captures inspected; toolkit extraction changes zero of 139,040 sampled thumbnail pixels.
+
+**Result:** New Game opens chapter selection; Start loads the selected chapter's first map
+in Half-Life 2, Episode One, Episode Two and Lost Coast. Three isolated runs/state: prior/new
+closed-browser mean frame 20.187/20.138 ms, overlapping ranges; no regression measured in
+this scene. Open browser 18.703 ms also fades/removes underlying menu outlines, so it is a
+different workload, not an isolated widget cost or FPS guarantee. No new render pass or
+per-frame asset reads/card-list allocation. Details: docs/validation.md and docs/performance.md.
+
+**Still broken or not tested:** Native Windows/Linux runtime, retail pixel parity, other UI
+languages and ordinary campaign playthrough not tested. Progress locking, commentary,
+intro movies and retail scroll animation remain unfinished; all discovered entries are
+selectable. Captures include unfinished world/material rendering outside the chapter UI.
+
+**Next:** Compare the desktop browser with retail and implement progression/commentary/movie
+behavior only as a separately bounded feature. The requested menu and selected-map flow are complete.
+
 ## 2026-10-27 Checkpoint: reusable card browser in source-ui
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

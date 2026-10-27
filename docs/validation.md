@@ -2,7 +2,8 @@
 
 ## Chapter selection (2026-10-27)
 
-Source implementation: `56717d2`; single-chapter containment fix: `da289c2`.
+Source implementation: `56717d2`; single-chapter containment fix: `da289c2`;
+reusable toolkit extraction: `7171e3f`.
 Research/design: `7db0bbf`; findings and limitations: [chapter-selection.md](chapter-selection.md).
 
 Commands (no installed files are changed):
@@ -12,7 +13,7 @@ scripts/checks/validate.sh
 scripts/checks/check_windows.sh
 cargo test --locked -p hl2-ui owned_chapter_catalogs -- --ignored
 scripts/build-bevy.sh
-NO_BUILD=1 ONLY='chapter_selection coverage' python3 scripts/checks/replays.py
+NO_BUILD=1 ONLY='chapter_selection coverage menu_options submenus' python3 scripts/checks/replays.py
 ```
 
 The final local run passes 1,135 Rust tests with 93 ignored, 13 Python tests,
@@ -40,11 +41,34 @@ images were retained, the pointer coordinates corrected to its own layout, and
 visual inspection additionally found overwide decorative separators. The fix
 centers a single card and sizes those rules using the authored frame inset.
 
+Final committed package (`7171e3f`) passes submenus, chapter_selection, menu_options
+and coverage: 4 check groups, zero failures, 199 s. The chapter group runs four
+browser previews plus four actual chapter loads. It asserts opening does not start
+gameplay; Cancel/reopen preserves the background; all titles/thumbnails are available;
+9a sorts correctly; pointer selection and Start use the correct chapter and game;
+load completion reaches Gameplay with no loader failures:
+
+| Game | Selected chapter | Verified loaded map |
+| --- | --- | --- |
+| Half-Life 2 | 2 | d1_trainstation_05 |
+| Episode One | 2 | ep1_citadel_03 |
+| Episode Two | 2 | ep2_outland_02 |
+| Lost Coast | 1 | d2_lostcoast |
+
+All four final browser captures were inspected after the resource/containment fixes;
+post-extraction comparison changes zero of 139,040 opaque thumbnail pixels across
+ten sampled image interiors (all four games). Geometry/input behavior is covered
+by the toolkit tests; transparent/background pixels are excluded from that comparison. Captures still
+show unfinished world/material rendering; UI validation does not establish complete
+background-map fidelity. Eleven package executable/shader hashes match the build
+metadata. Replays use a muted/background copy with default settings, leaving the
+normal package's settings and owned content untouched.
+
 Retained rejected evidence: artifacts/chapter-menu/rejected-stretched,
-rejected-pointer-coordinates and rejected-single-chapter. Exact check logs:
-validate-complete.log, windows-complete.log and owned-complete.log in
-artifacts/chapter-menu. Accepted runtime results and performance measurements
-are recorded below after the final runs. Native desktop comparison, Windows/Linux
+rejected-pointer-coordinates and rejected-single-chapter. Final check logs:
+validate-toolkit.log, windows-toolkit.log, owned-toolkit.log, replays-toolkit.log
+package-hashes-toolkit.json and toolkit-thumbnail-comparison.json under artifacts/chapter-menu. Final performance
+evidence: [performance.md](performance.md). Native desktop comparison, Windows/Linux
 runtime, other UI languages and an ordinary campaign playthrough remain **not tested**.
 
 
