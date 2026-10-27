@@ -6,6 +6,31 @@ guard are the first reviewable checkpoint. Advanced rendering optimisations are 
 and unqualified; the known high-resolution regression remains open. The primary checkout
 is reserved for the owner's manual testing. Sections below are newest first.
 
+## Uncapped baseline and efficiency scope (2026-10-27)
+
+Background --profile now has zero application-loop interval; ordinary background replays
+retain 1/60 s, interactive presentation is unchanged and the two-marker completion bound
+remains. Reports expose the selected interval; the guard asserts zero and allows explicit
+focused scene sweeps. Frame safety cap is 36,000 so fast runs can finish the full script;
+the existing script-finished check remains mandatory. No timing guard is weakened.
+
+Thirty packaged runs finish: eighteen native 3456x2168/4x, six 720p/no-AA idle and six
+1080p/no-AA idle, three alternating pairs each. Native median Enabled/Advanced frame ms:
+idle 14.27/19.17, turns 15.03/20.58, swing 14.28/21.49. Every native turning pair is resource-
+comparable and fails both budgets. 720p idle is 12.62/17.31 ms, all three pairs comparable;
+1080p idle is 12.78/17.42 ms, one Advanced run flags pressure. These do not qualify rendering.
+Native and no-AA sweeps differ in AA/aspect too; they are not isolated bandwidth tests.
+
+Render-phase buffer writes cost about 2.3 ms Enabled versus 4.5-4.7 ms Advanced at both
+native and 720p. Next: opt-in, startup-only direct drawing, preserving default rendering,
+then measure whether it reduces actual work/frame. CPU and GPU stage scopes overlap and are
+not additive GPU timings. Hardware/power-aware goal now explicitly includes CPU ms/frame,
+system GPU busy-time/frame proxy and memory; watts/joules remain unavailable. powermetrics
+requires superuser access here. No power saving is claimed from utilisation or FPS alone.
+Evidence: artifacts/blur-performance-regression/uncapped-main-depth-native,
+uncapped-main-depth-720p-noaa and uncapped-main-depth-1080p-noaa. No GPU workloads overlap.
+
+
 ## Newly found benchmark pacing limit (2026-10-27)
 
 Source inspection finds background runs install ScheduleRunnerPlugin::run_loop at 1/60 s,

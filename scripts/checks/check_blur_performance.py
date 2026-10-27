@@ -2,7 +2,7 @@
 
 NO_BUILD=1 python3 scripts/checks/check_blur_performance.py
 Defaults reproduce the reported 3456x2168 regression. BLUR_WIDTH/BLUR_HEIGHT,
-BLUR_AA and BLUR_RUNS override the stress workload (three alternating pairs by default); not part of headless CI.
+BLUR_AA, BLUR_SCENES and BLUR_RUNS override the stress workload (three alternating pairs by default); not part of headless CI.
 Runs only an isolated muted package and records frame tails as well as means.
 """
 import json
@@ -48,7 +48,7 @@ def measure(scene, advanced, repeat):
         }, indent=2), encoding="utf-8")
         replay.holds("no known competing workload before launch", not blocked, blocked)
         run = replay.game(name, "--map", "d1_trainstation_02", "--width", str(width), "--height", str(height),
-                          "--movement-script", str(path), "--frames", "2400", "--profile", capture=False)
+                          "--movement-script", str(path), "--frames", "36000", "--profile", capture=False)
     replay.holds("no render errors", "ERROR" not in run.log and "Caught rendering error" not in run.log)
     hud = run.report["render"]["presentation"]["hud"]
     replay.expect("actual internal frame size", hud["viewport"], [float(width), float(height)])
@@ -62,6 +62,7 @@ def measure(scene, advanced, repeat):
         replay.expect("profile window frame count", sum(w["frames"] for w in windows["windows"]), result["measured_frames"])
     monitor.metadata.update(adapter=run.report["render"].get("adapter"), backend=run.report["render"].get("backend"))
     result["environment"] = monitor.finish(replay.OUT/(name+".environment.json"), result, (width, height))
+    replay.expect("uncapped background profiling", run.report["render"]["presentation"].get("background_profile_interval_ms"), 0.0)
     completion = run.report["render"]["presentation"].get("gpu_completion", {})
     replay.holds("bounded GPU completion pacing", completion.get("limit") == 2 and
                  completion.get("max_pending_fences", 3) <= 2 and completion.get("errors") == 0, completion)
@@ -74,6 +75,13 @@ def measure(scene, advanced, repeat):
     summary["quality_flags"] = result["environment"]["quality_flags"]
     print(name, json.dumps(summary), flush=True)
     return result
+
+
+def requested_scenes(value):
+    scenes = tuple(value.split())
+    if not scenes or len(set(scenes)) != len(scenes) or any(s not in ("still", "turn", "swing") for s in scenes):
+        raise ValueError("BLUR_SCENES must select unique still/turn/swing scenes")
+    return scenes
 
 
 def main():
@@ -95,7 +103,8 @@ def main():
         "uncommitted_tracked_changes": bool(subprocess.check_output(["git", "diff", "HEAD", "--name-only"], cwd=replay.REPO)),
     }), encoding="utf-8")
     results, failures = {}, []
-    for scene in ("still", "turn", "swing"):
+    scenes = requested_scenes(os.environ.get("BLUR_SCENES", "still turn swing"))
+    for scene in scenes:
         modes = {False: [], True: []}
         for repeat in range(int(os.environ.get("BLUR_RUNS", "3"))):
             for advanced in ((False, True) if repeat % 2 == 0 else (True, False)):
@@ -122,7 +131,7 @@ def main():
         print(scene, "guards", guards, "environment", pairs, flush=True)
     if failures:
         raise replay.Failure("native-resolution blur not qualified: " + ", ".join(failures))
-    print("native-resolution blur performance guard passed")
+    print("blur performance guard passed for selected scenes:", ", ".join(scenes))
 
 
 if __name__ == "__main__":

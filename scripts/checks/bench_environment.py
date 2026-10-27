@@ -69,6 +69,9 @@ def throughput(fps, width, height, resources):
     cpu, gpu = resources.get("game_cpu_percent_one_core"), resources.get("gpu_busy_percent")
     return {"frames_per_second": fps, "megapixels_per_second": rate,
             "frames_per_game_cpu_second": fps/(cpu/100) if cpu and cpu > 0 else None,
+            "game_cpu_ms_per_frame": 10*cpu/fps if cpu is not None and fps > 0 else None,
+            "system_gpu_busy_ms_per_frame_proxy": 10*gpu/fps if gpu is not None and fps > 0 else None,
+            "power_watts": None, "energy_joules_per_frame": None,
             "megapixels_per_system_gpu_busy_second_proxy": rate/(gpu/100) if gpu and gpu > 0 else None}
 
 

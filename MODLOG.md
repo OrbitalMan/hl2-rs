@@ -1,5 +1,38 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: uncapped profiling and per-frame resource work
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Uncap only background --profile, retain normal replay pacing and GPU queue bound,
+and report/assert the selected interval. Focused scene selection is explicit and validated.
+Raise the harness frame safety cap to permit complete fast scripts. Add CPU ms/frame and
+labelled system GPU busy-time/frame proxies; leave watts/joules null instead of inventing
+energy from utilisation. No renderer optimisation is promoted.
+
+**Why:** The owner wants meaningful low-settings throughput and lower compute/energy per
+frame, beyond merely driving hardware harder. The old 60 Hz background interval hid headroom.
+
+**Tested how:** Three profiling tests, host strict Clippy and Python checks pass. Thirty
+packaged runs finish with scripts complete, reported zero interval and bounded GPU completion.
+Three alternating pairs per native scene and per 720p/1080p idle workload; results/resources
+are retained. Full validate.sh passes 1,137 Rust tests (92 ignored), 27 Python tests, strict Clippy, fmt
+and architecture; Windows-target strict Clippy also passes.
+
+**Result:** Native Enabled reaches about 70 FPS idle; Advanced about 52. All comparable native
+turning pairs fail the unchanged budget. 720p/1080p Advanced remains around 57-58 FPS. Render-
+phase write cost stays about 2.3 ms Enabled versus 4.5-4.7 ms Advanced across sizes, motivating
+a bounded direct-drawing experiment. Exact results and interference flags are in performance
+notes; earlier paced data is preserved with its limitations.
+
+**Still broken or not tested:** Rendering cost is unqualified. Actual power sampling requires
+privilege here; interactive FPS, Windows runtime and 120 FPS remain untested. No energy saving
+is claimed. No code or game assets were changed in the primary checkout.
+
+**Next:** Test direct drawing and measure work/frame; continue blur-specific optimisation
+without spending an unrelated saving as permission for unnecessary blur work.
+
+
 ## 2026-10-27 Finding: background benchmarks retain 60 Hz application pacing
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

@@ -1,5 +1,26 @@
 # Design
 
+## Reduce render preparation and measure work per frame (2026-10-27)
+
+Uncapped native and 720p data show render-phase buffer preparation around 2.3 ms Enabled
+and 4.5-4.7 ms Advanced, despite the pixel-count reduction. Test the supported direct-draw
+camera mode as a profiling-only experiment: an opt-in startup flag adds NoIndirectDrawing
+when cameras are initially created, never during play. Keep default rendering unchanged
+until measured. Retain geometry, materials, resolution/AA, simulation and blur filter math.
+Compare three alternating pairs at matched settings, CPU work/frame, GPU busy-time proxies
+and memory, then image/pose/occlusion checks. The documented general risk is extra CPU draw
+work and lost indirect batching/culling; reject/archive a regression rather than assuming a
+win. Do not modify Bevy. Preserve this variant separately before replacing it.
+
+The owner also requires compute/energy efficiency, beyond maximum FPS. Report process CPU
+milliseconds per rendered frame and explicitly system-wide GPU-busy milliseconds/frame as
+a proxy, with missing watt/joule fields null. Local powermetrics refuses unprivileged use;
+actual power is unavailable, not estimated from utilisation. Later energy comparisons need
+matched-FPS, scene, resolution, thermal and power-source conditions and a trustworthy power
+source. Fixed-rate and uncapped measurements answer different questions; neither alone
+establishes energy savings. Keep peak FPS, frame tails, work/frame and memory as separate
+criteria, preserving gameplay and blur quality.
+
 ## Uncapped profiling before low-settings throughput work (2026-10-27)
 
 The existing background runner's 1/60 s interval includes profiling runs. Separate test

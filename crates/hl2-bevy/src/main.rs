@@ -706,8 +706,8 @@ fn main() -> Result<()> {
             ..default()
         });
     // Background runs have no operating-system window: without winit nothing is created on the
-    // desktop or activated (winit activates the app on launch), and a fixed-rate loop steps the
-    // app instead of the window's event loop.
+    // desktop or activated (winit activates the app on launch). Profiling runs uncapped;
+    // ordinary background replays retain the fixed-rate loop.
     let default_plugins = if options.background {
         default_plugins.disable::<bevy::winit::WinitPlugin>()
     } else {
@@ -716,7 +716,7 @@ fn main() -> Result<()> {
     let mut app = App::new();
     if options.background {
         app.add_plugins(bevy::app::ScheduleRunnerPlugin::run_loop(
-            std::time::Duration::from_secs_f64(1. / 60.),
+            performance::background_interval(options.profile),
         ));
     }
     if let Some(path) = &options.audio_trace {

@@ -7,6 +7,7 @@ def markdown(results):
     lines = ["# Blur resource and output measurements", "",
              "Host utilisation includes the workload itself. Correlations are descriptive, not causal.",
              "GPU busy-time throughput is a system-wide proxy, not game-only GPU time or FLOPS.",
+             "Power and joules/frame are not sampled; utilisation is not an energy measurement.",
              "Memory columns use macOS free+inactive+speculative pages; dedicated VRAM is unavailable on unified memory.", "",
              "| Scene / mode | FPS | Frame ms | p95 ms | CPU busy % | GPU busy % | Min available GiB | Mpixel/s | Frames / game CPU-s | Mpixel / system GPU-busy-s proxy | Flags |",
              "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"]

@@ -1,5 +1,38 @@
 # Performance measurements - 2026-10-05
 
+## Uncapped main-depth baseline (2026-10-27)
+
+The background profiler now runs with zero application-loop interval, keeping the two-GPU-
+marker bound. Every run checks its reported interval, completed GPU work and script completion.
+Ordinary replays retain their pacing; interactive FPS is not tested by these runs.
+
+| Workload | Enabled median frame ms / FPS | Advanced median frame ms / FPS | Median p95 ms Enabled / Advanced |
+| --- | ---: | ---: | ---: |
+| Native 3456x2168, 4x AA, idle | 14.27 / 70.1 | 19.17 / 52.2 | 15 / 23 |
+| Native, turning | 15.03 / 66.5 | 20.58 / 48.6 | 18 / 25 |
+| Native, swinging | 14.28 / 70.0 | 21.49 / 46.5 | 15 / 30 |
+| 1280x720, no AA, idle | 12.62 / 79.3 | 17.31 / 57.8 | 14 / 19 |
+| 1920x1080, no AA, idle | 12.78 / 78.2 | 17.42 / 57.4 | 14 / 19 |
+
+Thirty packaged runs total: three alternating pairs per row, middle order reversed. All native
+turn pairs and all 720p pairs are resource-comparable. Native idle/swing and 1080p have some
+memory-baseline/pressure flags, retained in their raw results. Every row fails the unchanged
+performance budget; no optimisation is qualified. Native differs in AA and aspect ratio, so
+these rows cannot isolate resolution bandwidth. The matching-aspect no-AA rows indicate a
+substantial fixed cost. Earlier paced observations cannot be used as uncapped throughput.
+
+In representative native/720p runs, render-phase buffer writes are 2.3-2.4 ms Enabled and
+4.5-4.7 ms Advanced. These are CPU wall stage scopes, not direct GPU timers; scopes overlap.
+Animation is about 2.5-2.7 ms per call, fixed simulation about 2.7-2.9 ms per call. These values
+motivate testing supported direct drawing before adding more filter complexity. CPU work/frame
+is tracked separately from maximum FPS; GPU busy-time/frame remains a system-wide proxy.
+Power watts and joules/frame are null: local powermetrics requires privileged access, and
+utilisation cannot establish energy. Future energy tests require matched FPS and power/thermal
+conditions. Data: artifacts/blur-performance-regression/uncapped-main-depth-native,
+uncapped-main-depth-720p-noaa and uncapped-main-depth-1080p-noaa. No interactive, Windows-runtime,
+120 FPS or energy-efficiency success is claimed.
+
+
 ## Background frame pacing prevents an uncapped FPS claim (2026-10-27)
 
 Source inspection finds main.rs configures every --background loop, including --profile,

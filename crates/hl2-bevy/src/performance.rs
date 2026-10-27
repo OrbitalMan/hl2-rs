@@ -1,6 +1,8 @@
 //! Optional bounded CPU stage measurements; disabled for ordinary play.
 mod gpu_completion;
+mod pacing;
 use bevy::prelude::*;
+pub(crate) use pacing::background_interval;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -50,6 +52,13 @@ impl Performance {
         diagnostics: Option<&bevy::diagnostic::DiagnosticsStore>,
     ) {
         output["cpu_stages"] = self.report();
+        output["background_profile_interval_ms"] = self
+            .1
+            .lock()
+            .expect("GPU profiling state")
+            .as_ref()
+            .map(|_| background_interval(true).as_secs_f64() * 1000.)
+            .into();
         output["gpu_completion"] =
             serde_json::to_value(&*self.1.lock().expect("GPU profiling state"))
                 .expect("GPU profiling report");

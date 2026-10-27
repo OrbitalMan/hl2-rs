@@ -38,6 +38,14 @@ class EnvironmentTests(unittest.TestCase):
             self.assertEqual(evidence["known_interference"], ["other_game_processes"])
             self.assertEqual(evidence["baseline"], baseline)
 
+    def test_focused_scenes_are_explicit_and_validate_the_workload(self):
+        from check_blur_performance import requested_scenes
+        self.assertEqual(requested_scenes("still turn swing"), ("still", "turn", "swing"))
+        self.assertEqual(requested_scenes("turn"), ("turn",))
+        for value in ("", "still still", "camera", "turn missing"):
+            with self.assertRaises(ValueError):
+                requested_scenes(value)
+
     def test_cpu_delta_is_host_normalized_and_handles_wrap(self):
         self.assertIsNone(cpu_percent(None, [1, 2, 3, 4]))
         self.assertEqual(cpu_percent([10, 20, 30, 0], [20, 25, 45, 0]), 50)
@@ -73,6 +81,17 @@ class EnvironmentTests(unittest.TestCase):
         self.assertIsNone(correlation([(1, 1)]*10)['pearson_r'])
         self.assertIsNone(correlation([(1, 1)])['pearson_r'])
         self.assertAlmostEqual(correlation([(i, i*2) for i in range(6)])['pearson_r'], 1)
+
+    def test_work_per_frame_does_not_invent_energy_from_utilisation(self):
+        result = throughput(50, 1000, 1000, {"game_cpu_percent_one_core": 200, "gpu_busy_percent": 50})
+        self.assertEqual(result["game_cpu_ms_per_frame"], 40)
+        self.assertEqual(result["system_gpu_busy_ms_per_frame_proxy"], 10)
+        self.assertIsNone(result["power_watts"])
+        self.assertIsNone(result["energy_joules_per_frame"])
+        for fps, resources in [(0, {}), (50, {})]:
+            unknown = throughput(fps, 1, 1, resources)
+            self.assertIsNone(unknown["game_cpu_ms_per_frame"])
+            self.assertIsNone(unknown["system_gpu_busy_ms_per_frame_proxy"])
 
     def test_reports_flag_competition_pressure_and_unknown_telemetry(self):
         samples = [{'unix_seconds': i+0.5, 'sampler_wall_ms': 1, 'gpu_busy_percent': 80,
