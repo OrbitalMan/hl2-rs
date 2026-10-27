@@ -56,7 +56,8 @@ impl super::Catalog {
         game: &str,
         loc: &mut crate::gameui::localize::Localization,
     ) -> Self {
-        let read = |path: &str| vfs.read(path).ok().flatten();
+        let reader = Reader::new(vfs);
+        let read = |path: &str| reader.read(path);
         let file = format!("resource/{game}_english.txt");
         if let Some(bytes) = read(&file) {
             loc.add_resource(&file, &bytes);
@@ -78,7 +79,18 @@ impl super::Catalog {
                 .and_then(Layout::parse)
                 .unwrap_or_default()
         };
-        let scheme = Reader::new(vfs)
+        let dialog = layout("resource/newgamedialog.res");
+        let panel = layout("resource/newgamechapterpanel.res");
+        let commentary_icon = dialog
+            .get("CommentaryIcon")
+            .or_else(|| panel.get("CommentaryIcon"))
+            .and_then(|c| {
+                let name = c.image.trim_start_matches('/');
+                (!name.is_empty()).then(|| image(vfs, &format!("vgui/{name}")))?
+            })
+            .or_else(|| image(vfs, "vgui/resource/commentary_hl2c"))
+            .or_else(|| image(vfs, "vgui/hud/icon_commentary_small"));
+        let scheme = reader
             .read("resource/sourcescheme.res")
             .and_then(|b| source_assets::keyvalues::parse_resource(&b).ok())
             .and_then(|roots| roots.into_iter().next());
@@ -112,8 +124,9 @@ impl super::Catalog {
             font_tall,
             entries,
             thumbnails,
-            dialog: layout("resource/newgamedialog.res"),
-            panel: layout("resource/newgamechapterpanel.res"),
+            commentary_icon,
+            dialog,
+            panel,
         }
     }
 }

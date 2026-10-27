@@ -16,6 +16,19 @@ pub struct Card {
     pub image: Option<Texture2D>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScaledImageLayout {
+    pub rect: Rect,
+    pub scale: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrowserToggleLayout {
+    pub backing: Option<Rect>,
+    pub icon: Option<ScaledImageLayout>,
+    pub check_box: Rect,
+}
+
 #[derive(Clone, Debug)]
 pub struct CardLayout {
     pub size: Vec2,
@@ -23,6 +36,7 @@ pub struct CardLayout {
     pub title: Rect,
     pub image: Rect,
     pub border: Rect,
+    pub badge: Option<ScaledImageLayout>,
     pub font_tall: f32,
 }
 impl Default for CardLayout {
@@ -33,6 +47,7 @@ impl Default for CardLayout {
             title: Rect::new(0., 20., 168., 20.),
             image: Rect::new(8., 52., 152., 86.),
             border: Rect::new(0., 44., 168., 102.),
+            badge: None,
             font_tall: 14.,
         }
     }
@@ -47,6 +62,7 @@ pub struct BrowserLayout {
     pub next: Rect,
     pub accept: Rect,
     pub cancel: Rect,
+    pub toggle: Option<BrowserToggleLayout>,
     pub dividers: Vec<Rect>,
 }
 impl Default for BrowserLayout {
@@ -59,6 +75,7 @@ impl Default for BrowserLayout {
             next: Rect::new(500., 200., 72., 24.),
             accept: Rect::new(363., 252., 124., 24.),
             cancel: Rect::new(500., 252., 72., 24.),
+            toggle: None,
             dividers: Vec::new(),
         }
     }
@@ -71,6 +88,8 @@ pub struct BrowserSpec {
     pub title: String,
     /// Previous page, next page, accept and cancel, already localized by the application.
     pub labels: [String; 4],
+    pub toggle_label: Option<String>,
+    pub toggle_icon: Option<Texture2D>,
     pub selection: Option<Color>,
     pub fill: Option<Color>,
     pub text: Option<Color>,
@@ -82,6 +101,7 @@ enum Target {
     Card(usize),
     Previous,
     Next,
+    Toggle,
     Accept,
     Cancel,
     Close,
@@ -97,6 +117,7 @@ pub enum Outcome {
 pub struct CardBrowser {
     pub selected: usize,
     pub first: usize,
+    pub toggle_checked: bool,
     pub escape_held: bool,
     pub placement: Placement,
     spec: BrowserSpec,
@@ -114,6 +135,7 @@ impl CardBrowser {
         Self {
             selected: 0,
             first: 0,
+            toggle_checked: false,
             escape_held: false,
             placement: Placement::default(),
             spec,
@@ -130,6 +152,7 @@ impl CardBrowser {
     pub fn open(&mut self) {
         self.selected = 0;
         self.first = 0;
+        self.toggle_checked = false;
         self.escape_held = false;
         self.tracker.reset();
         self.keys.reset();
@@ -176,6 +199,11 @@ impl CardBrowser {
         let cards = (self.first..(self.first + 3).min(self.spec.cards.len()))
             .map(|i| (Target::Card(i), self.panel_rect(i)));
         let layout = &self.spec.layout;
+        let toggle = layout
+            .toggle
+            .filter(|_| self.spec.toggle_label.is_some())
+            .map(|t| t.check_box)
+            .unwrap_or_default();
         let buttons = [
             (self.first > 0, Target::Previous, layout.previous),
             (
@@ -183,6 +211,7 @@ impl CardBrowser {
                 Target::Next,
                 layout.next,
             ),
+            (toggle.w > 0. && toggle.h > 0., Target::Toggle, toggle),
             (!self.spec.cards.is_empty(), Target::Accept, layout.accept),
             (true, Target::Cancel, layout.cancel),
         ]

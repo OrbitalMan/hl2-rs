@@ -3,7 +3,7 @@ use super::{Catalog, Localization};
 use glam::vec2;
 use source_ui::{
     canvas::{Rect, Texture2D},
-    card_browser::{BrowserLayout, BrowserSpec, Card},
+    card_browser::{BrowserLayout, BrowserSpec, BrowserToggleLayout, Card, ScaledImageLayout},
     layout::Layout,
 };
 
@@ -37,12 +37,46 @@ impl Catalog {
                 Rect::new(x, y, w, h)
             })
             .collect();
+        if let Some(check) = self.dialog.get("Commentary").filter(|c| c.visible) {
+            let (x, y, w, h) = check.rect(parent);
+            let backing = self
+                .dialog
+                .get("ImagePanel1")
+                .filter(|c| c.visible)
+                .map(|c| {
+                    let (bx, by, bw, bh) = c.rect(parent);
+                    Rect::new(bx, by, bw, bh)
+                });
+            let icon = self
+                .dialog
+                .get("CommentaryIcon")
+                .filter(|c| c.visible)
+                .map(|c| {
+                    let (ix, iy, iw, ih) = c.rect(parent);
+                    ScaledImageLayout {
+                        rect: Rect::new(ix, iy, iw, ih),
+                        scale: c.scale_amount,
+                    }
+                });
+            layout.toggle = Some(BrowserToggleLayout {
+                backing,
+                icon,
+                check_box: Rect::new(x, y, w, h),
+            });
+        }
         let panel = &mut layout.card;
         let parent = (panel.size.x, panel.size.y);
         panel.heading = rect(&self.panel, "ChapterLabel", parent, panel.heading);
         panel.title = rect(&self.panel, "ChapterNameLabel", parent, panel.title);
         panel.image = rect(&self.panel, "LevelPic", parent, panel.image);
         panel.border = rect(&self.panel, "LevelPicBorder", parent, panel.border);
+        panel.badge = self.panel.get("CommentaryIcon").map(|c| {
+            let (bx, by, bw, bh) = c.rect(parent);
+            ScaledImageLayout {
+                rect: Rect::new(bx, by, bw, bh),
+                scale: c.scale_amount,
+            }
+        });
         if panel.border.w > panel.image.w && panel.image.w > 0. && panel.image.h > 0. {
             let pad = ((panel.border.w - panel.image.w) * 0.5).round().max(1.);
             let bottom = panel.border.y + panel.border.h;
@@ -95,6 +129,21 @@ impl Catalog {
                 label("Play", "#GameUI_StartNewGame"),
                 label("Cancel", "#GameUI_Cancel"),
             ],
+            toggle_label: self
+                .dialog
+                .get("Commentary")
+                .filter(|c| c.visible)
+                .map(|c| {
+                    loc.text(if c.label.is_empty() {
+                        "#HL2_Enable_Commentary"
+                    } else {
+                        &c.label
+                    })
+                }),
+            toggle_icon: self
+                .commentary_icon
+                .as_ref()
+                .map(|image| Texture2D::from_rgba8(image.width, image.height, &image.rgba)),
             selection: self.selection,
             fill: self.fill,
             text: self.text,

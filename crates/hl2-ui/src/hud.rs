@@ -1,10 +1,10 @@
 //! The PC HL2 HUD layout is read from the owned game's scheme and resource files.
 //! Bucket positioning and visibility follow CHudWeaponSelection, rather than a new UI design.
+mod commentary;
 mod font;
 mod power;
 use font::HudFont;
 
-use crate::gameui::localize::Localization;
 use anyhow::{Context, Result};
 use glam::{vec2, Vec2};
 use hl2_simulation::{
@@ -1150,6 +1150,7 @@ pub struct WeaponHud {
     secondary_ammo_panel: PanelLayout,
     quick_info: QuickInfoHud,
     power: power::PowerHud,
+    commentary: commentary::CommentaryHud,
     /// HudDamageIndicator dmg_xpos, dmg_ypos, dmg_wide, dmg_tall1, dmg_tall2
     /// (proportional, 480-line units).
     damage_layout: [f32; 5],
@@ -1254,40 +1255,8 @@ impl WeaponHud {
         let animation_rules = animations(&animation_source)?;
         let animation_events = event_rules(&animation_source)?;
         let numeric_effects = MutexCell::new(NumericHudEffects::new(&settings));
-        let mut ammo_icons = BTreeMap::new();
-        let mut secondary_ammo_icons = BTreeMap::new();
-        let mut weapon_crosshairs = BTreeMap::<String, String>::new();
-        for class in [
-            "weapon_crowbar",
-            "weapon_pistol",
-            "weapon_357",
-            "weapon_smg1",
-            "weapon_ar2",
-            "weapon_shotgun",
-            "weapon_crossbow",
-            "weapon_rpg",
-            "weapon_frag",
-        ] {
-            if let Some(bytes) = vfs.read(&format!("scripts/{class}.txt"))? {
-                if let Some(weapon) = keyvalues::parse_resource(&bytes)?.first() {
-                    if let Some(textures) = weapon.get("TextureData") {
-                        for (key, icons) in [
-                            ("ammo", &mut ammo_icons),
-                            ("ammo2", &mut secondary_ammo_icons),
-                            ("crosshair", &mut weapon_crosshairs),
-                        ] {
-                            if let Some(icon) = textures
-                                .get(key)
-                                .and_then(|e| e.get("character"))
-                                .and_then(Entry::text)
-                            {
-                                icons.insert(class.into(), icon.into());
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let (ammo_icons, secondary_ammo_icons, weapon_crosshairs) =
+            commentary::load_weapon_icons(vfs)?;
         let hud_textures = keyvalues::parse_resource(
             &vfs.read("scripts/hud_textures.txt")?
                 .context("HUD textures missing")?,
@@ -1345,16 +1314,8 @@ impl WeaponHud {
         for number in 1..=4 {
             corners.push(texture(vfs, &format!("vgui/hud/8x800corner{number}"))?);
         }
-        let mut loc = Localization::default();
-        for loc_path in [
-            "resource/valve_english.txt",
-            "resource/gameui_english.txt",
-            "resource/hl2_english.txt",
-        ] {
-            if let Ok(Some(bytes)) = vfs.read(loc_path) {
-                loc.add_resource(loc_path, &bytes);
-            }
-        }
+        let loc = commentary::load_localization(vfs);
+        let commentary = commentary::CommentaryHud::load(vfs, layout);
         let captions = crate::closecaption::CaptionHud::load(
             vfs,
             scheme,
@@ -1365,6 +1326,7 @@ impl WeaponHud {
         let power = power::PowerHud::load(layout, fonts, &loc, bold.clone(), face.clone())?;
         Ok(Self {
             power,
+            commentary,
             aspect: crate::config::HudAspect::default(),
             corners,
             canvas,
@@ -1429,6 +1391,16 @@ impl WeaponHud {
             alt_label: loc.text("#Valve_Hud_AMMO_ALT"),
             captions,
         })
+    }
+
+    /// The developer commentary progress panel (`HudCommentary`), hidden when `closecaption` is on.
+    pub fn draw_commentary(
+        &self,
+        overlay: Option<&hl2_simulation::commentary::CommentaryOverlay>,
+        closecaption: bool,
+        time: f64,
+    ) {
+        self.commentary.draw(self, overlay, closecaption, time);
     }
 
     /// The closed caption panel (CHudCloseCaption::Paint): its box through the HUD's rounded

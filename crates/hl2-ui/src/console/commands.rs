@@ -629,6 +629,13 @@ pub const COMMANDS: &[Spec] = &[
         map::skill_value,
         map::set_skill,
     ),
+    setting(
+        "commentary",
+        "commentary [0|1]: query or toggle developer commentary mode",
+        BOOLEAN,
+        map::commentary_value,
+        map::set_commentary,
+    ),
     command(
         "migrate_episodic_data",
         "migrate_episodic_data: migrate save data from standalone episodes (placeholder)",

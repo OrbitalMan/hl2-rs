@@ -184,3 +184,8 @@ pub(super) fn combine_camera(scene: &mut Scene, d: &Delivery) -> bool {
     }
     true
 }
+
+/// CPointCommentaryNode StartCommentary / StartUnstoppableCommentary / Enable / Disable.
+pub(super) fn commentary_node(scene: &mut Scene, d: &Delivery) -> bool {
+    crate::commentary::CommentaryState::handle_input(scene, d.world, d.id, d.input)
+}

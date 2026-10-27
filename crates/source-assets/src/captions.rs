@@ -71,7 +71,11 @@ impl Dictionary {
     }
 
     pub fn get(&self, token: &str) -> Option<&str> {
-        self.entries.get(&token_hash(token)).map(String::as_str)
+        self.entries
+            .get(&token_hash(token))
+            .or_else(|| self.entries.get(&token_hash(&token.replace('/', "\\"))))
+            .or_else(|| self.entries.get(&token_hash(&token.replace('\\', "/"))))
+            .map(String::as_str)
     }
 }
 

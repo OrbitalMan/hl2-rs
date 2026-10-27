@@ -66,7 +66,9 @@ impl Console {
             Layer::Window(Window::Console) => Mode::Console,
             Layer::Window(Window::NewGame) => Mode::NewGame,
             Layer::Window(Window::Confirmation) => {
-                if self.options_open() {
+                if self.shell.windows.is_active(Window::NewGame) {
+                    Mode::NewGame
+                } else if self.options_open() {
                     Mode::Options
                 } else {
                     self.base
@@ -348,6 +350,9 @@ impl Host for Console {
             // The menus are occluded: keep their tracker on the physical button so the rest of
             // a click that closes the modal layer is not read as a new menu press.
             self.menu_tracker.occlude(input.click || input.held);
+            if let Some(d) = self.chapter_dialog_mut() {
+                d.browser.occlude(input.click || input.held);
+            }
         }
         if let Some(loading) = self.loading_dialog.as_ref().filter(|l| !l.is_background()) {
             if loading.is_failed() && (input.pressed(Key::Enter) || input.click) {

@@ -247,3 +247,77 @@ fn occlusion_preserves_selection_and_cancels_hidden_key_activation() {
         Outcome::Accept(1)
     );
 }
+
+#[test]
+fn footer_toggle_checks_on_click_and_draws_card_badges_when_checked() {
+    use crate::{
+        canvas::Canvas,
+        widgets::{Fonts, Painter, Theme},
+    };
+    let mut dialog = fixture(2);
+    dialog.spec.layout.card.badge = Some(ScaledImageLayout {
+        rect: Rect::new(10., 100., 43., 42.),
+        scale: 0.5,
+    });
+    dialog.spec.layout.toggle = Some(BrowserToggleLayout {
+        backing: Some(Rect::new(22., 254., 308., 40.)),
+        icon: Some(ScaledImageLayout {
+            rect: Rect::new(25., 258., 43., 42.),
+            scale: 0.5,
+        }),
+        check_box: Rect::new(60., 262., 264., 24.),
+    });
+    dialog.spec.toggle_label = Some("Toggle option".into());
+    dialog.spec.toggle_icon = Some(Texture2D::from_rgba8(64, 64, &vec![255; 64 * 64 * 4]));
+    let size = vec2(960., 720.);
+    let frame = dialog.frame(size);
+    let pointer = Some(frame.origin + vec2(70., 270.) * frame.scale);
+
+    let canvas = Canvas::default();
+    let theme = Theme::default();
+    let fonts = Fonts::default();
+    let p = Painter {
+        canvas: &canvas,
+        fonts: &fonts,
+        theme: &theme,
+        origin: Vec2::ZERO,
+        scale: 1.,
+    };
+    dialog.draw(&p, size);
+    let unchecked_textures = canvas
+        .drain()
+        .iter()
+        .filter(|q| q.texture.is_some())
+        .count();
+    assert_eq!(unchecked_textures, 1);
+
+    dialog.input(
+        &Input {
+            pointer,
+            click: true,
+            held: true,
+            ..Default::default()
+        },
+        size,
+    );
+    dialog.input(
+        &Input {
+            pointer,
+            released: true,
+            ..Default::default()
+        },
+        size,
+    );
+    assert!(dialog.toggle_checked);
+
+    dialog.draw(&p, size);
+    let checked_textures = canvas
+        .drain()
+        .iter()
+        .filter(|q| q.texture.is_some())
+        .count();
+    assert_eq!(checked_textures, 3);
+
+    dialog.open();
+    assert!(!dialog.toggle_checked);
+}

@@ -1,5 +1,17 @@
 # STATUS
 
+## Developer commentary mode verified (2026-10-27)
+
+- Verified developer commentary mode across GameUI, simulation, HUD, and host runtime.
+- Chapter browser integrates the `#HL2_Enable_Commentary` footer checkbox, commentary card badge (`materials/vgui/resource/commentary_hl2c.vtf`), and the commentary explanation confirmation box (`#GameUI_CommentaryDialogTitle`, `#GAMEUI_Commentary_Console_Explanation`).
+- In-game `point_commentary_node` balloons support raycast hovering, `+use` playback toggle, sound cue dispatch, caption dictionary lookup, Hermite camera viewposition override, and secondary-attack (`+attack2`) node teleportation.
+- Balloon skin dynamically updates to `models/extras/speech_info_used` once played.
+- Player is immune to damage while commentary mode is enabled.
+- `HudCommentary` displays progress bar, speaker name, node count, and audio/caption status.
+- Zero per-frame cost when commentary is disabled.
+- Packaged replay check `commentary` (`test-inputs/bevy-lostcoast-commentary.json` on `d2_lostcoast`) and `coverage` passed; `validate.sh` and `check_windows.sh` passed.
+
+
 ## Chapter browser layout/fonts, submenu background retention, and loading screen backdrop verified (2026-10-27)
 
 - Normalized `CardBrowser` and `Catalog::browser_layout` card geometry to `168x146` with a

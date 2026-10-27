@@ -497,6 +497,8 @@ impl Default for MouseSettings {
 pub struct GameplaySettings {
     /// `skill`: 1 Easy, 2 Normal, 3 Hard.
     pub skill: u8,
+    /// `commentary`: developer commentary track enabled.
+    pub commentary: bool,
     /// Overridden or unlocked main-menu background map (falls back to `scripts/chapterbackgrounds.txt`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background_map: Option<String>,
@@ -510,6 +512,7 @@ impl Default for GameplaySettings {
     fn default() -> Self {
         Self {
             skill: 2,
+            commentary: false,
             background_map: None,
             background_game: None,
         }

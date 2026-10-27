@@ -363,6 +363,8 @@ pub struct Scene {
     pub color_correction: crate::color_correction::ColorCorrection,
     /// The point_viewcontrol and env_zoom the local player's view follows.
     pub view_control: crate::view_control::ViewControl,
+    /// Developer commentary state and `point_commentary_node` nodes.
+    pub commentary: crate::commentary::CommentaryState,
     /// point_template children that do not exist until ForceSpawn, with their authored
     /// visible/enabled state.
     templates: BTreeMap<usize, Vec<(usize, bool, bool)>>,
@@ -631,6 +633,7 @@ impl Scene {
             tonemap: Default::default(),
             color_correction: crate::color_correction::ColorCorrection::new(world),
             view_control: Default::default(),
+            commentary: Default::default(),
             templates: BTreeMap::new(),
             player_feet: Vec3::ZERO,
             tick_dt: 0.,
@@ -656,30 +659,7 @@ impl Scene {
         scene.hold_template_children(world);
         // MapEntity_ParseAllEntities removes SF_NPC_TEMPLATE NPCs (npc_template_maker).
         scene.makers = crate::npc_makers::NpcMakers::new(world, &mut scene.states);
-        // SetupParentsForSpawnList: `parentname` ("name" or "name,attachment") keeps the
-        // spawn world pose. Parents still held by a point_template do not exist yet.
-        for id in 0..world.entities.len() {
-            let e = &world.entities[id];
-            let Some(spec) = e.get("parentname").filter(|n| !n.is_empty()) else {
-                continue;
-            };
-            if self_positioned(e.class()) || scene.template_pending(id) || scene.makers.held(id) {
-                continue;
-            }
-            let (name, attachment) = match spec.split_once(',') {
-                Some((n, a)) => (n.trim(), Some(a.trim().to_owned())),
-                None => (spec.trim(), None),
-            };
-            let Some(parent) = world.entities.iter().position(|p| {
-                p.get("targetname")
-                    .is_some_and(|t| t.eq_ignore_ascii_case(name))
-            }) else {
-                continue;
-            };
-            if parent != id && !scene.template_pending(parent) && !scene.makers.held(parent) {
-                scene.set_parent(world, id, parent, attachment, true);
-            }
-        }
+        scene.setup_spawn_parents(world);
         // CTimerEntity::Spawn -> Enable -> ResetTimer: random timers draw their first delay.
         for (id, e) in world.entities.iter().enumerate() {
             if e.class() == "logic_timer" && number(e, "UseRandomTime", 0.) != 0. {

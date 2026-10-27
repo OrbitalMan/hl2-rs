@@ -315,6 +315,20 @@ pub fn return_to_main_menu_box(loc: &Localization) -> MessageBox {
     )
 }
 
+/// The Developer Commentary explanation confirmation dialog (`#GameUI_CommentaryDialogTitle`,
+/// `#GAMEUI_Commentary_Console_Explanation`, `#vgui_ok`, `#vgui_cancel`, matching
+/// `hl2/resource/commentaryexplanationdialog.res`).
+pub fn commentary_explanation_box(loc: &Localization, measure: impl Fn(&str) -> f32) -> MessageBox {
+    let raw = loc.text("#GAMEUI_Commentary_Console_Explanation");
+    let wrapped = source_ui::widgets::wrap(&raw, 320.0, measure).join("\n");
+    MessageBox::new(
+        loc.text("#GameUI_CommentaryDialogTitle"),
+        wrapped,
+        loc.text("#vgui_ok"),
+        Some(loc.text("#vgui_cancel")),
+    )
+}
+
 /// Reference design vertical resolution for Source UI coordinates (480p).
 pub const BASE_SCREEN_HEIGHT: f32 = 480.;
 /// Default X offset for the main menu title in 480p units (`Main.Title1.X`).

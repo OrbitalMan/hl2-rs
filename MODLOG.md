@@ -1,5 +1,27 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: developer commentary nodes, balloon skins, HUD progress, and chapter browser integration
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+
+**Changed:** Implemented complete developer commentary support across GameUI, simulation, HUD, and host runtime.
+In `source-ui` / `hl2-ui`: extended `CardBrowser` with footer toggle layout and per-card badges; wired the `#HL2_Enable_Commentary` checkbox and commentary badge (`materials/vgui/resource/commentary_hl2c.vtf`) into the chapter browser; added `commentary` cvar (`GameplaySettings::commentary`) and the confirmation explanation dialog (`#GameUI_CommentaryDialogTitle`, `#GAMEUI_Commentary_Console_Explanation`).
+In `hl2-simulation`: added commentary entity parsing and runtime state (`CommentaryState`) for `point_commentary_node`; implemented eye raycasting, balloon hover/selection, playback start/stop, speech sound cue and caption dispatching, Hermite camera viewposition blending (`view_control_override`), secondary-attack (`+attack2`) node teleportation (`jump_to_next_node`), and player damage immunity in commentary mode.
+In `hl2-ui` HUD: implemented `CommentaryHud` (`HudCommentary` progress bar, speaker label, node counter, sound/caption indicator) wired into `WeaponHud::draw_commentary`.
+In `source-assets`: normalized caption dictionary path separators (`/` vs `\`) for cross-platform commentary cue lookup.
+In `hl2-bevy`: wired commentary entity spawning during map load, pre-cached `models/extras/speech_info_used` material, updated balloon entity textures on state change (`speech_info` -> `speech_info_used`), allowed player `+use` and `+attack2` during scripted intro cameras, and extracted `apply_script_command` to reduce simulation step size.
+Added packaged replay fixture `test-inputs/bevy-lostcoast-commentary.json` and registered `check_commentary` in `scripts/checks/replays.py`.
+
+**Why:** Half-Life 2 (and Lost Coast / Episodes) developer commentary mode features interactive audio nodes (`point_commentary_node`) shaped as floating speech balloons throughout the levels, toggled from the chapter selection menu or the `commentary` cvar. Nodes play developer commentary audio with closed captions and HUD progress, switch materials once listened to, allow teleporting to subsequent nodes via secondary attack, and grant the player damage invulnerability during commentary playthroughs.
+
+**Tested how:** `scripts/checks/validate.sh` (architecture guardrails, 13 Python helper tests, 149 `hl2-bevy` tests, 123 `hl2-ui` tests, all workspace tests, strict Clippy, `cargo fmt --check`), `scripts/checks/check_windows.sh`, release build (`scripts/build-bevy.sh`), and packaged replay suite (`python3 scripts/checks/replays.py` with `ONLY="commentary coverage"`) verifying hovered balloon node, playback start with skin switch, playback stop with retained listened flag, and two consecutive secondary-attack node teleportations on `d2_lostcoast`.
+
+**Result:** Complete developer commentary experience verified: chapter browser toggle and badge, commentary explanation modal dialog, in-game balloon interaction, skin switching, audio cue and caption triggering, camera blend override, secondary-attack teleportation, and invulnerability. Zero per-frame cost when commentary is disabled.
+
+**Still broken or not tested:** Movie playback (`playvideo` / `playvideo_exitcommand`) is scheduled next; Windows/Linux native runtime execution and ordinary full campaign commentary playthroughs not tested in this session.
+
+**Next:** Implement movie playback (`playvideo` / `playvideo_exitcommand`) and opening video sequence.
+
 ## 2026-10-27 Checkpoint: chapter browser layout/fonts, submenu background retention, and loading backdrop
 
 **Agent/model:** Antigravity, Claude Opus 4.6. No subagents.

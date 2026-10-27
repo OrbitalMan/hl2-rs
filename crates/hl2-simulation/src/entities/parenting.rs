@@ -183,4 +183,34 @@ impl Scene {
             self.states[id].rotation = rotation.normalize();
         }
     }
+
+    /// SetupParentsForSpawnList: `parentname` ("name" or "name,attachment") keeps the
+    /// spawn world pose. Parents still held by a point_template do not exist yet.
+    pub(super) fn setup_spawn_parents(&mut self, world: &World) {
+        for id in 0..world.entities.len() {
+            let e = &world.entities[id];
+            let Some(spec) = e.get("parentname").filter(|n| !n.is_empty()) else {
+                continue;
+            };
+            if super::self_positioned(e.class())
+                || self.template_pending(id)
+                || self.makers.held(id)
+            {
+                continue;
+            }
+            let (name, attachment) = match spec.split_once(',') {
+                Some((n, a)) => (n.trim(), Some(a.trim().to_owned())),
+                None => (spec.trim(), None),
+            };
+            let Some(parent) = world.entities.iter().position(|p| {
+                p.get("targetname")
+                    .is_some_and(|t| t.eq_ignore_ascii_case(name))
+            }) else {
+                continue;
+            };
+            if parent != id && !self.template_pending(parent) && !self.makers.held(parent) {
+                self.set_parent(world, id, parent, attachment, true);
+            }
+        }
+    }
 }

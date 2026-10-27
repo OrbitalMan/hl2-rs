@@ -1,6 +1,7 @@
 //! Read owned Source assets before constructing the Bevy app; no system performs file I/O.
 mod faces;
 mod names;
+#[cfg(test)]
 use names::rendered_material_names;
 pub(crate) use names::visible_entity;
 mod vmt_vars;
@@ -246,6 +247,10 @@ pub fn load_with_progress(
     hl2_simulation::ai::spawn::append_pool(&mut world);
     // CNPC_Citizen::SelectModel (citizen types, random heads), before models load.
     hl2_simulation::citizens::select_models(&mut world, hl2_simulation::ai::spawn::POOL_KEY);
+    let commentary_enabled = config.gameplay.commentary;
+    if commentary_enabled {
+        hl2_simulation::commentary::append_world_commentary(&mut world, &vfs, map);
+    }
     let model_report = models::append_models_lod(&mut world, &vfs, root_lod);
     let _gibs_without_physics = models::append_break_physics(&mut world, &vfs);
     // NPC weapon world models: their sequence events fire NPC weapons (DESIGN 14w).
@@ -303,34 +308,15 @@ pub fn load_with_progress(
     let mut gameplay =
         crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
     let world = gameplay.world.clone();
-    let effects = crate::effects::PreparedEffects::load_with_lod(&vfs, &world, root_lod);
-    let mut names = rendered_material_names(&world);
-    names.insert(crate::shadows::BLOB_MATERIAL.to_owned());
-    names.extend(
-        effects
-            .models
-            .values()
-            .flatten()
-            .map(|s| s.material.clone()),
+    hl2_simulation::commentary::CommentaryState::spawn_init(
+        &mut gameplay.scene,
+        &world,
+        commentary_enabled,
+        hdr,
+        new_game,
     );
-    for model in &weapon_models {
-        if let Some(surfaces) = world
-            .model_assets
-            .get(&format!("{}#0", model.to_lowercase()))
-        {
-            names.extend(surfaces.iter().map(|s| s.material.clone()));
-        }
-    }
-    for weapon in gameplay.weapons.values() {
-        for skin in 0..2 {
-            if let Some(surfaces) = world
-                .model_assets
-                .get(&format!("{}#{skin}", weapon.viewmodel.to_lowercase()))
-            {
-                names.extend(surfaces.iter().map(|s| s.material.clone()));
-            }
-        }
-    }
+    let effects = crate::effects::PreparedEffects::load_with_lod(&vfs, &world, root_lod);
+    let names = names::map_material_names(&world, &effects, &weapon_models, &gameplay);
     if names.len() > MAX_MATERIALS {
         bail!("map exceeds {MAX_MATERIALS} unique material limit");
     }

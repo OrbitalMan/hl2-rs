@@ -42,6 +42,7 @@ pub mod weapon_rpg;
 
 pub mod campaign;
 pub mod captions;
+pub mod commentary;
 pub mod explosion_particles;
 pub mod impacts;
 pub mod pcf_runtime;

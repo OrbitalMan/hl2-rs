@@ -504,3 +504,58 @@ fn gameplay_map_loading_draws_target_chapter_blurred_background_and_hides_menu()
         "Mode::Gameplay loading screen must also draw the blurred chapter background"
     );
 }
+
+fn press(console: &mut Console, key: Key) -> Vec<Effect> {
+    console.confirm_input(&Input {
+        keys: [key].into(),
+        ..Default::default()
+    })
+}
+
+#[test]
+fn confirming_the_commentary_explanation_starts_the_chapter_with_commentary_and_cheats() {
+    let mut console = installed_console();
+    let target = GameMap::new("lostcoast", "d2_lostcoast");
+    let message =
+        crate::gameui::menu::commentary_explanation_box(&console.gameui.localization, |text| {
+            text.len() as f32 * 7.0
+        });
+    console.confirm_box = Some((message, ConfirmKind::StartCommentary(target.clone())));
+    let effects = press(&mut console, Key::Enter);
+    assert!(effects.contains(&Effect::ChapterMap(target)));
+    assert!(console.config.gameplay.commentary);
+    assert!(console.cheats);
+    assert!(console.is_loading());
+    assert!(console.confirm_box.is_none());
+}
+
+#[test]
+fn cancelling_the_commentary_explanation_does_not_start_or_enable_commentary() {
+    let mut console = installed_console();
+    console.config.gameplay.commentary = false;
+    let target = GameMap::new("lostcoast", "d2_lostcoast");
+    let message =
+        crate::gameui::menu::commentary_explanation_box(&console.gameui.localization, |text| {
+            text.len() as f32 * 7.0
+        });
+    console.confirm_box = Some((message, ConfirmKind::StartCommentary(target)));
+    press(&mut console, Key::Tab);
+    let effects = press(&mut console, Key::Enter);
+    assert!(!effects.iter().any(|e| matches!(e, Effect::ChapterMap(_))));
+    assert!(!console.config.gameplay.commentary);
+    assert!(!console.cheats);
+    assert!(!console.is_loading());
+}
+
+#[test]
+fn a_normal_chapter_start_clears_commentary_and_cheats() {
+    let mut console = installed_console();
+    console.config.gameplay.commentary = true;
+    console.cheats = true;
+    let effects = console.start_chapter(GameMap::new("hl2", "d1_trainstation_01"), false);
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::ChapterMap(m) if m.map == "d1_trainstation_01")));
+    assert!(!console.config.gameplay.commentary);
+    assert!(!console.cheats);
+}

@@ -366,6 +366,7 @@ impl Console {
             let kind = match kind {
                 ConfirmKind::Quit => "quit",
                 ConfirmKind::ReturnToMainMenu => "return_to_main_menu",
+                ConfirmKind::StartCommentary(_) => "start_commentary",
                 ConfirmKind::KeepVideo(_) => "keep_video",
             };
             serde_json::json!({"kind": kind, "text": confirm.text})
@@ -403,6 +404,10 @@ impl Console {
                         }
                         ConfirmKind::KeepVideo(_) => {
                             self.reset_menu_interaction();
+                            return effects;
+                        }
+                        ConfirmKind::StartCommentary(target) => {
+                            effects.extend(self.start_chapter(target, true));
                             return effects;
                         }
                         ConfirmKind::ReturnToMainMenu => {

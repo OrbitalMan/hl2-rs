@@ -61,8 +61,14 @@ fn owned_chapter_catalogs_use_each_games_configs_localization_and_thumbnails() {
             "{game}"
         );
         assert!(c.dialog.get("Play").is_some(), "{game}");
+        assert!(c.dialog.get("Commentary").is_some(), "{game}");
+        assert!(c.commentary_icon.is_some(), "{game}");
         let spec = c.browser_spec(&resources.localization);
+        assert!(spec.layout.toggle.is_some(), "{game}");
+        assert!(spec.toggle_label.is_some(), "{game}");
+        assert!(spec.toggle_icon.is_some(), "{game}");
         let card = &spec.layout.card;
+        assert!(card.badge.is_some(), "{game}");
         assert_eq!(card.size, glam::vec2(168., 146.), "{game}");
         assert_eq!(
             card.border,

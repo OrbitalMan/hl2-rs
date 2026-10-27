@@ -132,6 +132,7 @@ pub struct Control {
     pub label: String,
     pub command: String,
     pub image: String,
+    pub scale_amount: f32,
     pub align: Align,
     /// Slider end labels (`leftText` / `rightText`), usually tokens.
     pub left_text: String,
@@ -235,6 +236,7 @@ fn control(entry: &Entry) -> Option<Control> {
         label: text("labelText").unwrap_or_default().to_owned(),
         command: text("command").unwrap_or_default().to_owned(),
         image: text("image").unwrap_or_default().to_owned(),
+        scale_amount: number("scaleAmount"),
         align: text("textAlignment").map(Align::parse).unwrap_or_default(),
         left_text: text("leftText").unwrap_or_default().to_owned(),
         right_text: text("rightText").unwrap_or_default().to_owned(),

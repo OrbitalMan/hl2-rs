@@ -45,7 +45,7 @@ impl CardBrowser {
             self.focus_visible = false;
         }
         if input.pressed(Key::Tab) {
-            let mut order = [Target::Close; 8];
+            let mut order = [Target::Close; 10];
             let mut count = 0;
             for (target, _) in self.targets() {
                 order[count] = target;
@@ -98,6 +98,9 @@ impl CardBrowser {
                 self.first = self.first.saturating_sub(3);
                 self.selected = self.first;
                 self.focus = Some(Target::Card(self.selected));
+            }
+            Target::Toggle => {
+                self.toggle_checked = !self.toggle_checked;
             }
             Target::Accept => return self.start(),
         }

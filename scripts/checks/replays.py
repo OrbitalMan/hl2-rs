@@ -539,6 +539,43 @@ def check_captions():
     holds("captions off processes none", counts["none"] == 0, counts)
 
 
+def check_commentary():
+    """Developer commentary: balloon nodes, skin switching, and teleportation via secondary attack."""
+    if CONFIG.exists():
+        CONFIG.unlink()
+    settings(gameplay={"commentary": True}, audio={"captions": "subtitles"})
+    run = game("commentary", "--map", "d2_lostcoast", "--width", "1280", "--height", "720",
+               "--movement-script", "test-inputs/bevy-lostcoast-commentary.json", timeout=240)
+    s = run.samples()
+    c1 = s["hovered-node-1"]["gameplay"]["commentary"]
+    holds("hovered node 0", c1["hovered"] == 0, c1["hovered"])
+    holds("node 0 inactive", c1["active"] is None, c1["active"])
+    holds("node 0 not yet listened", not c1["nodes"][0]["listened"], c1["nodes"][0]["listened"])
+
+    c2 = s["started-node-1"]["gameplay"]["commentary"]
+    holds("active node 0", c2["active"] == 0, c2["active"])
+    holds("node 0 active flag", c2["nodes"][0]["active"], c2["nodes"][0]["active"])
+    holds("node 0 listened flag", c2["nodes"][0]["listened"], c2["nodes"][0]["listened"])
+
+    c3 = s["stopped-node-1"]["gameplay"]["commentary"]
+    holds("stopped active none", c3["active"] is None, c3["active"])
+    holds("node 0 inactive", not c3["nodes"][0]["active"], c3["nodes"][0]["active"])
+    holds("node 0 marked listened", c3["nodes"][0]["listened"], c3["nodes"][0]["listened"])
+
+    c4 = s["teleported-node-1"]["gameplay"]["commentary"]
+    feet1 = s["teleported-node-1"]["player"]["feet"]
+    node0_origin = c4["nodes"][0]["origin"]
+    holds("teleported to node 0", abs(feet1[0] - node0_origin[0]) < 100.0 and abs(feet1[1] - node0_origin[1]) < 100.0,
+          (feet1, node0_origin))
+
+    c5 = s["teleported-node-2"]["gameplay"]["commentary"]
+    feet2 = s["teleported-node-2"]["player"]["feet"]
+    node1_origin = c5["nodes"][1]["origin"]
+    holds("teleported to node 1", abs(feet2[0] - node1_origin[0]) < 100.0 and abs(feet2[1] - node1_origin[1]) < 100.0,
+          (feet2, node1_origin))
+    holds("node 1 hovered", c5["hovered"] == 1, c5["hovered"])
+
+
 def check_bg_compare():
     """Each game's chapter 1 background at 1024x768, FOV 75 (compare with the retail images)."""
     for game_, map_ in (("hl2", "background01"), ("episodic", "ep1_background01"),
@@ -1055,7 +1092,8 @@ UI_FIXTURES = tuple(f"bevy-chapters-{game}{suffix}" for game in ("hl2", "episodi
                "bevy-console-open", "bevy-flashlight-hud-on", "bevy-flashlight-hud-recharged",
                "bevy-flashlight-depth-actor", "bevy-flashlight-depth-fence",
                "bevy-options-motion-blur", "bevy-viewmodel-motion-blur", "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg", "bevy-canals-lamp", "bevy-flashlight-availability",
-               "bevy-options-status-mouse", "bevy-options-status-audio", "bevy-options-status-advanced")
+               "bevy-options-status-mouse", "bevy-options-status-audio", "bevy-options-status-advanced",
+               "bevy-lostcoast-commentary")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1608,6 +1646,7 @@ CHECKS = [
     Check("motion_blur_options", check_motion_blur_options, "shared"),
     Check("viewmodel_motion_blur", check_viewmodel_motion_blur, "shared"),
     Check("flashlight_viewmodel", check_flashlight_viewmodel, "shared"),
+    Check("commentary", check_commentary, "shared"),
     Check("window", check_window, "windowed"),
     Check("window_place", check_window_place, "macos"),
     Check("no_border", check_no_border, "windows"),

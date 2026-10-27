@@ -1,7 +1,7 @@
 //! Generic card rendering over caller-provided content and geometry.
-use super::{CardBrowser, Target};
+use super::{CardBrowser, ScaledImageLayout, Target};
 use crate::{
-    canvas::{draw_texture_ex, Color, DrawTextureParams, Rect, WHITE},
+    canvas::{draw_texture_ex, Color, DrawTextureParams, Rect, Texture2D, WHITE},
     widgets::{truncate_ellipsis, Align, ButtonState, FrameSpec, Painter},
 };
 use glam::{vec2, Vec2};
@@ -86,10 +86,23 @@ impl CardBrowser {
             let wide = rect.w.min((frame.size.x - 2. * rect.x).max(0.));
             p.sunken(Rect::new(rect.x, rect.y, wide, rect.h));
         }
+        if let Some(toggle) = &self.spec.layout.toggle {
+            if let Some(backing) = toggle.backing {
+                p.rounded_fill(backing, Color::new(0., 0., 0., 196. / 255.), 5.0);
+            }
+            if let (Some(icon), Some(tex)) = (toggle.icon, &self.spec.toggle_icon) {
+                Self::draw_scaled_image(&p, icon, tex);
+            }
+        }
         for (target, rect) in self.targets() {
             match target {
                 Target::Card(index) => self.draw_card(&p, index, rect),
                 Target::Close => {}
+                Target::Toggle => {
+                    if let Some(label) = &self.spec.toggle_label {
+                        p.check_box(rect, label, self.toggle_checked, self.state(target));
+                    }
+                }
                 button => {
                     let label = match button {
                         Target::Previous => &self.spec.labels[0],
@@ -104,6 +117,13 @@ impl CardBrowser {
                 p.focus_ring(rect);
             }
         }
+    }
+
+    fn draw_scaled_image(p: &Painter<'_>, spec: ScaledImageLayout, texture: &Texture2D) {
+        let scale = if spec.scale > 0. { spec.scale } else { 1. };
+        let w = (texture.width() * scale).min(spec.rect.w);
+        let h = (texture.height() * scale).min(spec.rect.h);
+        p.image(Rect::new(spec.rect.x, spec.rect.y, w, h), texture);
     }
 
     fn panel_control(rect: Rect, panel: Rect) -> Rect {
@@ -142,6 +162,19 @@ impl CardBrowser {
                     dest_size: Some(vec2(destination.w, destination.h)),
                 },
             );
+        }
+        if self.toggle_checked {
+            if let (Some(badge), Some(tex)) = (self.spec.layout.card.badge, &self.spec.toggle_icon)
+            {
+                Self::draw_scaled_image(
+                    p,
+                    ScaledImageLayout {
+                        rect: Self::panel_control(badge.rect, panel),
+                        scale: badge.scale,
+                    },
+                    tex,
+                );
+            }
         }
         let heading = Self::panel_control(self.spec.layout.card.heading, panel);
         let title = Self::panel_control(self.spec.layout.card.title, panel);

@@ -17,6 +17,7 @@ pub struct Entry {
 pub struct Catalog {
     pub entries: Vec<Entry>,
     pub thumbnails: Vec<Option<Image>>,
+    pub commentary_icon: Option<Image>,
     pub dialog: Layout,
     pub panel: Layout,
     pub selection: Option<source_ui::canvas::Color>,
@@ -104,9 +105,13 @@ impl Dialog {
             }
         }
     }
+    pub fn commentary_enabled(&self) -> bool {
+        self.browser.toggle_checked
+    }
     pub fn report(&self, canvas: glam::Vec2) -> serde_json::Value {
         let b = self.browser.bounds(canvas);
         serde_json::json!({"game":self.game,"selected":self.browser.selected,"first":self.browser.first,
+            "commentary":self.browser.toggle_checked,
             "frame":[b.x,b.y,b.w,b.h],"entries":self.entries.iter().map(|e| {
                 serde_json::json!({"key":e.key,"map":e.map,"heading":e.heading,"title":e.title})
             }).collect::<Vec<_>>(),"thumbnails":self.browser.thumbnail_count()})

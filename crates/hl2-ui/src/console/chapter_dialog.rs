@@ -1,5 +1,5 @@
 //! Chapter window lifecycle and typed gameplay map requests.
-use super::{Console, Effect, Mode, Window};
+use super::{ConfirmKind, Console, Effect, GameMap, Mode, Window};
 use crate::gameui::{
     new_game::{Dialog, Outcome},
     resources::GameUiResources,
@@ -49,12 +49,28 @@ impl Console {
             .flatten()
     }
 
+    pub(super) fn start_chapter(&mut self, target: GameMap, commentary: bool) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if self.config.gameplay.commentary != commentary || commentary {
+            self.config.gameplay.commentary = commentary;
+            let _ = self.config.save();
+            effects.push(Effect::ApplyConfig(Box::new(self.config.clone())));
+        }
+        self.cheats = commentary;
+        self.shell.windows.clear();
+        self.sync_mode();
+        self.start_loading_for_game(&target.game, &target.map);
+        effects.push(Effect::ChapterMap(target));
+        effects
+    }
+
     pub(super) fn chapters_input(&mut self, input: &Input) -> Vec<Effect> {
         let canvas = self.canvas_size();
         let Some(dialog) = self.chapter_dialog_mut() else {
             return Vec::new();
         };
         let outcome = dialog.input(input, canvas);
+        let commentary = dialog.commentary_enabled();
         let mut effects: Vec<_> = dialog
             .browser
             .take_sounds()
@@ -65,10 +81,19 @@ impl Console {
             Outcome::None => {}
             Outcome::Close => shell::close_window(self, Window::NewGame),
             Outcome::Start(target) => {
-                self.shell.windows.clear();
-                self.sync_mode();
-                self.start_loading_for_game(&target.game, &target.map);
-                effects.push(Effect::ChapterMap(target));
+                if commentary {
+                    let loc = &self.gameui.localization;
+                    let measure = self.painter(Vec2::ZERO, 1.);
+                    let msg = crate::gameui::menu::commentary_explanation_box(loc, |s| {
+                        measure.text_width(s, false)
+                    });
+                    self.reset_menu_interaction();
+                    self.quit_placement.reset();
+                    self.confirm_box = Some((msg, ConfirmKind::StartCommentary(target)));
+                    self.sync_dialog_windows();
+                } else {
+                    effects.extend(self.start_chapter(target, false));
+                }
             }
         }
         effects

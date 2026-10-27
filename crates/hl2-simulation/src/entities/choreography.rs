@@ -10,12 +10,9 @@ use super::{
 use crate::physics;
 use glam::Vec3;
 use modkit_core::World;
-use source_assets::scenes::Cache;
-use source_assets::scenes::ChoreoScene;
-use source_assets::scenes::EventType;
+use source_assets::scenes::{Cache, ChoreoScene, EventType};
 use source_assets::vpk::Vfs;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 impl Scene {
@@ -327,6 +324,7 @@ impl Scene {
                 result.push(request.unwrap_or_else(|| event.parameters[0].clone().into()));
             }
         }
+        result.extend(self.commentary.required_sound_requests());
         result
     }
 

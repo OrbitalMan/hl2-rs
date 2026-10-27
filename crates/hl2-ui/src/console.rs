@@ -71,6 +71,8 @@ pub enum Mode {
 pub enum ConfirmKind {
     Quit,
     ReturnToMainMenu,
+    /// Confirm starting a chapter in developer commentary mode (`CommentaryExplanationDialog`).
+    StartCommentary(GameMap),
     /// Keep an aspect ratio change, else revert it (counts down on [`Console::tick`]).
     KeepVideo(VideoConfirm),
 }

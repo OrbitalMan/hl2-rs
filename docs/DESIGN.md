@@ -1,5 +1,27 @@
 # Design
 
+## Developer commentary mode (2026-10-27)
+
+Bounded design for Developer Commentary across `source-ui`, `hl2-ui`, `hl2-simulation` and `hl2-bevy`:
+
+1. **Chapter browser footer toggle and card badge (`source-ui::card_browser`, `hl2-ui::gameui::new_game`)**:
+   - Read `newgamedialog.res` and `newgamechapterpanel.res` through `Reader::new(vfs)` so `hl2_complete/resource/newgamedialog.res` and `hl2_complete/resource/newgamechapterpanel.res` take precedence when present.
+   - Parse `ImagePanel1` (`22, 254, 308x40`), `CommentaryIcon` (`25, 258, 43x42`, `scaleAmount 0.5`), and `Commentary` (`CheckButton` at `60, 262, 264x24`, font `ChapterTitle`, label `#HL2_Enable_Commentary`) from `newgamedialog.res`, plus the per-card `CommentaryIcon` (`10, 100, 43x42`, `scaleAmount 0.5`) from `newgamechapterpanel.res`.
+   - Decode `materials/vgui/resource/commentary_hl2c.vtf` (fallback `materials/vgui/hud/icon_commentary_small.vtf`).
+   - Add generic optional footer toggle and card badge specs to `source_ui::card_browser::BrowserLayout` without naming HL2 in `source-ui`. When checked, each chapter card renders the scaled badge at `(10, 100)` over the thumbnail's bottom-left corner. Include the checkbox in `CardBrowser`'s keyboard focus and pointer handling.
+2. **Explanation confirmation and cvar (`hl2-ui::console`, `hl2-ui::config`)**:
+   - Add `commentary: bool` (`#[serde(default)]`) to `GameplaySettings` and register the `commentary` cvar in `COMMANDS` (`cvars.golden`).
+   - When starting a chapter from `NewGameDialog` with commentary unchecked, clear `config.gameplay.commentary` and `cheats`, emit `Effect::ApplyConfig`, close `NewGame` and start the map.
+   - When starting a chapter with commentary checked, open modal `ConfirmKind::StartCommentary(GameMap)` using `MessageBox` (`380x240`, title `#GameUI_CommentaryDialogTitle`, text `#GAMEUI_Commentary_Console_Explanation`, OK `#vgui_ok`, Cancel `#vgui_cancel`, matching `hl2/resource/commentaryexplanationdialog.res`). Confirming sets `config.gameplay.commentary = true` and `cheats = true`, emits `Effect::ApplyConfig`, closes `NewGame` and starts the map; cancelling returns focus to `NewGame`.
+3. **In-game `point_commentary_node` simulation and presentation (`hl2-simulation::commentary`, `hl2-ui::hud`, `hl2-bevy`)**:
+   - Parse `maps/<map>_commentary.txt` (`Entities` -> `entity` blocks, replacing `^` with `"` in string values and converting `connections` subblocks to standard entity outputs).
+   - When commentary mode is enabled on a gameplay map, append the parsed commentary entities and the `commentary_semaphore` `info_target` before model loading so `point_commentary_node` spawns with `models/extras/info_speech.mdl` (preloading both skin 0 `speech_info` and skin 1 `speech_info_used`). Fire `commentary_auto` outputs (`OnCommentaryNewGame`, `OnCommentaryMultiplayerSpawn`) on map spawn.
+   - Support `StartCommentary`, `StopCommentary`, `StartUnstoppableCommentary`, `Enable`, `Disable` and `Toggle` inputs on `point_commentary_node`.
+   - Run per-tick commentary logic only while `commentary` is enabled (zero per-frame work when off): raycast the player's view against visible `point_commentary_node` `[-16, -16, -16]..[16, 16, 16]` bounds, spin the speech balloon (`0x` idle, `1x` when aimed at while unlistened, `3x` while active), toggle targeted nodes on `+use`, jump to the next node with a brief black fade on `+attack2`, execute `precommands` / `postcommands`, interpolate camera overrides for `viewposition` / `viewtarget` (with `point_commentary_viewpoint` sprite visibility and `prevent_movement`), emit audio and closed captions, switch finished nodes to skin 1 (`speech_info_used`), and make the player invulnerable to damage while commentary mode is active.
+   - Add `HudCommentary` (`crates/hl2-ui/src/hud/commentary.rs`, parsed from `scripts/hudlayout.res` `HudCommentary`: `c-190, 350, 380x40`, `vgui/hud/icon_commentary`, speaker label, `N \ M` counter and orange progress bar), drawn while a node is active and `closecaption` is disabled (matching `CHudCommentary::ShouldDraw`).
+
+Validation: unit tests and owned-install tests across `source-ui`, `hl2-ui`, `hl2-simulation` and `hl2-bevy`; `validate.sh`, `check_windows.sh`, and packaged UI/HUD checks.
+
 ## Windows unit-test portability follow-up (2026-10-26)
 
 Keep the Retina clamp assertion macOS-only, matching its margin constant. Separate flag
