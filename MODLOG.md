@@ -1,5 +1,44 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: packaged dialog/loading fixes verified
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.
+
+**Changed:** Extend owned asynchronous background validation to open/select/close chapters
+after the actual worker consumes its queue flag, then verify successful load and scene
+replacement. Record packaged reproduction, fixed capture, final package identity, strict
+checks, retail evidence limits and isolated frame measurements. Production source is
+6019af3; this checkpoint changes tests/documentation only.
+
+**Why:** Cover the reported during-loading interaction with actual decoding, beyond a
+controlled loading-state input check, and preserve reviewable evidence of the rectangle fix.
+
+**Tested how:** Full validate.sh: 1,143 Rust tests / 94 ignored, 13 Python helper tests,
+strict Clippy/fmt/architecture pass. Local and Windows-target strict Clippy/fmt pass again
+after strengthening the owned test. Owned native per-frame input and actual asynchronous
+browser-during-worker test pass (the latter 11.30 s). Release package executable plus ten
+shader hashes verified against metadata for 6019af3. Initial fix/resource-reuse package
+passes five replay groups (all expansion chapters, submenus, return, Options, coverage),
+zero failures/290 s. Final committed package repeats three affected groups (submenus,
+return, coverage), zero failures/111 s. Both before/fixed captures inspected: old dialog
+rectangle reproduced; fixed browser has all three thumbnails and an intact frame.
+
+**Result:** Background requests are retained, obsolete results cannot dismiss newer loads,
+closing the browser keeps its worker alive, and chapter starts supersede background
+presentation. Rapid switching back reuses the installed world. Three isolated alternating
+Metal 1024x768 pairs measure prior/fixed browser frames 18.947/18.878 ms with overlapping
+ranges; HUD CPU 0.1670/0.1615 ms. No steady-state regression measured; no speedup claim.
+Detailed evidence/commands in validation.md and performance.md; artifacts/chapter-bugs.
+
+**Still broken or not tested:** Final physics/GPU installation can hitch; zero-hitch loading,
+native retail input responsiveness, Windows/Linux runtime and ordinary campaign play
+remain not tested here. Baseline invalid-entity command warnings are retained with captures;
+this work does not establish general map-lifecycle parity. Earlier rejected capture/test
+assumptions remain recorded alongside passing evidence.
+
+**Next:** If further stalls reproduce, measure individual main-thread installation phases
+and input latency against retail before changing installation scheduling. Media stays deferred.
+
 ## 2026-10-27 Checkpoint: retain GameUI across runtime map loads
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.

@@ -63,6 +63,30 @@ pub(super) fn completed(
 }
 
 #[cfg(test)]
+pub(super) fn exercise_browser_during_worker(app: &mut bevy::prelude::App) {
+    app.update();
+    assert!(app.world().resource::<super::Campaign>().job.is_some());
+    assert!(
+        app.world()
+            .resource::<crate::simulation::Simulation>()
+            .loading()
+    );
+    let mut ui = app.world_mut().resource_mut::<ui_host::Console>();
+    assert!(!ui.background_request, "worker has consumed the queue flag");
+    ui.source.activate_menu(0);
+    assert_eq!(ui.source.mode(), hl2_ui::console::Mode::NewGame);
+    ui.source.input(&source_ui::input::Input {
+        keys: [source_ui::input::Key::Right].into(),
+        ..Default::default()
+    });
+    assert_eq!(ui.source.chapters_report().unwrap()["selected"], 1);
+    ui.source.escape_pressed();
+    ui.source.escape_released();
+    assert_eq!(ui.source.mode(), hl2_ui::console::Mode::MainMenu);
+    assert!(ui.source.is_background_loading());
+}
+
+#[cfg(test)]
 mod tests {
     use super::{Request, preserve_gameplay_request, superseded, ui_host};
     fn request(background: bool) -> Request {

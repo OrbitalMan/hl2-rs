@@ -1,5 +1,35 @@
 # Performance measurements - 2026-10-05
 
+## Chapter/loading bug fixes (2026-10-27)
+
+Prior package `7171e3f`, fixed production source/package `6019af3`, Metal on Apple
+M1 Pro, 1024x768 default settings, live hl2/background01 with the browser open.
+Three alternating pairs (prior/current, current/prior, prior/current), no concurrent
+builds, replays or image analysis. Use the same perf-browser.json fixture as the
+chapter benchmark: finish host tick 1100, 2000-frame safety cap, profiling enabled,
+120 warm-up frames. All six scripts finish with NewGame mode and 728–757 measured
+frames per run (about 14 seconds after warm-up).
+
+| Package | Mean frame | Run range | HUD/UI CPU mean |
+| --- | ---: | ---: | ---: |
+| Prior | 18.947 ms | 18.692–19.404 ms | 0.1670 ms |
+| Fixed | 18.878 ms | 18.698–19.079 ms | 0.1615 ms |
+
+Ranges overlap; the 0.069 ms difference does not establish a speedup. No steady
+browser-frame regression is measured in this scene. No new render pass is added.
+The runtime loader no longer reconstructs an unused GameUI: chapter thumbnails,
+menu resources and fonts stay owned by the existing console. That avoids redundant
+worker work, but this steady-state benchmark does not isolate loading latency,
+input latency, GPU time or peak installation stalls. Physics construction and GPU
+resource installation still run on the main thread and can hitch. Zero-hitch
+loading and sustained FPS guarantees remain not tested.
+
+Reproduction and evidence: artifacts/chapter-bugs/finish_validation.py waits for
+packaged checks/build completion, repeats the affected committed-package replays,
+then runs the six isolated processes against retained package copies. It resets
+only each copy's own config. timing-summary.json, timing-aggregate.json, individual
+timing reports/logs, package-hashes.json and prior/current copies are retained there.
+
 ## Chapter browser (2026-10-27)
 
 Packaged Metal on Apple M1 Pro, 1024x768, default settings, live hl2/background01.

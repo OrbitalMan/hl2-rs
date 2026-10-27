@@ -435,7 +435,8 @@ mod tests {
             assert!(sim.loading());
         }
 
-        // 4. Update the Bevy app in a loop until the background map loader thread finishes
+        // Exercise chapter selection after the worker consumes the pending-request flag.
+        loading::exercise_browser_during_worker(&mut app);
         let mut completed = false;
         for _ in 0..100 {
             app.update();

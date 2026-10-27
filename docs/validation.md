@@ -1,5 +1,62 @@
 # Local validation — 2026-10-05
 
+## Dialog occlusion and background loading (2026-10-27)
+
+Runtime checkpoints: `5a70c90` (dialog/request lifetime), `6019af3` (resource reuse
+and rapid switch back). Full `scripts/checks/validate.sh` passes: 1,143 Rust tests,
+94 ignored, 13 Python helper tests, strict Clippy/fmt and architecture. The
+architecture baseline shrinks for the asset loader/file and campaign poll.
+`scripts/checks/check_windows.sh` passes against final source; native Windows/Linux
+execution is not tested here.
+
+Owned-content checks:
+
+```sh
+cargo test -p hl2-bevy --bin hl2-bevy native_chapter_input -- --ignored --nocapture
+cargo test -p hl2-bevy --bin hl2-bevy headless_bevy_app_submenu_entry_switches_background_map_and_scene -- --ignored --nocapture
+```
+
+Both pass. The first drives the actual per-frame Bevy keyboard input system while
+simulation is marked loading: arrow selection responds, Escape waits for release,
+closing preserves background work, reopening and Enter release submit a chapter
+with foreground loading. This is a controlled headless input-system check, not
+an OS event-latency measurement. The second decodes and installs actual Episode
+One/Lost Coast background worlds asynchronously and checks scene replacement.
+It now opens chapter selection after the actual worker consumes the pending flag,
+changes selection, closes on Escape release, verifies the load remains active, and
+then checks successful completion and scene replacement. This strengthened test
+passes in 11.30 s; final local/Windows strict Clippy and fmt also pass.
+Unit regressions cover the return confirmation's lifetime, queued/active load
+kinds, background result supersession/coalescing, foreground presentation, stale
+failure and rapid return to the already installed background without reloading.
+
+The old packaged build reproduces the reported rectangular hole after gameplay,
+return confirmation, background completion and reopening chapter selection.
+The revised return-menu fixture includes that sequence and asserts the final
+browser/game identity and absence of an active confirmation. Captures and reports
+are under artifacts/chapter-bugs: return-before and return-after (with suffixes).
+The first baseline attempt selected no keyboard row and is retained as
+return-before-rejected-no-selection; it is not visual evidence of the fix.
+Initial native-input test failures incorrectly used press activation and expected
+selection to survive reopening; corrected to release activation and reset-on-open.
+
+The final release package is built with scripts/build-bevy.sh; executable and ten
+shader hashes match build-bevy-info metadata for `6019af3`. Initial fix/resource-reuse
+package: `NO_BUILD=1 ONLY='return_menu chapter_selection submenus menu_options coverage'
+python3 scripts/checks/replays.py` passes five groups, zero failures, 290 s. This
+includes all four campaign chapter previews/selected-map launches. After the final
+rapid-switch reuse helper, committed package `6019af3` passes
+`NO_BUILD=1 ONLY='return_menu submenus coverage' python3 scripts/checks/replays.py`:
+three affected groups, zero failures, 111 s. Return capture is intact and inspected;
+no dialog rectangle is cut out. Performance evidence is in performance.md.
+
+Evidence: artifacts/chapter-bugs contains validate-resource-reuse.log,
+windows-test-final.log, clippy-test-final.log, fmt-final.log, native-input-resource-reuse.log,
+owned-browser-during-worker.log, replays.log, replays-final.log, package-hashes.json,
+return-before/return-after captures/reports/logs and timing outputs. Retail findings
+and verification limits are in gameui.md; static exports do not prove native loading
+input responsiveness or establish zero-hitch loading in either implementation.
+
 ## Chapter selection (2026-10-27)
 
 Source implementation: `56717d2`; single-chapter containment fix: `da289c2`;

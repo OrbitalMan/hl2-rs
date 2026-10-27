@@ -1,16 +1,28 @@
 # STATUS
 
-## Background-loading bugs: source checkpoint (2026-10-27)
+## Dialog/background loading fixes verified (2026-10-27)
 
-- Fixed orphaned return-confirmation occlusion and composed it through the window stack.
-- Fixed pending-vs-active background request confusion; newest request remains queued,
-  stale results are discarded, and chapter loading supersedes background presentation.
-- 1,141 Rust tests / 94 ignored, 13 Python checks, strict Clippy/fmt/architecture and
-  Windows-target Clippy pass. Owned native-input and asynchronous background tests pass.
-- Packaged capture/replay and loading-performance validation pending. Baseline capture
-  attempt with unselected keyboard rows retained as rejected evidence; replay now selects
-  the rows explicitly. Ordinary Windows/Linux play and native retail input comparison
-  remain not tested.
+- Production source/package 6019af3, following lifetime fix 5a70c90. Eleven package hashes
+  verified. Before capture reproduces the confirmation-shaped hole; fixed capture is intact.
+- Closing a browser preserves its background worker. A newer background stays queued;
+  superseded results cannot install or dismiss newer loading UI. Chapter launch resets
+  background presentation. Rapid return to the current background reuses its installed world.
+- Runtime map changes retain GameUI; they no longer rebuild and discard fonts, menus and
+  thumbnails. No new dependency, render pass or per-frame file access.
+- validate.sh passes: 1,143 Rust tests / 94 ignored, 13 Python, strict Clippy/fmt/architecture.
+  Windows-target Clippy passes. Owned native-input and actual decoding-worker browser
+  interaction/scene-replacement tests pass; final strengthened owned test takes 11.30 s.
+- Initial fix/resource-reuse package: five replay groups, zero failures/290 s, including all
+  four expansion chapter launches. Final committed package: affected submenus/return/coverage
+  groups, zero failures/111 s. Evidence and rejected assumptions: artifacts/chapter-bugs;
+  detailed commands in docs/validation.md.
+- Three isolated alternating Metal 1024x768 pairs: prior/fixed browser 18.947/18.878 ms,
+  overlapping ranges; no measured steady-state regression or established speedup.
+- Final physics/GPU installation can still hitch. Zero-hitch loading, native retail input
+  responsiveness, Windows/Linux runtime and ordinary campaign play remain not tested.
+  Native/static resource findings and their limits: docs/gameui.md; timing: docs/performance.md.
+- Next: profile individual installation phases/input latency if remaining stalls reproduce;
+  keep media deferred. Baseline invalid-entity command warnings remain outside this fix.
 
 
 ## Portability / dependency declaration checkpoint (2026-10-27)
