@@ -1,5 +1,65 @@
 # Local validation — 2026-10-05
 
+## Background-loading wait presentation (2026-10-27)
+
+Production package `fa4a000` supersedes the interactive-during-background-load policy.
+The owner still observed lag; earlier acceptance/completion tests were insufficient
+latency evidence. On-demand native dispatch review now establishes menu hiding
+(`InstantHideMainMenu`, menu/title alpha zero); details in gameui.md. Ordinary native
+retail playback/input timing remains not tested.
+
+`scripts/checks/validate.sh` passes: 1,145 Rust tests / 94 ignored, 13 Python helpers,
+architecture, strict Clippy and fmt. `scripts/checks/check_windows.sh` passes.
+Owned checks pass:
+
+```sh
+cargo test -p hl2-bevy --bin hl2-bevy native_menu_wait -- --ignored --nocapture
+cargo test -p hl2-bevy --bin hl2-bevy headless_bevy_app_submenu_entry_switches_background_map_and_scene -- --ignored --nocapture
+```
+
+The native input-system check blocks arrows/Enter/Escape during the wait, then allows
+opening, selecting and starting a chapter after completion. The actual asynchronous
+worker test attempts chapter opening while a worker owns its consumed request and
+asserts the menu is hidden, input is gated, the load remains alive, and scene replacement
+completes (10.59 s). Unit tests cover success and failure restoring access, direct
+activation, Escape, hidden-window canvas rendering, preserved chapter selection, and
+shared card-browser occlusion cancelling held activation. Background request safeguards
+remain independently tested. No English UI literal or new dependency was introduced.
+
+Build with scripts/build-bevy.sh. Eleven executable/shader hashes match package metadata
+for fa4a000. Packaged checks use a private copy and default config:
+
+```sh
+NO_BUILD=1 ONLY='return_menu submenus chapter_selection menu_options coverage' python3 scripts/checks/replays.py
+```
+
+Transient capture limitations are retained rather than counted as passing evidence.
+The burst capture experiment skipped the loading interval because diagnostics/capture
+counters stop while simulation is loading. It recorded the loading-request label with
+menu.visible=false and subsequent restored controls, but its images are not screenshots
+of the wait state. The controlled attached windowed launch loads an owned map through
+map_background; its report also records false at request and true after completion.
+Computer use could not bind the unbundled binary as an app (Invalid app; absent from
+inventory), so no native wait-screen screenshot was obtained. No further capture retry
+was made. Headless canvas-quad comparisons verify hidden rendering; packaged restored
+browser captures provide visual restoration evidence. Final physics/GPU installation
+can still hitch. Native Windows/Linux execution and end-to-end retail UI latency are
+not tested here.
+
+Evidence in artifacts/chapter-loading-gate: validate.log, windows.log, ui-tests-final.log,
+toolkit-tests.log, native-wait.log, owned-wait.log, build.log, package-hashes.json,
+replays.log, wait-burst-report.json and retained burst PNGs/log, window-wait-report.json
+and log. Initial compile/test assumptions and their corrections are retained in ui-tests.log.
+All five groups pass, zero failures, 270 s. Restored return-menu and Episode Two
+browser captures were inspected and copied alongside their reports; both report
+menu.visible=true and NewGame after loading. The burst and controlled windowed
+reports record menu.visible=false at the request and true after successful completion.
+
+Three isolated alternating prior/current browser pairs compare package 6019af3 with
+fa4a000: 18.693/18.743 ms mean frame, HUD CPU 0.1550/0.1581 ms. Run ranges overlap
+slightly; a 0.051 ms difference is not isolated causal evidence. No added render pass
+or frame asset access. Details and reproduction in performance.md.
+
 ## Dialog occlusion and background loading (2026-10-27)
 
 Runtime checkpoints: `5a70c90` (dialog/request lifetime), `6019af3` (resource reuse

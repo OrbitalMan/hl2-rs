@@ -1,5 +1,29 @@
 # STATUS
 
+## Background loading now waits before showing controls (2026-10-27)
+
+- Production package fa4a000 supersedes the earlier interactive-loading policy. Hide menu
+  titles/buttons and dialogs, retain owned loading backdrop/localized plaque, gate pointer,
+  keyboard, Escape, console toggle and direct menu/chapter opening. Restore windows and
+  chapter selection after success/failure; consume hidden held activation.
+- Further pinned GameUI analysis traces loading state to InstantHideMainMenu and menu/title
+  alpha zero. Published SDK Panel::SetAlpha corroborates the alpha helper. The earlier
+  interactive-menu assumption was unsupported. Native retail timing remains not tested.
+- validate.sh: 1,145 Rust tests / 94 ignored, 13 Python, strict Clippy/fmt/architecture pass.
+  Windows-target Clippy, owned per-frame input wait/restore and actual asynchronous worker
+  wait/completion tests pass. Eleven package hashes verified.
+- Packaged submenus/return/chapter_selection/menu_options/coverage: five groups, zero failures,
+  270 s. Restored browser captures inspected. Controlled attached windowed report records
+  hidden controls at request and restored controls after completion; it exited normally.
+- Three isolated alternating Metal 1024x768 pairs: prior/current browser 18.693/18.743 ms,
+  HUD CPU 0.1550/0.1581 ms, slightly overlapping ranges; no causal performance claim.
+- Actual transient GPU wait-screen capture remains not tested: replay capture counters skip
+  loading, and computer use could not bind the unbundled binary. Rejected evidence retained;
+  canvas-quad tests verify hidden rendering. Final physics/GPU install can still hitch.
+- Evidence: artifacts/chapter-loading-gate; commands/limits in docs/validation.md and
+  docs/performance.md. Native Windows/Linux execution and ordinary campaign play not tested.
+
+
 ## Dialog/background loading fixes verified (2026-10-27)
 
 - Production source/package 6019af3, following lifetime fix 5a70c90. Eleven package hashes

@@ -1,5 +1,41 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: background wait policy validated
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.
+
+**Changed:** Record final package/replay, native research, controlled windowed report and
+frame comparison for fa4a000. Document the superseded interactive-loading assumption
+and rejected transient capture approaches. This checkpoint changes documentation only.
+
+**Why:** Acceptance/completion tests did not establish good latency during loading. Retail
+static dispatch explicitly reaches InstantHideMainMenu and panel/title alpha zero, so
+waiting with hidden controls is evidence-based and matches the owner preference.
+
+**Tested how:** validate.sh passes (1,145 Rust tests / 94 ignored, 13 Python, strict
+Clippy/fmt/architecture), Windows-target Clippy, owned native-input wait/restore and actual
+asynchronous worker completion pass. Release package fa4a000: eleven hashes verified.
+Packaged submenus, return_menu, chapter_selection, menu_options and coverage: five groups,
+zero failures/270 s. Restored return/episode-browser captures inspected. Controlled attached
+windowed run reports hidden menu at request and visible after completion, then exits itself.
+Three isolated alternating Metal 1024x768 pairs: prior/current open-browser mean frames
+18.693/18.743 ms, HUD CPU 0.1550/0.1581 ms, slightly overlapping ranges. No causal speedup
+or regression established; details in validation.md/performance.md.
+
+**Result:** Menu titles/buttons and dialogs stay hidden while the background loads; input
+and held release are gated. Success/failure restores access and preserves existing chapter
+selection. Existing request coordination remains intact. New generic card occlusion stays
+in source-ui; HL2 wait policy stays in hl2-ui. No dependency or English UI literal added.
+
+**Still broken or not tested:** Native retail timing and Windows/Linux runtime not tested.
+The final installation may hitch. No GPU screenshot of the transient wait was obtained:
+replay diagnostics skip loading frames; computer use could not bind the unbundled test
+process. Both approaches are recorded; their images are not passed off as wait captures.
+Headless canvas comparisons verify hidden rendering, and packaged captures verify restoration.
+Existing scene/material fidelity and invalid-entity warnings remain outside this UI change.
+
+**Next:** Native retail/runtime comparison if needed; media remains deferred.
+
 ## 2026-10-27 Checkpoint: wait for background loading
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.

@@ -1,5 +1,32 @@
 # Performance measurements - 2026-10-05
 
+## Background-loading wait policy (2026-10-27)
+
+Packages 6019af3 (prior) and fa4a000 (wait gate), Metal on Apple M1 Pro, default
+settings, 1024x768 hl2/background01 with chapter browser open. Three isolated pairs
+ordered prior/current, current/prior, prior/current. No concurrent builds, replays,
+windowed test or image analysis. The benchmark waits for all validation processes
+to finish. Same perf-browser.json fixture, host tick 1100, 2000-frame safety cap,
+120 warm-up frames, 751–759 measured frames/run (about 14 seconds after warm-up).
+All six runs complete in NewGame; the current package reports menu.visible=true.
+
+| Package | Mean frame | Run range | HUD/UI CPU mean |
+| --- | ---: | ---: | ---: |
+| Prior | 18.693 ms | 18.672–18.709 ms | 0.1550 ms |
+| Wait gate | 18.743 ms | 18.705–18.773 ms | 0.1581 ms |
+
+The ranges overlap slightly. The +0.051 ms frame / +0.0031 ms HUD means do not
+isolate a causal cost or establish a speedup. The gate adds simple state checks,
+no render pass, allocation or asset access. During the wait, it omits menu/title
+and window painting. This is a steady-state cost check; worker-load input latency,
+wait-state GPU cost and final physics/GPU installation stalls are not measured.
+The policy makes users wait instead of claiming responsive controls under load.
+
+Reproduce with artifacts/chapter-loading-gate/benchmark.py; retained package metadata,
+individual timing reports/logs, timing-summary.json and timing-aggregate.json identify
+all samples. The prior copy is the retained 6019af3 package. Other native platforms,
+retail frame/input latency and sustained FPS guarantees remain not tested.
+
 ## Chapter/loading bug fixes (2026-10-27)
 
 Prior package `7171e3f`, fixed production source/package `6019af3`, Metal on Apple
