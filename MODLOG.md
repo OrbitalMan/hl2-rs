@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-27 Finding: background benchmarks retain 60 Hz application pacing
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Recorded the background runner's fixed 1/60 s interval and bounded plan to
+uncap profiling only before claiming low-settings maximum throughput. Current Shader Detail,
+Water Detail and Multicore status strings explicitly describe unfinished/no-effect behavior.
+No runtime code or settings were changed, and no GPU benchmark was started.
+
+**Why:** The owner asks about substantial low-settings gains and 120 FPS. Paced background
+runs cannot establish uncapped performance; settings without a renderer implementation
+cannot be treated as working quality/performance controls.
+
+**Tested how:** Read runner configuration and setting bindings/status strings; diff whitespace
+and source-only documentation checks. Runtime timing and the proposed uncapped path are not
+tested. Existing images and slowdowns remain evidence under their recorded paced workload.
+
+**Result:** Corrected interpretation is explicit in STATUS and performance/design notes.
+Earlier data is preserved; no 120 FPS or GPU-work ceiling is claimed.
+
+**Still broken or not tested:** Uncapped throughput, CPU/GPU work split and a validated low
+preset remain unfinished. No graphics feature or blur implementation is reverted.
+
+**Next:** After other contributor workloads finish, implement/profile the uncapped path,
+then measure resolution/AA sensitivity before choosing the next optimisation.
+
+
 ## 2026-10-27 Checkpoint: refuse known-contended benchmark launches
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

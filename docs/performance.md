@@ -1,5 +1,18 @@
 # Performance measurements - 2026-10-05
 
+## Background frame pacing prevents an uncapped FPS claim (2026-10-27)
+
+Source inspection finds main.rs configures every --background loop, including --profile,
+with a 1/60 s ScheduleRunnerPlugin interval. GPU completion pacing does not remove that
+application-loop interval. Existing measurements include this pacing: they show observed
+regressions/resource use, but cannot establish maximum low-settings throughput or predict
+120 FPS. No new uncapped or interactive run has verified the underlying work budget.
+Before further optimisation qualification, provide an uncapped profiling-only loop, retain
+ordinary replay pacing and the fixed two-marker GPU bound, then repeat matched measurements.
+Earlier data stays archived with this interpretation; no frame-budget result is silently
+rewritten as an uncapped GPU measurement.
+
+
 ## Main-depth follow-up: incomplete timing (2026-10-27)
 
 Sampling main depth after drawing avoids its separate multisampled prepass export/copy.

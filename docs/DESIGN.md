@@ -1,5 +1,18 @@
 # Design
 
+## Uncapped profiling before low-settings throughput work (2026-10-27)
+
+The existing background runner's 1/60 s interval includes profiling runs. Separate test
+pacing from throughput: uncap only background --profile, retaining ordinary background replay
+pacing, interactive behavior and the two-marker GPU completion bound. Test the selection
+policy, then check scripted time/pose outcomes and completed-frame telemetry. In an exclusive
+timing window, repeat fixed scenes across 720p, 1080p and native resolution, AA off/4x, and
+Enabled/Advanced/reference weapon-only modes. Report CPU work, waits and completed throughput
+separately; fixed 15 ms gameplay order stays intact. Targeting 120 FPS requires an 8.33 ms
+frame budget; success is not established by the previous 60 Hz-paced observations. A wider
+low-settings renderer redesign requires a separate measured plan after these results.
+
+
 ## Sample main depth without a copied prepass image (2026-10-27)
 
 The repeated direct-colour candidate fails the comparable swing budget. Its source remains

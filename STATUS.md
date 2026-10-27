@@ -6,6 +6,19 @@ guard are the first reviewable checkpoint. Advanced rendering optimisations are 
 and unqualified; the known high-resolution regression remains open. The primary checkout
 is reserved for the owner's manual testing. Sections below are newest first.
 
+## Newly found benchmark pacing limit (2026-10-27)
+
+Source inspection finds background runs install ScheduleRunnerPlugin::run_loop at 1/60 s,
+including --profile. Existing completion markers bound the GPU queue but do not remove this
+application-loop pacing. Recorded headless frame means therefore include pacing and cannot
+establish uncapped renderer throughput or a 120 FPS ceiling. Slowdowns and resource evidence
+remain observations under that paced workload; previous comparisons are not pure GPU costs.
+No runtime pacing change or new GPU run is made yet. Next: uncap background --profile only,
+retain ordinary replay timing and the two-marker queue bound, then repeat controlled low/high
+resolution and AA sweeps after the other contributor's work. Shader Detail, Water Detail and
+Multicore explicitly report unfinished/no-effect behavior in the current settings status.
+
+
 ## Main-depth candidate and benchmark deferral (2026-10-27)
 
 - Main-depth source is preserved on codex/experiment/blur-main-depth. World/projectile GPU
