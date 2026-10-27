@@ -2,7 +2,7 @@
 
 NO_BUILD=1 python3 scripts/checks/check_blur_performance.py
 Defaults reproduce the reported 3456x2168 regression. BLUR_WIDTH/BLUR_HEIGHT,
-BLUR_AA and BLUR_RUNS override the stress workload; not part of headless CI.
+BLUR_AA and BLUR_RUNS override the stress workload (three alternating pairs by default); not part of headless CI.
 Runs only an isolated muted package and records frame tails as well as means.
 """
 import json
@@ -56,6 +56,11 @@ def measure(scene, advanced, repeat):
         replay.expect("profile window frame count", sum(w["frames"] for w in windows["windows"]), result["measured_frames"])
     monitor.metadata.update(adapter=run.report["render"].get("adapter"), backend=run.report["render"].get("backend"))
     result["environment"] = monitor.finish(replay.OUT/(name+".environment.json"), result, (width, height))
+    completion = run.report["render"]["presentation"].get("gpu_completion", {})
+    replay.holds("bounded GPU completion pacing", completion.get("limit") == 2 and
+                 completion.get("max_pending_fences", 3) <= 2 and completion.get("errors") == 0, completion)
+    replay.holds("GPU completions observed", completion.get("completed_frames_observed", 0) >= 100)
+    result["gpu_completion"] = completion
     result["adapter"] = run.report["render"].get("adapter")
     result["backend"] = run.report["render"].get("backend")
     summary = {k: v for k, v in result.items() if k not in ("environment", "frame_windows")}
@@ -86,7 +91,7 @@ def main():
     results, failures = {}, []
     for scene in ("still", "turn", "swing"):
         modes = {False: [], True: []}
-        for repeat in range(int(os.environ.get("BLUR_RUNS", "1"))):
+        for repeat in range(int(os.environ.get("BLUR_RUNS", "3"))):
             for advanced in ((False, True) if repeat % 2 == 0 else (True, False)):
                 modes[advanced].append(measure(scene, advanced, repeat))
         median = lambda mode, key: statistics.median(r[key] for r in modes[mode])
@@ -94,9 +99,16 @@ def main():
                  for a, b in zip(modes[False], modes[True])]
         guards = {"mean": median(True, "mean_frame_ms") <= median(False, "mean_frame_ms")*1.2+0.25,
                   "p95": median(True, "p95_frame_ms_upper_bound") <= median(False, "p95_frame_ms_upper_bound")*1.25+1}
+        iteration_stats = {name: {key: {
+            "median": statistics.median(values), "minimum": min(values), "maximum": max(values)}
+            for key in ("mean_frame_ms", "p95_frame_ms_upper_bound", "p99_frame_ms_upper_bound")
+            if (values := [r[key] for r in modes[mode]])}
+            for name, mode in (("retail", False), ("advanced", True))}
+        ratios = [b["mean_frame_ms"]/a["mean_frame_ms"] for a, b in zip(modes[False], modes[True])]
         results[scene] = {"retail": modes[False], "advanced": modes[True], "environment_pairs": pairs,
                           "frame_time_ratio_advanced_to_retail": median(True, "mean_frame_ms")/median(False, "mean_frame_ms"),
-                          "performance_guards": guards}
+                          "performance_guards": guards, "iteration_statistics": iteration_stats,
+                          "paired_frame_time_ratios": ratios, "median_paired_frame_time_ratio": statistics.median(ratios)}
         if not all(guards.values()) or not all(p["comparable"] for p in pairs):
             failures.append(scene)
         (replay.OUT / "summary.json").write_text(json.dumps(results, indent=2), encoding="utf-8")

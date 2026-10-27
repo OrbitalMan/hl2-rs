@@ -6,6 +6,34 @@ guard are the first reviewable checkpoint. Advanced rendering optimisations are 
 and unqualified; the known high-resolution regression remains open. The primary checkout
 is reserved for the owner's manual testing. Sections below are newest first.
 
+## Experiment preservation (2026-10-27)
+
+Eight local codex/experiment branches preserve meaningful blur approaches. The source-only
+index is docs/blur-experiments.md; every branch has docs/blur-experiment.md with provenance
+and reuse notes. Two are complete recorded snapshots; partial/reconstructed shader and
+camera integrations are labelled. These archives are unqualified, and new archive checkouts
+were not rebuilt. Temporary stash cleanup does not remove the archived source objects.
+
+
+## Completion-paced profiling checkpoint (2026-10-27)
+
+- c53b369 and 2cca3f9 commit frame-tail reporting and host-resource measurements. Headless
+  profiling now waits on a fixed two-marker GPU completion ring; ordinary/interactive runs
+  retain their existing path. Native runs observe hundreds of completions, a maximum of
+  two pending fences and zero wait errors. No exact render-pass GPU timing is claimed.
+- GPU-managed memory in the completion-paced swing averages 2.23 GiB versus about 4.40 GiB
+  in the earlier unpaced resolved-world run, with no pressure flags. This supports queue
+  growth as a contributor; the paired frame times are not an isolated pacing speedup test.
+- The first driver GPU sample can reflect a preceding run. Retain it separately and use
+  subsequent samples as the baseline; prefer quiet samples, but compare stable moderate
+  inputs under the original resource-matching criteria rather than requiring total idleness.
+  An experimental quiet-only rejection is removed; those earlier files are not rewritten.
+- Pre-pacing headless frame rates remain exploratory submission-cadence evidence. Rendering
+  candidates still fail some native guards and remain uncommitted. New empty-ray skipping
+  reuses conservative raw motion tiles without adding images/passes; GPU quality and final
+  performance qualification are pending. Concurrent build activity is retained and flagged.
+
+
 ## Hardware-aware benchmark checkpoint (2026-10-27)
 
 - c53b369 commits profiled frame-time tails and the native blur guard. Resource instrumentation

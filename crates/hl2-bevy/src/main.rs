@@ -1241,10 +1241,7 @@ fn monitor(
             material_proxies::report(two_textures.iter(), &source_materials, game.scene.time);
         report.presentation["render_candidates"] = performance::render_candidates(geometry.iter());
         if let Some(performance) = performance.as_deref() {
-            report.presentation["cpu_stages"] = performance.report();
-            if let Some(diagnostics) = render_diagnostics.as_deref() {
-                report.presentation["render_diagnostics"] = performance::render_report(diagnostics);
-            }
+            performance.write_report(&mut report.presentation, render_diagnostics.as_deref());
         }
         if let Some(adapter) = adapter {
             report.adapter = Some(adapter.name.clone());

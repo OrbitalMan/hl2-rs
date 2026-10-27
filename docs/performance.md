@@ -1,5 +1,21 @@
 # Performance measurements - 2026-10-05
 
+## Completion pacing changes measurement interpretation (2026-10-27)
+
+Offscreen tests now keep at most two pending GPU completion markers during --profile.
+The completion-paced swing reports about 2.23 GiB driver-managed memory, against 4.40 GiB
+in the earlier unpaced resolved-world case; pressure flags disappear. This supports queue
+growth as a contributor to memory pressure. The 23.14/25.44 ms frame figures are exploratory
+and do not isolate pacing overhead or a rendering speedup. Interactive mode retains its
+existing surface presentation and installs no new limiter.
+
+Pre-pacing headless FPS is CPU-produced-frame cadence, not independent proof of completed
+GPU throughput. New qualification requires observed completions and a maximum of two
+pending markers, alongside the existing resource and frame-time checks. The baseline GPU
+primer is excluded; stable moderate host inputs are compared instead of presuming full
+idleness. Failed earlier flags/results remain in ignored evidence. Rendering candidates
+are still unqualified; exact GPU-pass durations and isolated marker overhead are untested.
+
 ## Resource/output correlation batch (2026-10-27; not qualified)
 
 Apple M1 Pro / Metal, 10 logical CPUs, 16 GiB unified memory, 3456x2168 / 4x MSAA. Driver
@@ -10,7 +26,7 @@ All numbers below are observational. All pairs are rejected for optimisation qua
 | --- | ---: | ---: | ---: | ---: |
 | Idle | 18.22 / 22.96 | 1.260 | 68.5 / 96.9% | 4.51 / 2.03 GiB |
 | Turns | 18.25 / 27.97 | 1.533 | 81.9 / 94.9% | 4.50 / 1.96 GiB |
-| Swing | 19.61 / 27.58 | 1.407 | 69.9 / 96.1% | 3.42 / 1.72 GiB |
+| Swing | 19.61 / 27.58 | 1.407 | 70.1 / 96.4% | 3.42 / 1.72 GiB |
 
 Advanced runs show VM pressure/pageouts, and the swing pair includes competing build work.
 In the idle pair, driver-reported in-use system memory averages about 1.69/4.45 GiB; these

@@ -1,5 +1,71 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: preserve meaningful blur experiments
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Created eight source-only local archive branches and docs/blur-experiments.md.
+Two branches preserve complete recorded tracked/untracked states; shader/module fragments
+and reconstructed variants are explicitly labelled. Each archive has branch-specific
+provenance, limitations and possible reuse notes. Retain plausible or inconclusive designs
+before replacing them; simple harness mistakes remain in failure notes.
+
+**Why:** The owner requested preserving experiments for other hardware/workloads instead of
+throwing away an approach solely because one contextual benchmark missed its target.
+
+**Tested how:** Verified branch references and source-only additions; complete snapshot
+branches include the recorded untracked source modules. Active worktree/index isolation was
+preserved. Archive checkout compilation and GPU validation are not tested.
+
+**Result:** The designs are retained independently of temporary stashes/build packages.
+The primary checkout is untouched. No failed experiment is presented as a qualified release.
+
+**Still broken or not tested:** Some historical CPU integration files were not retained;
+those branches are partial or reconstructed. Raw generated evidence remains ignored.
+
+**Next:** Run the requested alternating repetitions, retain every outcome, and qualify the
+preferred implementation separately from its experimental archives.
+
+## 2026-10-27 Checkpoint: completion-paced headless profiling
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Headless --profile keeps two fixed GPU submission markers and waits for the
+oldest completion before reusing its slot. Reports record submitted/observed-completed
+frames, maximum pending fences, waits and errors. Interactive and ordinary runs install no
+limiter. No render pass, dependency or callback allocation is added. The host sampler
+retains its initial GPU reading as a primer, then prefers settled samples for comparisons;
+quietness is recorded, while stable moderate resource inputs remain comparable under the
+existing matched-input criteria. Owner-requested repetitions now default to three alternating
+pairs per scene, retaining all samples, paired ratios and median/minimum/maximum statistics. Baseline history is retained and frame thresholds unchanged.
+
+**Why:** Offscreen submission has no window-acquisition backpressure. A rising GPU-managed
+memory footprint during costly runs could make produced-frame FPS diverge from completed
+GPU throughput. The initial driver reading also sometimes retains the previous run's load,
+creating false ambient-load flags when averaged into the new baseline.
+
+**Tested how:** GPU ledger/no-renderer tests, baseline-primer and matched-moderate-load tests;
+local workspace validation and Windows-target Clippy. The native six-run completion-paced
+batch reports at most two pending fences, hundreds of observed completions and zero wait
+errors. It asserts actual viewport, frame-window counts and full scripted completion.
+
+**Result:** Completion-paced swing GPU-managed memory averages 2.23 GiB versus 4.40 GiB in
+the earlier unpaced resolved-world run, without memory-pressure flags. The accompanying
+23.14/25.44 ms frame measurements are exploratory, not an isolated pacing speedup claim.
+Frame guards still fail; rendering optimisations remain unqualified and uncommitted.
+Marker waits measure backpressure, not isolated render-pass GPU duration. The matched-input
+protocol does not assume a completely idle machine; earlier experimental quiet-only flags
+remain in their original evidence. Stable moderate CPU/GPU load is an input to the ratio.
+
+**Still broken or not tested:** Precise GPU durations, native Windows/Linux runtime and
+isolated marker overhead remain untested. Pre-pacing headless results are submission-cadence
+observations and do not independently prove completed GPU throughput. Native interactive
+FPS still needs separate confirmation. Evidence: artifacts/blur-performance-regression/
+completion-bounded and resolved-world.
+
+**Next:** Qualify the rendering candidates using completion-paced, resource-matched runs
+and the projectile/weapon GPU image regressions; keep all failed attempts visible.
+
 ## 2026-10-27 Checkpoint: hardware-aware blur measurements
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

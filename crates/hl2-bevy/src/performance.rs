@@ -1,4 +1,5 @@
 //! Optional bounded CPU stage measurements; disabled for ordinary play.
+mod gpu_completion;
 use bevy::prelude::*;
 use std::{
     collections::BTreeMap,
@@ -6,7 +7,10 @@ use std::{
     time::Instant,
 };
 #[derive(Resource, Default, Clone)]
-pub struct Performance(Arc<Mutex<BTreeMap<&'static str, Samples>>>);
+pub struct Performance(
+    Arc<Mutex<BTreeMap<&'static str, Samples>>>,
+    Arc<Mutex<Option<gpu_completion::Stats>>>,
+);
 #[derive(Default)]
 struct Samples {
     calls: u64,
@@ -40,6 +44,19 @@ impl Drop for Scope<'_> {
     }
 }
 impl Performance {
+    pub fn write_report(
+        &self,
+        output: &mut serde_json::Value,
+        diagnostics: Option<&bevy::diagnostic::DiagnosticsStore>,
+    ) {
+        output["cpu_stages"] = self.report();
+        output["gpu_completion"] =
+            serde_json::to_value(&*self.1.lock().expect("GPU profiling state"))
+                .expect("GPU profiling report");
+        if let Some(diagnostics) = diagnostics {
+            output["render_diagnostics"] = render_report(diagnostics);
+        }
+    }
     pub fn report(&self) -> serde_json::Value {
         let all = self.0.lock().expect("CPU timing");
         serde_json::Value::Object(all.iter().map(|(name,samples)| {
@@ -71,7 +88,7 @@ struct RenderTimers(BTreeMap<&'static str, Instant>);
 /// Optional render-stage CPU wall timings. Ordering fences exist only with --profile.
 pub fn install(app: &mut App) {
     use bevy::render::{Render, RenderApp, RenderSystems};
-    let performance = Performance::default();
+    let performance = gpu_completion::prepare(app);
     app.insert_resource(performance.clone())
         .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
     let Some(render) = app.get_sub_app_mut(RenderApp) else {

@@ -1,6 +1,7 @@
 """Synthetic counters and alignment; no game, host queries or GPU required."""
 import plistlib
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from bench_environment import align, correlation, pair_environment, report, throughput
 from bench_environment_macos import Probe, cpu_percent, cpu_seconds, gpu_stats, vm_pages
@@ -82,6 +83,30 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(sum(row.startswith('| still') or row.startswith('| turn') for row in table.splitlines()), 4)
         self.assertNotIn('frame-time ratio', table)
         self.assertIn('unavailable', text)
+
+    def test_baseline_excludes_stale_gpu_primer(self):
+        from bench_environment import Monitor, Unavailable
+        class FakeProbe(Unavailable):
+            def __init__(self):
+                self.calls = 0
+            def sample(self):
+                self.calls += 1
+                return {'gpu_busy_percent': 99 if self.calls == 1 else 0, 'cpu_busy_percent': 0}
+        with patch('bench_environment.platform.system', return_value='Unsupported'):
+            monitor = Monitor('owned-game', interval=0.001)
+        monitor.probe = FakeProbe()
+        with monitor:
+            pass
+        self.assertEqual(monitor.primer['gpu_busy_percent'], 99)
+        self.assertEqual(len(monitor.baseline), 2)
+        self.assertEqual(monitor.baseline[0]['gpu_busy_percent'], 0)
+
+    def test_matched_moderate_load_is_comparable_without_assuming_an_idle_machine(self):
+        run = {'quality_flags': [], 'hardware': {'cpu': 'A', 'quiet_baseline_observed': False},
+               'baseline': {'cpu_busy_percent': 23, 'gpu_busy_percent': 24}}
+        result = pair_environment(run, run)
+        self.assertTrue(result['comparable'])
+        self.assertFalse(result['both_baselines_quiet'])
 
     def test_process_cpu_uses_elapsed_time_and_no_process_names_are_retained(self):
         self.assertAlmostEqual(cpu_seconds('1-02:03:04.5'), 93784.5)

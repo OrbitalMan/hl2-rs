@@ -130,13 +130,14 @@ def pair_environment(retail, advanced):
         a, b = retail["baseline"].get(key), advanced["baseline"].get(key)
         if a is not None and b is not None and abs(a-b) > 10:
             issues.append("baseline " + key + " differs by more than 10 percentage points")
-    return {"comparable": not issues, "flags": issues}
+    return {"comparable": not issues, "flags": issues,
+            "both_baselines_quiet": all(r["hardware"].get("quiet_baseline_observed") is True for r in (retail, advanced))}
 
 
 class Monitor:
     def __init__(self, executable, interval=1.):
-        if not math.isfinite(interval) or interval <= 0:
-            raise ValueError("telemetry interval must be positive")
+        if not math.isfinite(interval) or not 0 < interval <= 5:
+            raise ValueError("telemetry interval must be positive and at most five seconds")
         self.interval = interval
         self.probe = Unavailable()
         self.errors = []
@@ -171,9 +172,22 @@ class Monitor:
                 "sampler_wall_ms": (end-start)*1000, **data}
 
     def __enter__(self):
-        self.baseline.append(self.sample())
-        self.stop.wait(self.interval)
-        self.baseline.append(self.sample())
+        self.primer = self.sample()
+        # Prefer two quiet, current samples; never wait indefinitely on a shared host.
+        deadline = time.monotonic()+5
+        while True:
+            self.stop.wait(self.interval)
+            self.baseline.append(self.sample())
+            recent = self.baseline[-2:]
+            quiet = len(recent) == 2 and all(
+                s.get("cpu_busy_percent", 101) <= 20 and s.get("gpu_busy_percent", 101) <= 15
+                and s.get("memory_pressure_level", 1) == 1 and not s.get("competing_build_processes", 0)
+                and not s.get("other_game_processes", 0) for s in recent)
+            if quiet or time.monotonic() >= deadline or type(self.probe) is Unavailable:
+                break
+        self.baseline_history = self.baseline
+        self.baseline = self.baseline[-2:]
+        self.metadata["quiet_baseline_observed"] = quiet
         self.worker = threading.Thread(target=self.collect, daemon=True)
         self.worker.start()
         return self
@@ -198,5 +212,5 @@ class Monitor:
                for k, v in limits.items() if k in ("CPU_Speed_Limit", "CPU_Scheduler_Limit")):
             result["quality_flags"].append("reported CPU thermal limit")
         path.write_text(json.dumps({"summary": result, "baseline": self.baseline,
-                                   "samples": self.samples}, indent=2), encoding="utf-8")
+                                   "primer": self.primer, "baseline_history": self.baseline_history, "samples": self.samples}, indent=2), encoding="utf-8")
         return result

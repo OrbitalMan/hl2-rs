@@ -1,5 +1,33 @@
 # Local validation — 2026-10-05
 
+Repeated native qualification defaults to three Enabled/Advanced pairs per scene, with
+order reversed in the middle pair. Report every iteration, paired cost ratios and median/
+minimum/maximum frame means and p95/p99 values. Medians smooth ordinary noise; known
+interference remains flagged rather than averaged away. The raw evidence is never hidden.
+
+## Headless GPU completion and settled baselines (2026-10-27)
+
+Headless --profile runs use a two-marker ring in the host render graph. Completion markers
+follow render submission; the oldest marker is awaited before reuse, bounding GPU render
+submission without serialising every CPU frame. Reports expose submitted/observed-completed
+frames, maximum pending fences, wait time and errors. The native guard requires a limit of
+two, at least 100 observed completions and zero errors. No marker or wait is installed for
+ordinary or interactive runs. Empty submissions add no render pass or callback allocation.
+
+A native six-run batch exercises the limiter. Swing driver-managed memory averages about
+2.23 GiB versus 4.40 GiB in the earlier unpaced resolved-world run; these are aggregate
+counters. Marked waits are GPU backpressure, not render-pass timing. Pre-pacing headless
+FPS reports measure produced-frame cadence and cannot alone establish GPU throughput.
+The limiter retains CPU/GPU overlap; isolated overhead and native Windows/Linux are untested.
+
+The sampler's first reading is retained as a primer, excluded from baseline means. It can
+contain the previous game's GPU load while CPU counters have no initial delta. Subsequent
+samples prefer a quiet baseline for up to five seconds; all baseline history is saved.
+Resource comparison remains the committed matched-input protocol: stable moderate load is
+comparable, while hardware differences, material shifts and known interference/pressure
+remain flagged. A short-lived experimental requirement for total quietness is removed;
+earlier files keep their original flags. No frame-time threshold is loosened.
+
 ## Hardware-aware benchmark evidence (2026-10-27)
 
 The native blur guard writes per-run `.environment.json`, `resource-report.md`, package hashes

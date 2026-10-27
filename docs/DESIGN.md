@@ -1,5 +1,91 @@
 # Design
 
+Repeated native qualification defaults to three Enabled/Advanced pairs per scene, with
+order reversed in the middle pair. Report every iteration, paired cost ratios and median/
+minimum/maximum frame means and p95/p99 values. Medians smooth ordinary noise; known
+interference remains flagged rather than averaged away. The raw evidence is never hidden.
+
+## Conservative empty-ray skipping (2026-10-27)
+
+Reuse the existing undilated 32x32 maximum-motion tiles for native world gathers. When the
+destination is stationary, samples with no independent object motion contribute neither
+colour nor coverage. If an undilated tile is zero, its raw samples are all below the motion
+onset. Skip directly to a conservative sample index at/before the ray exits that tile,
+retaining the original tap denominator and every potentially contributing sample. Do not
+skip revealed-background estimates for moving destinations. Enable the lookup only on rays
+at least sixteen pixels long, where skipping can offset its cost. Unlike the rejected
+occupancy lookup, this avoids whole loop iterations; no image or pass is added. Validate
+GPU foreground ownership, occlusion, projected projectile silhouettes and native performance.
+
+Quiet preflight is preferred, but resource comparability remains the committed matched-input
+protocol: a stable moderate baseline is a valid input. Retain the quiet-baseline observation
+without requiring an arbitrary completely idle machine. Earlier experimental quiet-only
+flags stay in their evidence; use fresh runs for qualification. Frame-time thresholds and
+actual competing-work/pressure rejection remain unchanged.
+
+## Lazy native world gather (2026-10-27)
+
+World producers already export object-only UV motion and explicitly disable sky/background
+vectors. The native object gather can classify static samples from motion alone. Read
+MSAA depth only for moving samples, for the destination's occlusion depth, or when a moving
+centre estimates revealed background. Compute camera reprojection only for contributing
+foreground samples. Quarter camera filtering retains its current depth handling. No new
+mask/cache/pass is needed. For short world trajectories, use the existing 1.5 samples/pixel
+density with an odd minimum of three instead of seventeen; trajectories over eleven pixels
+and the weapon filter retain their dense counts. Preserve odd centred coverage, silhouette
+expansion, foreground occlusion, exposure and reach. Validate native performance and all
+world/weapon GPU probes before accepting; avoid the rejected extra occupancy texture.
+
+## Conservative weapon motion precheck (2026-10-27)
+
+Reuse the existing dilated maximum-UV-motion field before reading native/MSAA weapon depth
+and vectors. If length(maximum UV motion) * max(width,height) * exposure is below one pixel,
+all owned sample/mean velocities are also below the existing filter onset, including on
+non-square views. Return the same sharp input immediately. Use the conservative maximum
+frame dimension, not the dominant vector's pixel length, because maximum UV length does
+not preserve pixel-length ordering across axes. Keep all active filter taps, coverage,
+shutter and surface ownership unchanged. This adds no resource or pass. Verify the existing
+GPU ownership/coverage and crowbar silhouette tests at no AA/4x AA and native performance.
+
+## Headless GPU completion pacing (2026-10-27)
+
+Resource traces show a rising GPU-managed memory footprint during expensive headless runs.
+Unlike a window surface, the offscreen target supplies no acquisition backpressure. Test
+whether submission outruns completion before accepting CPU-present FPS as GPU throughput.
+For headless --profile only, keep two submission fences in a fixed ring. Use an empty queue
+submission as a completion marker after rendering; wait only for the oldest marker before
+reusing its slot. Record submitted/observed-completed frames, bounded pending fences and
+wait durations. This adds no new dependency, render pass, callback allocation or ordinary/
+interactive-game work. Verify completion pacing, resource stability and measured throughput;
+if it does not explain the growth, retain the failed evidence and change approach.
+
+The environment sampler's first GPU reading can retain the preceding run's load while CPU
+counters have no initial delta. Retain this primer separately, wait one sampling interval,
+and compare the subsequent baseline only; otherwise stale GPU readings create false
+ambient-load mismatches. Preserve raw data and mark earlier qualification flags accordingly.
+
+## Resolved weapon composition follow-up (2026-10-27)
+
+The weapon filter also consumes an already-resolved colour image and writes identical
+reconstructed values to each MSAA output sample. Preserve its exact a8 sampling/coverage
+math and multisampled motion/depth inputs, but test the same single-sample post-process
+destination and shared draw helper for its final composition. Scene and weapon geometry
+still render at the configured AA level. Qualify the surface-ownership/coverage probes at
+no AA and 4x AA plus crowbar strength/off/pause checks, and native-resolution paired costs.
+
+## Resolved world post-processing experiment (2026-10-27)
+
+The resource-aware batch shows Advanced near GPU saturation and higher driver-managed
+system-memory use/pressure. The world reconstruction currently writes a full-screen filter
+back into a multisampled colour attachment and resolves it again, although its colour input
+is already resolved and every output sample receives the same reconstructed value. Test
+Bevy's normal single-sample post_process_write destination for the world composite; retain
+MSAA motion/depth input, scene/weapon AA, shutter length, native object gather and weapon
+algorithm. Use the shared draw helper, without another pass or framebuffer. Bevy's existing
+MSAA writeback supplies the processed background to the subsequent weapon view. Verify
+background preservation, native AA, projectile/weapon GPU probes and actual-resolution
+mean/tail/resource changes before qualifying; do not accept just a faster averaged frame.
+
 ## Hardware-aware blur qualification (2026-10-27)
 
 Pair each native-resolution blur run with bounded, timestamp-aligned frame and host-resource

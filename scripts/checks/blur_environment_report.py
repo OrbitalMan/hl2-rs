@@ -25,6 +25,9 @@ def markdown(results):
                          value(rate.get("megapixels_per_system_gpu_busy_second_proxy")),
                          "; ".join(env["quality_flags"]) or "none"]
                 lines.append("| " + " | ".join(cells) + " |")
+        if 'iteration_statistics' in pair:
+            ratios += ['', f"{scene} repeated-run medians/ranges: " + json.dumps(pair['iteration_statistics']),
+                       'Paired frame-time ratios: ' + json.dumps(pair['paired_frame_time_ratios'])]
         ratios += ["", f"{scene}: Advanced/Enabled frame-time ratio **{pair['frame_time_ratio_advanced_to_retail']:.3f}**.",
                   "Environment checks: " + json.dumps(pair["environment_pairs"]), ""]
     lines += ["", "## Paired costs", "", *ratios, "## Within-run associations", "", "Pearson r against mean frame milliseconds; adjacent windows are not independent. No significance test is claimed.", ""]
