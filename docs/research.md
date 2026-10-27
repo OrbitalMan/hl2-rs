@@ -1,5 +1,17 @@
 # Sources and native research
 
+## Retail LookAt registration and measured base state (2026-10-27)
+
+The selected endline LookAt on an inactive authored channel reaches actual actor registration, not just callback lookup. Exact retail virtual targets and on-demand bodies bind event construction, conditional insertion, processing and player-directed attention-request storage. An instrumented run observes nonzero registration returns, scene-event count 5 -> 6 and 27 nested processing/request updates with raw stored values matching call arguments. Final post-tail state no longer contains the selected scene-event record. This is one observed event, not a universal rule for inactive actors/channels or a final gaze result.
+
+A distinct never-attached control corroborates selected record/request state and captures named base sequence/cycle/playback-rate/24-pose-parameter values. Offset admission comes from retail descriptor construction, the actual citizen's primary base ancestry, and loaded descriptor/child/proxy checks. Pose parameters use a nested datatable. Neither a familiar SDK offset nor an unbound nearby ViewModel initializer was substituted. Passive request coincidence corroborates the instrumented chain; it does not supply callback causality.
+
+Five stable native curve points use packed 10-byte records and default type257. Four values differ by one float step from the retained source journal's rounded byte/255 values; all five match a float32 reciprocal product. Keep that verified arithmetic match distinct from a directly observed restore operation. Native sequence numbers likewise remain separate from resolved included-model clip identity, overlay/flex/root motion and final bone/eye pose.
+
+BR adds a separate exact static restore binding: the caller passes the event curve to a helper that zero-extends each compact value byte, converts it to float32 and multiplies by the float32 reciprocal of255. Its packed value/time/zero-flag stores agree with the passive representation. This statically explains all five values while leaving actual restore invocation and interpolation fidelity untraced. The first nearby constant-reference candidate handles distinct vectors/count widths and is explicitly rejected for this event ramp.
+
+BN/BO/BP/BQ/BR are closed private evidence inventories. The Ghidra comparison agrees on six selected bodies' bytes and instruction starts/mnemonics; four pseudocode texts differ from pass14 and remain unpromoted. Rejected drafts stay retained. No Rust edits/builds or ordinary campaign completion claim; first_map_finished:false.
+
 ## File-backed opening events and authoring-flag boundary (2026-10-27)
 
 Private BJ validates a bounded rotating file recorder beyond the old message cap, including complete raw binary ranges, call pairs, native deterministic fixture results and explicit finish witnesses. Binary storage improves this fixture's median cost roughly eightfold; no native HL2 overhead or solver optimization follows. BK's actual adapted observer passes the deterministic scope/generation harness before loading.

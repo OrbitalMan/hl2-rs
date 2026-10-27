@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-27: retail LookAt registration and passive animation-state admission
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents. Claude owns Rust implementation.
+
+**Changed / Why:** Followed the inactive-channel callback through the actual retail actor registration and attention-request path. Added separate exact retail descriptor/RTTI bindings before capturing named base-animation fields. New private roots preserve source, raw reads, failures and independent verification; public changes are documentation only.
+
+**Tested how / Result:** Static checks pass 14 + 8 exact pass14 bodies, six independent Ghidra bodies/2,480 bytes/818 instruction starts, 17 animation-field anchors and 21 ancestry entries. Only two of six Ghidra pseudocode texts are whitespace-normalized equal to pass14; four differ. Actual observer passes 24 offline controls and 26 relocated entry-prefix guards. Native trace passes 505 records/198 closed pairs/7,483 raw reads, observes registration 5 -> 6 and 27 nested request updates. Fresh never-attached control accepts 5,573/5,687 samples, with 87 selected-event rows/27 distinct player requests; actual-verifier positive and 11 corruption controls pass. New seals pass 46/122/93/18 files. Both owned games exit 0/settings unchanged; Frida and Ghidra sessions close. Document diff/whitelist/staged-set checks apply; no Rust build.
+
+**Still broken or not tested / Next:** Requests are not final gaze or visible pose. Base sequence IDs are not resolved virtual-model clips; overlay/flex/root/final bone and eye pose remain untested. A final BR static supplement seals 20 files/three exact bodies/seven byte anchors, binding the event-curve restore caller and reciprocal multiply that matches all five passive values. Restore invocation itself was not traced. The first constant-reference candidate was rejected for the selected event ramp; unavailable Capstone verification was replaced by direct PE checks of 531 retained dumpbin instruction starts, without claiming a second decoder. Rejected fixture, alignment and report-shadow drafts stay retained. Original 16 gaps/four missing scene entries, first_map_finished:false and Rust parity remain open. Next bind include/sequence mapping for the observed actor. Private checkpoint research-followup-continuation-20261027br.md.
+
 ## 2026-10-27: file-backed opening callbacks and fresh passive control
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents. Claude owns Rust implementation.

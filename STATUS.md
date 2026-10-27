@@ -1,5 +1,15 @@
 # STATUS
 
+## Retail LookAt registration, request updates and base-animation fields (2026-10-27)
+
+The selected endline LookAt from an authored inactive channel does more than enter a callback: the instrumented native trace observes successful actor/base registration, an actor scene-event vector growing 5 -> 6, and 27 processing calls with nested player-directed attention-request updates. Stored target handles, timing, ramp and importance match raw call inputs. The selected scene-event record is absent in the final post-tail snapshot. This establishes registration and requests for this event; final eye/head pose, gaze arbitration and general inactive-channel policy remain untested.
+
+A fresh never-attached control accepts 5,573 of 5,687 samples, excluding 109 tick-crossing acquisitions and five reload null-slot acquisitions. Its 87 selected-event samples contain 27 distinct coincident player requests. Retail descriptor/RTTI bindings admit actual base sequence, cycle, playback rate and 24 pose parameters. Numeric sequences are not yet resolved to virtual-model clips; overlay, flex, root and final bone/eye pose remain open.
+
+The packed native curve uses 10-byte samples and observed default type 257. Four of five loaded values differ by one float step from rounding byte/255; all five match float32(byte * float32(1/255)). A separate BR static supplement binds the event-curve restore caller and actual unsigned-byte conversion/MULSS instructions, explaining that match. Restore invocation was not traced in the passive run. Original source journals and rejected alignment/verifier/harness drafts remain retained.
+
+BN/BO/BP/BQ seals pass 46/122/93/18 files, with 7/15/13/4 external bindings and one bounded owned-content range for BP. BR seals 20 files/three exact bodies/seven byte anchors. Both new owned native processes exit 0/settings unchanged; observer closed, with no research-owned game/fixture/audio/Ghidra process left at closeout. No Rust edits/builds or parity test. First_map_finished:false; original 16 gaps/four missing exact scene entries remain. Next bind virtual-model/include mapping for the observed sequence IDs before claiming animation selection. Private checkpoint: work/publishing/research-followup-continuation-20261027br.md.
+
 ## Finite opening callbacks and passive control (2026-10-27)
 
 The new private file recorder passes an authored x86 fixture beyond REA's 16 MiB message cap: 30,002 records, 15,000 closed pairs and 90,000 raw reads. Binary sidecars reduce median fixture cost from about 1.58 ms to 0.20 ms per recorded call. This is fixture performance, not native HL2 overhead or a long-capture guarantee.

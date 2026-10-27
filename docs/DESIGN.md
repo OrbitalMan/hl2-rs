@@ -1,5 +1,13 @@
 # Design
 
+## Research plan: selected retail LookAt and animation-state admission (2026-10-27)
+
+The callback follow-up is bounded to one authored endline LookAt. First bind its actual scene/actor virtual targets and conditional event insertion using exact retail bodies/bytes. Validate the additional function-entry observer against deterministic generation/call/raw-vector controls before native load. Trace insertion and attention-request mutations, then corroborate selected state in a fresh never-attached process. Keep callback execution, successful registration, request generation and final gaze as separate claims.
+
+For animation measurement, bind named retail fields and actual primary-base ancestry before VM_READ sampling. Validate loaded descriptors, nested child offsets and proxy identity at admission; preserve tick/generation/vector races as excluded or bounded observations. Do not turn numeric base sequence IDs into clip identities without virtual-model/include mapping, or claim final pose from base fields alone.
+
+These bounded steps now pass in private BN/BO/BP/BQ: registration 5 -> 6, 27 nested native attention-request updates, 87 passive selected-event samples and descriptor-admitted base sequence/cycle/rate/24 pose values. Packed curve indexing is 10 bytes; observed float normalization requires preserving the one-step difference between rounded division and reciprocal multiplication. Separate BR binds the selected static event-curve restore caller and reciprocal multiply, without tracing its invocation. Next retrieve exact include/sequence mapping and evaluator evidence as needed, with new private roots and independent checks. Full eye/head pose and Rust implementation remain separate work.
+
 ## Research plan: bounded file-backed native scene recording (2026-10-27)
 
 The next native research step replaces the two capped REA message captures with a private rotating file recorder. First validate the recorder on an authored x86 fixture beyond 16 MiB, including raw read ranges, complete call pairs, generation brackets, explicit finish witnesses, failure rejection and measured hook overhead. Keep the original captures and their continuity failures unchanged.
