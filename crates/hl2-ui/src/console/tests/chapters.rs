@@ -303,3 +303,15 @@ fn starting_chapter_cancels_background_presentation_and_stale_failure() {
     assert!(!console.is_loading());
     assert!(!console.is_background_loading());
 }
+
+#[test]
+fn switching_back_to_installed_background_supersedes_worker_in_other_game() {
+    let mut console = installed_console();
+    console.level_loaded_for_map("hl2", "background01", true);
+    console.activate_menu(1);
+    assert!(console.is_background_loading());
+    console.escape();
+    let effects = console.activate_menu(0);
+    assert!(effects.contains(&Effect::MainMenuMap(GameMap::new("hl2", "background01"))));
+    assert_eq!(console.background_transition.target_category(), Some("hl2"));
+}

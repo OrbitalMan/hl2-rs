@@ -1,5 +1,39 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: retain GameUI across runtime map loads
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.
+
+**Changed:** Prepare GameUI once during startup instead of rebuilding then dropping its
+resources, menus, fonts and chapter thumbnails for each runtime load. LoadedMap contains
+only map-owned presentation/gameplay assets; installation no longer returns an unused
+console. Startup simulation uses the already resolved video config. Rapidly switching
+back to the installed background submits the superseding target and then reuses that
+world without another decode/install. Extract result polling and tighten architecture
+baseline after shrinking the campaign poll and asset loader. Record native evidence
+and its limits in gameui documentation.
+
+**Why:** Avoid unnecessary worker CPU/allocation work and a related rapid-switch hole:
+selecting the currently installed background during a replacement must supersede that
+replacement rather than silently allowing it to install.
+
+**Tested how:** Full validate.sh passes, including 1,143 Rust tests / 94 ignored and
+13 Python helper tests, strict Clippy/fmt and architecture. Windows-target Clippy,
+owned native per-frame chapter input and actual asynchronous background scene replacement
+pass after resource reuse. New rapid-switch UI and reuse tests pass. Packaged replay and
+frame measurements are in progress; final rapid-switch helper source requires rebuilt
+package validation.
+
+**Result:** No new runtime dependencies, render passes, toolkit game policy or per-frame
+asset access. Installed localization/layouts remain authoritative.
+
+**Still broken or not tested:** Final installation still builds physics and submits GPU
+resources on the main thread and may hitch; zero-hitch loading and native retail input
+parity are not established. Final package/replay/performance evidence follows separately.
+
+**Next:** Commit runtime source, rebuild package with current revision, finish captures,
+replays and isolated frame measurements.
+
 ## 2026-10-27 Checkpoint: dialog lifetime and background request coordination
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.

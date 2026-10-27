@@ -643,9 +643,9 @@ fn main() -> Result<()> {
         options.fly,
         movement_commands,
     );
-    simulation.fov = loaded.console.config.video.fov;
-    simulation.vertical_fov = loaded.console.config.video.vertical_fov;
-    simulation.viewmodel_fov = loaded.console.config.video.viewmodel_fov;
+    simulation.fov = options.config.video.fov;
+    simulation.vertical_fov = options.config.video.vertical_fov;
+    simulation.viewmodel_fov = options.config.video.viewmodel_fov;
     simulation.applied_window = Some(
         simulation::WindowSettings::new(options.width, options.height, options.display_mode)
             .with_flexible_aspect(options.flexible_aspect),
@@ -957,7 +957,8 @@ fn setup(
         .position
         .unwrap_or_else(|| Vec3::from_array(spawn.to_array()));
     let yaw = options.yaw.unwrap_or(yaw);
-    let ui = install_map(
+    let ui = hl2_ui::console::Console::load(&loaded.vfs, loaded.hud.canvas.clone());
+    install_map(
         loaded,
         &mut commands,
         (
@@ -979,7 +980,6 @@ fn setup(
     );
     let mut console_ui = ui_host::Console::new(ui);
     console_ui.source.set_history(console_host::load_history());
-    // Which chapter each map is in (the menu background after leaving a map), off the main thread.
     console_ui.source.index_chapters();
     console_ui
         .source

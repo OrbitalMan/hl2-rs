@@ -38,7 +38,6 @@ pub struct LoadedMap {
     pub game: String,
     pub world: Arc<World>,
     pub gameplay: crate::gameplay::Gameplay,
-    pub console: hl2_ui::console::Console,
     pub hud: hl2_ui::hud::WeaponHud,
     pub audio: crate::audio::PreparedAudio,
     pub sky: Option<source_assets::sky::Skybox>,
@@ -360,7 +359,6 @@ pub fn load_with_progress(
     progress.report(0.90, "LoadingProgress_SignonLocal");
     let faces = faces::load(&vfs, &world, &mut texture_errors);
     let hud = hl2_ui::hud::WeaponHud::load(&vfs, canvas)?;
-    let console = hl2_ui::console::Console::load(&vfs, hud.canvas.clone());
     let mut audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
     for (wave, sentence, seconds) in audio.sentences.drain(..) {
         gameplay
@@ -374,7 +372,6 @@ pub fn load_with_progress(
         shadow_receivers: Arc::new(crate::shadows::receivers(&world, &materials)),
         flashlight_cookie: crate::flashlight::load_cookie(&vfs).map(Arc::new),
         game: game.to_owned(),
-        console,
         effects,
         eyes: faces.eyes,
         gaze: faces.gaze,

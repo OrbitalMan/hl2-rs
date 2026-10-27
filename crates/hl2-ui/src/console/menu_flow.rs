@@ -267,7 +267,10 @@ impl Console {
         let background = GameMap::new(game, map);
         self.set_background(Some(background.clone()));
         let _ = self.config.save();
-        if self.background_level && self.loaded_map.as_ref() == Some(&background) {
+        if self.background_level
+            && self.loaded_map.as_ref() == Some(&background)
+            && !self.background_transition.is_active()
+        {
             self.background_transition
                 .set_displayed_category(&background.game);
             return Vec::new();

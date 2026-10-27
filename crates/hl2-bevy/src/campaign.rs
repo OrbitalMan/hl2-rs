@@ -123,6 +123,9 @@ pub fn poll(
         let Some(request) = request else {
             return;
         };
+        if loading::reuse_background(&request, &campaign, &mut ui, &mut sim) {
+            return;
+        }
         let result: ResultSlot = Arc::new(Mutex::new(None));
         let output = result.clone();
         let map = request.map.clone();
@@ -161,16 +164,9 @@ pub fn poll(
         sim.loading = true;
         campaign.job = Some(Job { request, result });
     }
-    campaign.loading_frames += 1;
-    ui.source.update_loading();
-    let result = campaign
-        .job
-        .as_ref()
-        .and_then(|j| j.result.try_lock().ok()?.take());
-    let Some(result) = result else {
+    let Some((job, result)) = loading::completed(&mut campaign, &mut ui) else {
         return;
     };
-    let job = campaign.job.take().expect("completed map job");
     if loading::superseded(&job.request, &mut ui) {
         if let Err(error) = result {
             ui.source.log(&error);
@@ -272,7 +268,7 @@ pub fn poll(
     }
     ui.source
         .log(format!("Loaded {}/{}", loaded.game, loaded.world.name));
-    let _unused_new_console = crate::install_map(
+    crate::install_map(
         loaded,
         &mut commands,
         (

@@ -31,6 +31,37 @@ pub(super) fn superseded(request: &Request, ui: &mut ui_host::Console) -> bool {
     true
 }
 
+/// A rapid switch back can keep the already installed background after discarding its
+/// replacement. Finish the presentation without loading or installing that world twice.
+pub(super) fn reuse_background(
+    request: &Request,
+    campaign: &super::Campaign,
+    ui: &mut ui_host::Console,
+    sim: &mut crate::simulation::Simulation,
+) -> bool {
+    if !request.background
+        || !campaign.last_event.as_ref().is_some_and(|event| {
+            event.background && event.game == request.game && event.map == request.map
+        })
+    {
+        return false;
+    }
+    ui.source
+        .level_loaded_for_map(&request.game, &request.map, true);
+    sim.loading = false;
+    true
+}
+
+pub(super) fn completed(
+    campaign: &mut super::Campaign,
+    ui: &mut ui_host::Console,
+) -> Option<(super::Job, Result<crate::assets::LoadedMap, String>)> {
+    campaign.loading_frames += 1;
+    ui.source.update_loading();
+    let result = campaign.job.as_ref()?.result.try_lock().ok()?.take()?;
+    Some((campaign.job.take().expect("completed map job"), result))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Request, preserve_gameplay_request, superseded, ui_host};
@@ -83,5 +114,41 @@ mod tests {
         ui.source.set_mode(hl2_ui::console::Mode::NewGame);
         ui.source.set_mode(hl2_ui::console::Mode::MainMenu);
         assert!(!superseded(&request(true), &mut ui));
+    }
+    #[test]
+    fn rapid_switch_back_reuses_installed_background_and_finishes_loading() {
+        let mut campaign = crate::campaign::Campaign::default();
+        campaign.last_event = Some(crate::campaign::MapLoaded {
+            game: "hl2".into(),
+            map: "background01".into(),
+            background: true,
+        });
+        let mut ui = queued(true, "hl2", "background01");
+        ui.source.start_background_loading("hl2", "background01");
+        let mut sim = crate::simulation::Simulation::new(
+            &modkit_core::World::default(),
+            glam::Vec3::ZERO,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        sim.loading = true;
+        assert!(super::reuse_background(
+            &request(true),
+            &campaign,
+            &mut ui,
+            &mut sim
+        ));
+        assert!(!sim.loading);
+        assert!(!ui.source.is_background_loading());
+        assert!(!ui.source.is_loading());
+        campaign.last_event.as_mut().unwrap().background = false;
+        assert!(!super::reuse_background(
+            &request(true),
+            &campaign,
+            &mut ui,
+            &mut sim
+        ));
     }
 }

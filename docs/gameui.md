@@ -68,6 +68,33 @@ such a change.
 - Displayed menu subtitles are derived strictly from `BackgroundTransitionState`: while in `Starting` or `Loading`, the previously displayed subtitle remains visible; when reaching `Finished` or `Failed`, the target subtitle is applied (so a failed load never leaves the subtitle stuck). Rapid consecutive switches update the target map and category, and stale load events for older maps are safely ignored.
 - Technical note on background blur: retail Source does not run a dynamic GPU blur shader or live full-screen post-processing blur pass during background transitions. Instead, Valve authored pre-blurred 512x512 background textures in `materials/console/` for each expansion (`background01.vtf` through `07.vtf`, `ep1_background01.vtf`, `ep2_background01.vtf`, `lostcoast/background01.vtf`, and widescreen counterparts) and renders them with `MainMenu.Backdrop` tinting while loading the 3D map.
 
+### Background worker and dialog lifetime (2026-10-27)
+
+The active campaign worker owns the background/gameplay distinction. The UI's
+`background_request` flag describes only a pending request and becomes false when
+that request is consumed. Keep the latest background request queued while a worker
+runs. Coalesce an identical `(game, map)` request; discard a superseded background
+result before replacing any world, dismissing a newer dialog, or reporting completion.
+Foreground loads take priority. Starting one resets background transition presentation;
+stale background failures cannot dismiss it. Closing chapter selection leaves the
+worker and its loading plaque alive. Runtime map loads retain the existing GameUI,
+not a newly decoded menu/font/thumbnail set that would immediately be discarded.
+
+Replacing the window stack also drops fading dialog payloads. A global quit/return
+confirmation is drawn and occludes only at its real position in that stack. A closed
+or orphaned message box cannot cut a rectangle from another window.
+
+Retail evidence: owned `bin/gameui.dll`, SHA256
+`62ada6888369bed1a01a2aac50bc81e689a6e7b8df5cbfdc350a8ad690108136`,
+loading-start notification at `0x100af900`, finish at `0x100af7d0`, loading-dialog
+construction at `0x1006be00`, startup-background texture construction at `0x100b3f80`.
+These distinguish loading state notifications, background-specific dialog presentation
+and authored loading textures. Virtual-call names beyond recovered strings are
+inferred. Static exports, the published SDK and resource layouts do not establish
+uninterrupted input responsiveness while retail loads its engine world; native runtime
+comparison remains not tested. The rewrite keeps per-frame UI input live while its
+map worker freezes fixed simulation; final world/physics/GPU installation can still hitch.
+
 ### KeyValues Syntax Quirks & Parser Tolerance
 
 - Retail Valve resource files (e.g. `ep2/scripts/HudLayout.res` in the 20th Anniversary update) contain authentic authoring errors, such as unquoted identifiers merged into quoted literals (`"ypos" "426"HudPoisonDamageIndicator`).

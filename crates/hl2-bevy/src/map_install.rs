@@ -27,7 +27,7 @@ pub(crate) fn install_map(
     (cpu_skinning, no_pvs, world_partition): (bool, bool, bool),
     filtering: hl2_ui::config::Filtering,
     mute: bool,
-) -> hl2_ui::console::Console {
+) {
     {
         let mut stats = status.0.lock().expect("map stats");
         stats.meshes = 0;
@@ -83,5 +83,4 @@ pub(crate) fn install_map(
     });
     commands.insert_resource(canvas_renderer::Hud::new(loaded.hud));
     audio::install(commands, sounds, loaded.audio, mute);
-    loaded.console
 }
