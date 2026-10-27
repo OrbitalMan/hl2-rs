@@ -209,7 +209,7 @@
    114
   ],
   "crates/hl2-bevy/src/campaign.rs::poll": [
-   213
+   208
   ],
   "crates/hl2-bevy/src/canvas_renderer.rs::present": [
    175
@@ -437,10 +437,10 @@
    123
   ],
   "crates/hl2-ui/src/console.rs::draw": [
-   238
+   231
   ],
   "crates/hl2-ui/src/console.rs::load": [
-   208
+   170
   ],
   "crates/hl2-ui/src/gameui/chapters.rs::assign": [
    102

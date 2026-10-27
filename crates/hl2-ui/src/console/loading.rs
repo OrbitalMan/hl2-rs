@@ -1,15 +1,24 @@
 //! Map loading: the gameplay loading dialog and the background-map transition.
 
-use super::Console;
+use super::{Console, Mode};
 use source_ui::input::Input;
 
 impl Console {
-    /// Displays the modal loading dialog for the given map.
-    pub fn start_loading(&mut self, map: &str) {
+    /// Displays the modal loading dialog for `game`'s `map` over that chapter's pre-blurred
+    /// background image.
+    pub fn start_loading_for_game(&mut self, game: &str, map: &str) {
         self.clear_menu_hover();
         self.background_transition.reset();
+        self.loading_background = self.chapter_background_for(game, map);
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new(map));
         self.loading_progress.reset();
+    }
+
+    /// Displays the modal loading dialog for the given map.
+    pub fn start_loading(&mut self, map: &str) {
+        let current = self.loaded_map.as_ref().map(|m| m.game.as_str());
+        let target = self.game_map(map, current);
+        self.start_loading_for_game(&target.game, &target.map);
     }
 
     /// Starts the background transition to `game`'s `map` and shows the corner loading plaque.
@@ -18,8 +27,39 @@ impl Console {
         self.clear_menu_hover();
         self.occlude_background_controls(&Input::default());
         self.background_transition.start(map, game);
+        self.loading_background = None;
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new_background(map));
         self.loading_progress.reset();
+    }
+
+    /// Draws the full-screen gameplay loading screen (pre-blurred chapter background texture and
+    /// modal [`LoadingDialog`], hiding menu titles, buttons, and windows) when a gameplay map load
+    /// is active or when in [`Mode::Gameplay`]. Returns `true` if `Console::draw` is complete.
+    pub(super) fn draw_loading_screen(&self) -> bool {
+        if let Some(loading) = self
+            .loading_dialog
+            .as_ref()
+            .filter(|l| !l.is_background() && !l.is_failed())
+        {
+            let _ = loading;
+            let is_widescreen = self.canvas.width() / self.canvas.height().max(1.0) >= 1.6;
+            let bg = self
+                .loading_background
+                .as_ref()
+                .or(self.loaded_map.as_ref());
+            if let Some(tex) =
+                bg.and_then(|m| self.background_texture(&m.game, &m.map, is_widescreen))
+            {
+                crate::gameui::loading::draw_background_texture(&self.canvas, tex);
+            }
+            self.draw_loading();
+            return true;
+        }
+        if self.mode == Mode::Gameplay {
+            self.draw_loading();
+            return true;
+        }
+        false
     }
 
     /// Hidden controls consume physical input so its release cannot activate restored UI.
@@ -86,6 +126,7 @@ impl Console {
             self.background_transition.finish();
         }
         self.loading_dialog = None;
+        self.loading_background = None;
         self.clear_menu_hover();
         self.loading_progress.reset();
     }

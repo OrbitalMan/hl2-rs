@@ -381,3 +381,126 @@ fn loading_draws_no_menu_titles_buttons_or_browser_and_preserves_selection() {
         console.canvas.drain().iter().filter(inside).count() > hidden.iter().filter(inside).count()
     );
 }
+
+#[test]
+fn selecting_submenu_keeps_existing_chapter_background_from_same_game() {
+    let mut console = installed_console();
+    // Simulate having loaded Half-Life 2 chapter 10's background (`hl2/background05`).
+    console.set_background(Some(GameMap::new("hl2", "background05")));
+    console.level_loaded_for_map("hl2", "background05", true);
+    assert_eq!(console.main_menu.category(), "main");
+
+    // Entering the Half-Life 2 submenu must keep `hl2/background05` without reloading `background01`.
+    let effects = click_row(&mut console, 0);
+    assert_eq!(console.main_menu.category(), "hl2");
+    assert_eq!(
+        effects,
+        vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())],
+        "same-game submenu entry must not emit MainMenuMap when another chapter background of that game is active"
+    );
+    assert!(!console.is_loading());
+    assert!(!console.is_background_loading());
+    assert_eq!(
+        console.loaded_map,
+        Some(GameMap::new("hl2", "background05"))
+    );
+    assert_eq!(
+        console.background(),
+        Some(GameMap::new("hl2", "background05"))
+    );
+
+    // Returning to main and selecting a different game (Episode Two) loads its chapter 1 background.
+    console.escape();
+    let ep2_effects = click_row(&mut console, 2);
+    assert!(ep2_effects.contains(&Effect::MainMenuMap(GameMap::new(
+        "ep2",
+        "ep2_background01"
+    ))));
+    console.level_loaded_for_map("ep2", "ep2_background01", true);
+
+    // Simulate having loaded Episode Two chapter 3's background (`ep2/ep2_background02`).
+    console.set_background(Some(GameMap::new("ep2", "ep2_background02")));
+    console.level_loaded_for_map("ep2", "ep2_background02", true);
+    console.escape();
+    assert_eq!(console.main_menu.category(), "main");
+
+    // Re-entering Episode Two submenu keeps `ep2/ep2_background02`.
+    let ep2_reenter = click_row(&mut console, 2);
+    assert_eq!(console.main_menu.category(), "ep2");
+    assert_eq!(
+        ep2_reenter,
+        vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+    );
+    assert!(!console.is_background_loading());
+    assert_eq!(
+        console.loaded_map,
+        Some(GameMap::new("ep2", "ep2_background02"))
+    );
+}
+
+#[test]
+fn gameplay_map_loading_draws_target_chapter_blurred_background_and_hides_menu() {
+    let mut console = installed_console();
+    console.canvas.resize(1280., 720.);
+    console.level_loaded_for_map("hl2", "background01", true);
+    std::sync::Arc::make_mut(&mut console.gameui)
+        .chapters
+        .insert(
+            "hl2".into(),
+            vec![
+                crate::gameui::chapters::Chapter {
+                    key: "1".into(),
+                    background: "background01".into(),
+                    start: Some("d1_trainstation_01".into()),
+                },
+                crate::gameui::chapters::Chapter {
+                    key: "6".into(),
+                    background: "background03".into(),
+                    start: Some("d1_town_01".into()),
+                },
+            ],
+        );
+
+    // Distinct 2x2 textures for background01 vs background03 (chapter 6: d1_town_01).
+    let tex_bg1 = Texture2D::from_rgba8(2, 2, &[10; 16]);
+    let tex_bg3 = Texture2D::from_rgba8(2, 2, &[220; 16]);
+    console.background_textures.insert(
+        ("hl2".into(), "background01_widescreen".into()),
+        tex_bg1.clone(),
+    );
+    console.background_textures.insert(
+        ("hl2".into(), "background03_widescreen".into()),
+        tex_bg3.clone(),
+    );
+
+    // Start loading chapter 6 (`d1_town_01`, whose chapter background is `background03`).
+    console.start_loading_for_game("hl2", "d1_town_01");
+    assert_eq!(
+        console.loading_background,
+        Some(GameMap::new("hl2", "background03"))
+    );
+
+    console.draw(0.);
+    let quads = console.canvas.drain();
+    let full_screen_bg = quads
+        .iter()
+        .find(|q| q.destination == Rect::new(0., 0., 1280., 720.) && q.texture.is_some())
+        .expect("full-screen blurred chapter background quad");
+    assert_eq!(
+        full_screen_bg.texture.as_ref().unwrap().id(),
+        tex_bg3.id(),
+        "must draw the target map's chapter background texture (background03)"
+    );
+
+    // Also draws the blurred chapter background when loading in Mode::Gameplay (mid-campaign changelevel).
+    console.set_mode(Mode::Gameplay);
+    console.draw(0.);
+    let gameplay_quads = console.canvas.drain();
+    assert!(
+        gameplay_quads
+            .iter()
+            .any(|q| q.destination == Rect::new(0., 0., 1280., 720.)
+                && q.texture.as_ref().map(Texture2D::id) == Some(tex_bg3.id())),
+        "Mode::Gameplay loading screen must also draw the blurred chapter background"
+    );
+}

@@ -190,7 +190,7 @@ fn single_card_layout_centers_the_card_and_sizes_decorative_rules_to_the_frame()
     dialog.spec.layout.dividers = vec![Rect::new(24., 34., 548., 2.)];
     dialog.spec.layout.accept = Rect::new(63., 252., 124., 24.);
     dialog.spec.layout.cancel = Rect::new(200., 252., 72., 24.);
-    assert_eq!(dialog.panel_rect(0).x, 64.);
+    assert_eq!(dialog.panel_rect(0).x, 66.);
     let canvas = Canvas::default();
     let theme = Theme::default();
     let fonts = Fonts::default();

@@ -5,14 +5,20 @@
 Installed content is authoritative. The desktop layouts are
 `hl2/resource/newgamedialog.res` (600 x 296; Prev, Next, Play, Cancel and two
 separators; Lost Coast overrides the frame width to 300) and `hl2/resource/newgamechapterpanel.res` (chapter heading/name,
-152 x 86 picture in a 168 x 106 border). SDK `vgui2/vgui_controls/ImagePanel.cpp`
+152 x 86 picture in a 168-wide border, normalized to a uniform 8 px border on all
+four sides at 0, 44, 168, 102 with the picture at 8, 52, 152, 86 so the three
+168 x 146 cards align flush with the 548 px separators and titles never overhang
+the border). SDK `vgui2/vgui_controls/ImagePanel.cpp`
 paints unscaled images at native size and clips them to the panel. The chapter
 textures contain power-of-two padding: sample their top-left 152 x 86 region
 before proportional UI scaling; stretching the entire texture makes the picture
 small inside a black padded area and is rejected. The selected game's VFS resolves
 `materials/vgui/chapters/chapter<key>.vmt` and its `$basetexture`, rather than
 assuming a texture name or using replacement artwork. Scheme colors resolve
-`NewGame.TextColor`, `NewGame.FillColor` and `NewGame.SelectionColor`.
+`NewGame.TextColor`, `NewGame.FillColor` and `NewGame.SelectionColor`; the
+selected card applies `NewGame.SelectionColor` to both `LevelPicBorder` and the
+card's heading and title labels (`10071090`), and card labels size from the
+scheme's `ChapterTitle` / `UiBold` height.
 
 Each game's own `cfg/chapter*.cfg` files define selectable entries, independent
 of its background index. Half-Life 2 ships 15 configs: 1 through 14, including

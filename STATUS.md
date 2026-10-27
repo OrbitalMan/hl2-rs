@@ -1,5 +1,23 @@
 # STATUS
 
+## Chapter browser layout/fonts, submenu background retention, and loading screen backdrop verified (2026-10-27)
+
+- Normalized `CardBrowser` and `Catalog::browser_layout` card geometry to `168x146` with a
+  symmetric `8px` `LevelPicBorder` (`0, 44, 168, 102`) around `LevelPic` (`8, 52, 152, 86`),
+  aligning all three cards with the `548px` divider rules and clamping label widths to `168px`.
+- Resolved `Default` (`GorDIN` Regular 400) and `UiBold` (`GorDIN` Bold 700) from
+  `resource/SourceScheme.res` in `Console::load`, centered `FontFace` ascent using
+  `OS/2.sCapHeight` when present, snapped `FontFace::draw_cell_outlined` to integer pixels,
+  and colored selected card headings/titles with `SelectionColor` (orange) and unselected
+  cards with `FgColor` (white).
+- Preserved an already-loaded chapter background from the same game when re-entering that
+  game's submenu (`Console::show_category`), and drew the target map's pre-blurred chapter
+  background (`Console::loading_background`) full-screen behind the modal `LoadingDialog`
+  with menu titles/buttons hidden during gameplay map loads.
+- `validate.sh`, `check_windows.sh`, owned-install font/catalog tests, and packaged
+  `submenus`, `return_menu`, and `chapter_selection` replays pass (3/3 checks, 0 failures).
+
+
 ## Background loading now waits before showing controls (2026-10-27)
 
 - Production package fa4a000 supersedes the earlier interactive-loading policy. Hide menu

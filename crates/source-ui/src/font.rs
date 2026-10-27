@@ -69,9 +69,16 @@ impl FontFace {
                 (metrics.ascent, metrics.ascent - metrics.descent)
             },
             |table| {
-                let ascent = f32::from(table.windows_ascender()) / units;
+                let win_ascent = f32::from(table.windows_ascender()) / units;
                 let descent = f32::from(table.windows_descender()).abs() / units;
-                (ascent, ascent + descent)
+                let cell_height = win_ascent + descent;
+                let ascent = face
+                    .capital_height()
+                    .filter(|&cap| cap > 0)
+                    .map_or(win_ascent, |cap| {
+                        (cell_height + f32::from(cap) / units) * 0.5
+                    });
+                (ascent, cell_height)
             },
         );
         Ok(Self {
@@ -186,7 +193,8 @@ impl FontFace {
         self.width_em(value, cell / self.cell_height)
     }
     /// Draws `value` with an outline/border along the letter edge path with its character cell's
-    /// top-left corner at `top_left`. Glyphs are rasterized at a whole-pixel EM and scaled.
+    /// top-left corner at `top_left`. Glyphs are rasterized at a whole-pixel EM and snapped to
+    /// whole pixels so 1:1 glyph bitmaps do not blur across subpixels.
     pub fn draw_cell_outlined(
         &self,
         value: &str,
@@ -195,13 +203,12 @@ impl FontFace {
         color: Color,
         outline: TextOutline,
     ) {
-        let em = (cell / self.cell_height).max(1.);
-        let raster = em.round().clamp(1., 1024.);
+        let raster = (cell / self.cell_height).round().clamp(1., 1024.);
         self.draw_baseline_outlined(
             value,
-            top_left + Vec2::new(0., (self.ascent * em).round()),
+            (top_left + Vec2::new(0., self.ascent * raster)).round(),
             raster,
-            em / raster,
+            1.0,
             color,
             outline,
         );
@@ -223,14 +230,28 @@ impl FontFace {
     ) {
         let mut pen = origin;
         let mut glyphs = Vec::with_capacity(value.len());
+        let unit_scale = (scale - 1.0).abs() < 1e-3;
         for c in value.chars() {
             let glyph = self.raster(c, em, 0, 0);
             if let Some(texture) = &glyph.texture {
-                let pos = vec2(
-                    pen.x + glyph.x * scale,
-                    pen.y + (glyph.y - self.ascent * em) * scale,
-                );
-                glyphs.push((texture.clone(), pos, texture.size() * scale));
+                let (pos, size) = if unit_scale {
+                    (
+                        vec2(
+                            (pen.x + glyph.x).round(),
+                            (pen.y + glyph.y - self.ascent * em).round(),
+                        ),
+                        texture.size(),
+                    )
+                } else {
+                    (
+                        vec2(
+                            pen.x + glyph.x * scale,
+                            pen.y + (glyph.y - self.ascent * em) * scale,
+                        ),
+                        texture.size() * scale,
+                    )
+                };
+                glyphs.push((texture.clone(), pos, size));
             }
             pen.x += glyph.advance * scale;
         }

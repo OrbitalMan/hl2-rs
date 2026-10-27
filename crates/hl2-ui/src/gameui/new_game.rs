@@ -22,6 +22,7 @@ pub struct Catalog {
     pub selection: Option<source_ui::canvas::Color>,
     pub fill: Option<source_ui::canvas::Color>,
     pub text: Option<source_ui::canvas::Color>,
+    pub font_tall: Option<f32>,
     pub title: String,
 }
 

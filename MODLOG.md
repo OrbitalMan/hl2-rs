@@ -1,5 +1,48 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: chapter browser layout/fonts, submenu background retention, and loading backdrop
+
+**Agent/model:** Antigravity, Claude Opus 4.6. No subagents.
+
+**Changed:** Normalize `CardLayout` and `Catalog::browser_layout` to a `168x146` card with a
+uniform `8px` `LevelPicBorder` (`0, 44, 168, 102`) around `LevelPic` (`8, 52, 152, 86`) and
+`168px` label widths. Resolve `Default` (`GorDIN` Regular 400) and `UiBold` (`GorDIN` Bold 700)
+from `resource/SourceScheme.res` in `Console::load`, center `FontFace` ascent using
+`OS/2.sCapHeight` when present, snap `FontFace::draw_cell_outlined` to integer EM/pixel
+coordinates, and color selected chapter labels with `SelectionColor` (orange) and unselected
+labels with `FgColor` (white). Keep an already-loaded background map from the same game when
+opening that game's submenu (`Console::show_category`), and draw the target map's pre-blurred
+chapter background (`Console::loading_background`) full-screen behind `LoadingDialog` while
+hiding main/pause menu chrome during gameplay map loads. Update `docs/chapter-selection.md`,
+`docs/gameui.md`, `STATUS.md`, and `scripts/checks/architecture-baseline.json`.
+
+**Why:** Retail `newgamechapterpanel.res` specifies asymmetric `10px` left/top/bottom vs `6px`
+right border margins and `172px` labels that overflow the `168px` card border and `548px`
+divider width; `Console::load` previously loaded only `Tahoma` instead of `SourceScheme.res`'s
+`GorDIN` `Default`/`UiBold` fonts, and fractional raster scaling blurred glyph stems. In retail
+`GameUI`, `SwitchExpansion` keeps an active background map when its game directory already
+matches the selected expansion, and `PaintBackground` draws the chapter's pre-blurred
+`materials/console/background*.vtf` texture full-screen behind `LoadingDialog` with menu chrome
+hidden during gameplay map loads.
+
+**Tested how:** `scripts/checks/validate.sh` (architecture guardrails, 13 Python helper tests,
+all workspace unit/integration/doc tests including new unit tests in `source-ui` and `hl2-ui`,
+strict Clippy, `cargo fmt --check`), `scripts/checks/check_windows.sh`, owned-install
+`owned_chapter_catalogs` and `owned_menu_font` tests, release build (`scripts/build-bevy.sh`),
+and packaged `submenus`, `return_menu`, and `chapter_selection` replays (`3 checks, 0 failed,
+234 s`) with visual inspection of `chapters_hl2_preview.png`, `chapters_ep2_preview.png`, and
+`chapters_lostcoast_preview.png`.
+
+**Result:** Chapter cards render with symmetric `8px` borders aligned to the dialog rules,
+crisp `GorDIN` typography, and orange/white selected/unselected label colors. Submenu entry
+preserves any background map already loaded from the same game, and gameplay map loading
+displays the target chapter's pre-blurred background texture behind `LoadingDialog`.
+
+**Still broken or not tested:** Windows/Linux runtime execution and ordinary campaign play not
+tested in this session.
+
+**Next:** Further UI polish as requested by the owner.
+
 ## 2026-10-27 Checkpoint: background wait policy validated
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.

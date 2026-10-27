@@ -23,15 +23,17 @@ pub struct CardLayout {
     pub title: Rect,
     pub image: Rect,
     pub border: Rect,
+    pub font_tall: f32,
 }
 impl Default for CardLayout {
     fn default() -> Self {
         Self {
-            size: vec2(172., 146.),
-            heading: Rect::new(0., 4., 172., 20.),
-            title: Rect::new(0., 20., 172., 20.),
-            image: Rect::new(10., 50., 152., 86.),
-            border: Rect::new(0., 40., 168., 106.),
+            size: vec2(168., 146.),
+            heading: Rect::new(0., 4., 168., 20.),
+            title: Rect::new(0., 20., 168., 20.),
+            image: Rect::new(8., 52., 152., 86.),
+            border: Rect::new(0., 44., 168., 102.),
+            font_tall: 14.,
         }
     }
 }
@@ -193,13 +195,19 @@ impl CardBrowser {
         )))
     }
     pub fn prepare_text(&mut self, painter: &Painter<'_>) {
+        let card_layout = &self.spec.layout.card;
         self.display_titles = self
             .spec
             .cards
             .iter()
             .map(|card| {
                 painter
-                    .truncate_ellipsis(&card.title, self.spec.layout.card.title.w, true)
+                    .truncate_ellipsis_sized(
+                        &card.title,
+                        card_layout.title.w,
+                        card_layout.font_tall,
+                        true,
+                    )
                     .into_owned()
             })
             .collect();

@@ -32,6 +32,18 @@ pub fn scheme_font(root: &Entry, name: &str) -> Option<SchemeFont> {
     })
 }
 
+/// The character-cell height (`tall`) of the first definition of the named scheme font (`Fonts/<name>/1`).
+pub fn scheme_font_tall(root: &Entry, name: &str) -> Option<f32> {
+    root.get("Fonts")?
+        .get(name)?
+        .children()
+        .first()?
+        .get("tall")
+        .and_then(Entry::text)
+        .and_then(|t| t.trim().parse::<f32>().ok())
+        .filter(|&t| t > 0.)
+}
+
 /// The font files a scheme registers (`CustomFontFiles`), in listed order.
 pub fn custom_font_files(root: &Entry) -> Vec<String> {
     root.get("CustomFontFiles")

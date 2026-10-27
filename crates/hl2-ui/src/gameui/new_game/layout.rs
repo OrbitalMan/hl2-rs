@@ -38,17 +38,25 @@ impl Catalog {
             })
             .collect();
         let panel = &mut layout.card;
-        panel.size.x = self
-            .panel
-            .controls
-            .iter()
-            .map(|c| c.wide)
-            .fold(panel.size.x, f32::max);
         let parent = (panel.size.x, panel.size.y);
         panel.heading = rect(&self.panel, "ChapterLabel", parent, panel.heading);
         panel.title = rect(&self.panel, "ChapterNameLabel", parent, panel.title);
         panel.image = rect(&self.panel, "LevelPic", parent, panel.image);
         panel.border = rect(&self.panel, "LevelPicBorder", parent, panel.border);
+        if panel.border.w > panel.image.w && panel.image.w > 0. && panel.image.h > 0. {
+            let pad = ((panel.border.w - panel.image.w) * 0.5).round().max(1.);
+            let bottom = panel.border.y + panel.border.h;
+            panel.border.h = panel.image.h + 2. * pad;
+            panel.border.y = (bottom - panel.border.h).max(panel.title.y + panel.title.h);
+            panel.image.x = panel.border.x + pad;
+            panel.image.y = panel.border.y + pad;
+            panel.size = vec2(panel.border.w, panel.border.y + panel.border.h);
+            panel.heading.w = panel.heading.w.min(panel.border.w);
+            panel.title.w = panel.title.w.min(panel.border.w);
+        }
+        if let Some(tall) = self.font_tall {
+            panel.font_tall = tall;
+        }
         layout
     }
 

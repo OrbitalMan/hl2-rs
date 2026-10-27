@@ -61,6 +61,21 @@ fn owned_chapter_catalogs_use_each_games_configs_localization_and_thumbnails() {
             "{game}"
         );
         assert!(c.dialog.get("Play").is_some(), "{game}");
+        let spec = c.browser_spec(&resources.localization);
+        let card = &spec.layout.card;
+        assert_eq!(card.size, glam::vec2(168., 146.), "{game}");
+        assert_eq!(
+            card.border,
+            source_ui::canvas::Rect::new(0., 44., 168., 102.),
+            "{game}"
+        );
+        assert_eq!(
+            card.image,
+            source_ui::canvas::Rect::new(8., 52., 152., 86.),
+            "{game}"
+        );
+        assert_eq!(card.heading.w, 168., "{game}");
+        assert_eq!(card.title.w, 168., "{game}");
     }
 }
 

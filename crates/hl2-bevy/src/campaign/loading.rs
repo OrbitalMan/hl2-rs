@@ -2,6 +2,16 @@
 use super::Request;
 use crate::ui_host;
 
+pub(super) fn start(request: &Request, ui: &mut ui_host::Console) {
+    if request.background {
+        ui.source
+            .start_background_loading(&request.game, &request.map);
+    } else {
+        ui.source
+            .start_loading_for_game(&request.game, &request.map);
+    }
+}
+
 pub(super) fn preserve_gameplay_request(request: &Request, ui: &mut ui_host::Console) {
     if !request.background && ui.background_request {
         ui.source
@@ -9,7 +19,8 @@ pub(super) fn preserve_gameplay_request(request: &Request, ui: &mut ui_host::Con
         ui.background_request = false;
         ui.map_request = None;
         ui.map_request_game = None;
-        ui.source.start_loading(&request.map);
+        ui.source
+            .start_loading_for_game(&request.game, &request.map);
     }
 }
 

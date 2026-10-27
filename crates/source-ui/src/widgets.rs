@@ -521,7 +521,7 @@ impl Painter<'_> {
         self.border(rect, self.theme.border_dark, self.theme.border_bright);
     }
 
-    fn font(&self, bold: bool) -> Option<&FontFace> {
+    pub fn font(&self, bold: bool) -> Option<&FontFace> {
         if bold {
             self.fonts.bold.as_ref().or(self.fonts.text.as_ref())
         } else {

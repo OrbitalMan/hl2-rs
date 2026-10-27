@@ -77,7 +77,7 @@ impl Console {
         self.draw_loading();
     }
 
-    fn draw_loading(&self) {
+    pub(super) fn draw_loading(&self) {
         if let Some(loading) = &self.loading_dialog {
             let scale = crate::proportional::dialog_scale(self.canvas_size());
             loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);

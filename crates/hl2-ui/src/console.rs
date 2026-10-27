@@ -125,6 +125,8 @@ pub struct Console {
     background_level: bool,
     /// Currently loaded map, if any.
     pub loaded_map: Option<GameMap>,
+    /// Chapter background for the gameplay map currently loading in [`Console::loading_dialog`].
+    pub loading_background: Option<GameMap>,
     theme: Theme,
     widget_fonts: Fonts,
     style: Style,
@@ -295,6 +297,7 @@ impl Default for Console {
             background_transition: crate::gameui::loading::BackgroundTransitionState::Idle,
             background_level: false,
             loaded_map: None,
+            loading_background: None,
             theme: Theme::default(),
             widget_fonts: Fonts::default(),
             style: Style::default(),
@@ -318,56 +321,96 @@ impl Default for Console {
 const DEBUG_HEADER_HEIGHT: f32 = 105.;
 const VIEWMODEL_DEBUG_HEIGHT: f32 = 130.;
 
+struct LoadedUiFonts {
+    developer: Option<FontFace>,
+    menu: Option<FontFace>,
+    menu_metrics: CellMetrics,
+    ui: Option<FontFace>,
+    bold: Option<FontFace>,
+    mono: Option<FontFace>,
+}
+
+fn load_ui_fonts(vfs: &Vfs, canvas: &Canvas) -> LoadedUiFonts {
+    let font = |path: &str| {
+        vfs.read(path)
+            .ok()
+            .flatten()
+            .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
+    };
+    let developer = FontFace::load(source_ui::PROGGY_CLEAN, canvas.clone()).ok();
+    // Menu items and dialog controls draw the source scheme's MenuLarge, Default, and UiBold
+    // faces (GorDIN 600, 400, and 700 in the installed scheme) from its registered font files.
+    let reader = crate::gameui::resources::Reader::new(vfs);
+    let scheme = reader
+        .read("resource/SourceScheme.res")
+        .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
+        .and_then(|roots| roots.into_iter().next());
+    let resolve = |name: &str, fallbacks: &[&str]| {
+        scheme
+            .as_ref()
+            .and_then(|root| source_ui::scheme_fonts::resolve(root, name, |path| reader.read(path)))
+            .or_else(|| fallbacks.iter().find_map(|path| reader.read(path)))
+    };
+    let menu_bytes = resolve(
+        "MenuLarge",
+        &[
+            "resource/linux_fonts/liberationsans-regular.ttf",
+            "resource/gordin-regular.ttf",
+        ],
+    );
+    let menu = menu_bytes
+        .as_deref()
+        .and_then(|bytes| FontFace::load(bytes, canvas.clone()).ok())
+        .or_else(|| developer.clone());
+    let menu_metrics = menu_bytes
+        .as_deref()
+        .and_then(CellMetrics::from_bytes)
+        .unwrap_or_default();
+    let ui = resolve(
+        "Default",
+        &[
+            "resource/gordin-regular.ttf",
+            "resource/linux_fonts/liberationsans-regular.ttf",
+        ],
+    )
+    .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
+    .or_else(|| developer.clone());
+    let mono = font("resource/linux_fonts/liberationmono-regular.ttf")
+        .or_else(|| font("resource/linux_fonts/DejaVuSansMono.ttf"))
+        .or_else(|| developer.clone());
+    let bold = resolve(
+        "UiBold",
+        &[
+            "resource/gordin-bold.ttf",
+            "resource/linux_fonts/liberationsans-bold.ttf",
+        ],
+    )
+    .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
+    .or_else(|| ui.clone());
+    LoadedUiFonts {
+        developer,
+        menu,
+        menu_metrics,
+        ui,
+        bold,
+        mono,
+    }
+}
+
 impl Console {
     pub fn load(vfs: &Vfs, canvas: Canvas) -> Self {
-        let font = |path: &str| {
-            vfs.read(path)
-                .ok()
-                .flatten()
-                .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
-        };
-        let developer_font = FontFace::load(source_ui::PROGGY_CLEAN, canvas.clone()).ok();
-        // Menu items draw the source scheme's MenuLarge face (GorDIN 600 in the installed
-        // scheme) from the font files the scheme registers.
-        let reader = crate::gameui::resources::Reader::new(vfs);
-        let menu_bytes = reader
-            .read("resource/SourceScheme.res")
-            .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
-            .and_then(|roots| roots.into_iter().next())
-            .and_then(|root| {
-                source_ui::scheme_fonts::resolve(&root, "MenuLarge", |path| reader.read(path))
-            })
-            .or_else(|| {
-                vfs.read("resource/linux_fonts/liberationsans-regular.ttf")
-                    .ok()
-                    .flatten()
-            })
-            .or_else(|| vfs.read("resource/gordin-regular.ttf").ok().flatten());
-        let menu_font = menu_bytes
-            .as_deref()
-            .and_then(|bytes| FontFace::load(bytes, canvas.clone()).ok())
-            .or_else(|| developer_font.clone());
-        let ui_font = font("resource/linux_fonts/liberationsans-regular.ttf")
-            .or_else(|| font("resource/gordin-regular.ttf"))
-            .or_else(|| developer_font.clone());
-        let mono = font("resource/linux_fonts/liberationmono-regular.ttf")
-            .or_else(|| font("resource/linux_fonts/DejaVuSansMono.ttf"))
-            .or_else(|| developer_font.clone());
-        // The scheme's Default/DefaultBold dialog fonts:
-        let bold_font = font("resource/linux_fonts/liberationsans-bold.ttf")
-            .or_else(|| font("resource/gordin-bold.ttf"))
-            .or_else(|| ui_font.clone());
+        let fonts = load_ui_fonts(vfs, &canvas);
         let config = crate::config::Config::load_or_default();
         let mut console = Self {
             canvas: canvas.clone(),
-            developer_font,
+            developer_font: fonts.developer,
             widget_fonts: Fonts {
-                text: ui_font.clone(),
-                bold: bold_font,
+                text: fonts.ui.clone(),
+                bold: fonts.bold,
             },
-            font: ui_font,
-            menu_font,
-            mono,
+            font: fonts.ui,
+            menu_font: fonts.menu,
+            mono: fonts.mono,
             config,
             ..Default::default()
         };
@@ -382,9 +425,7 @@ impl Console {
         console
             .options
             .set_placement(Placement::from_saved(console.config.dialogs.options));
-        if let Some(bytes) = menu_bytes {
-            console.menu_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
-        }
+        console.menu_metrics = fonts.menu_metrics;
         let title_bytes = vfs
             .read("resource/HL2EP2.ttf")
             .ok()
@@ -687,14 +728,7 @@ impl Console {
     }
 
     pub fn draw(&self, time: f64) {
-        if self.mode == Mode::Gameplay && self.loading_dialog.is_none() {
-            return;
-        }
-        if self.mode == Mode::Gameplay {
-            if let Some(loading) = &self.loading_dialog {
-                let scale = crate::proportional::dialog_scale(self.canvas_size());
-                loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
-            }
+        if self.draw_loading_screen() {
             return;
         }
         // The windows (Options, the console) are drawn over the base, bottom to top.

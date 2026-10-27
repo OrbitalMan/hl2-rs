@@ -155,12 +155,7 @@ pub fn poll(
             sim.loading_failed();
             return;
         }
-        if request.background {
-            ui.source
-                .start_background_loading(&request.game, &request.map);
-        } else {
-            ui.source.start_loading(&request.map);
-        }
+        loading::start(&request, &mut ui);
         sim.loading = true;
         campaign.job = Some(Job { request, result });
     }

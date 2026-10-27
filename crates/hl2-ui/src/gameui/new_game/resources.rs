@@ -97,11 +97,19 @@ impl super::Catalog {
                     .map(str::to_owned)
             })
             .unwrap_or_default();
+        let font_tall = scheme
+            .as_ref()
+            .and_then(|root| {
+                source_ui::scheme_fonts::scheme_font_tall(root, "ChapterTitle")
+                    .or_else(|| source_ui::scheme_fonts::scheme_font_tall(root, "UiBold"))
+            })
+            .map(|tall| tall.clamp(14., 15.));
         Self {
             title,
             selection: color("NewGame.SelectionColor"),
             fill: color("NewGame.FillColor"),
             text: color("NewGame.TextColor"),
+            font_tall,
             entries,
             thumbnails,
             dialog: layout("resource/newgamedialog.res"),

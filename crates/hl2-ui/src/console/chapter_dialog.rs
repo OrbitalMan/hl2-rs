@@ -67,7 +67,7 @@ impl Console {
             Outcome::Start(target) => {
                 self.shell.windows.clear();
                 self.sync_mode();
-                self.start_loading(&target.map);
+                self.start_loading_for_game(&target.game, &target.map);
                 effects.push(Effect::ChapterMap(target));
             }
         }
