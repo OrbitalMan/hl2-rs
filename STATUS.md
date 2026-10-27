@@ -1,5 +1,18 @@
 # STATUS
 
+## Advanced weapon edge coverage correction (2026-10-27)
+
+Reproduced with the cutout fix active: offscreen gather taps were skipped but still counted
+in the divisor, fading guns near viewport edges. Normalize color and coverage by in-frame
+taps instead. Exposure/tap density/reach and world/retail paths are preserved. Eight owned
+SMG/shotgun fire/reload cases at no AA/4x AA pass with zero lost coverage; a private old-divisor
+control detects 6,843 affected pixels. Normal captures inspected. Full validation passes
+(1,186 Rust / 100 ignored, 27 Python, strict host/Windows Clippy/fmt/architecture). Existing
+crowbar/lifecycle replay, fixture coverage and all eight pistol/switch/reload/SMG ownership
+cases pass, with zero borrowed-motion or missing-coverage pixels.
+Evidence: artifacts/weapon-edges and artifacts/render-fixes. Other GPU/Windows runtime,
+all animation phases/frame rates and native comparison NOT TESTED.
+
 ## Cutout material alpha fix (2026-10-27)
 
 Alpha-test survivors now output opaque alpha, avoiding sky/background being blended through

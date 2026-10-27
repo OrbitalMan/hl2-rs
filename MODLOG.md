@@ -1,5 +1,40 @@
 # MODLOG
 
+## 2026-10-27 Fix: preserve Advanced weapon blur coverage at screen edges
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Count in-frame gather taps and normalize both color and foreground coverage by
+that count. Out-of-frame taps no longer become artificial transparent background. Preserve
+in-frame background coverage, exposure, tap density, reach cap and surface ownership; world
+and retail reconstruction paths are unchanged. Add an owned SMG/shotgun fire/reload edge
+probe and update the existing ownership probe hook. The cutout-alpha fix stays active.
+
+**Why:** Post-cutout-fix captures still show spurious gun transparency where the blur footprint
+crosses the bottom/right viewport. The old gather skipped unavailable samples but divided by
+the entire requested count. A private negative control restoring only that divisor detects
+6,843 lost-coverage pixels on the firing SMG. No reduction in blur strength is required.
+
+**Tested how:** Full validate.sh and check_windows.sh pass; release package rebuilt. Eight
+owned edge cases (SMG/shotgun firing/reloading, no AA/4x AA) all pass, with actual diagnostic
+execution asserted across 13-frame bursts. Positive edge counts range 644-10,426; every case
+has zero lost coverage. Normal SMG fire and shotgun reload captures inspected after the
+cutout fix and edge correction. Evidence: artifacts/weapon-edges and artifacts/render-fixes.
+Existing crowbar/lifecycle replay plus coverage pass. All eight existing pistol/switch/
+reload/SMG ownership cases (no AA/4x) pass with zero borrowed-motion or missing-coverage
+pixels. The strong swing effect and pause/still/switch/off behavior remain verified.
+
+**Result:** 1,186 Rust tests pass (100 ignored), 27 Python tests, strict host/Windows-target
+Clippy, architecture/fmt and the new GPU checks pass. No new texture fetch/pass/resource or
+CPU work is added; the gather adds a scalar tap count. No fresh FPS claim is made.
+
+**Still broken or not tested:** Windows/other GPU runtime, every weapon/animation/frame rate,
+ordinary campaign and native comparison are NOT TESTED. Current-frame reconstruction still
+cannot recover hidden/offscreen geometry or colors.
+
+**Next:** Owner manual testing of the three verified checkpoints. No further optimization
+or rendering changes are included in this task.
+
 ## 2026-10-27 Fix: stop sky bleeding through accepted cutout pixels
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

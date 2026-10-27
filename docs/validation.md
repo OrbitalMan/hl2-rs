@@ -1,5 +1,36 @@
 # Local validation — 2026-10-05
 
+## Advanced weapon blur at viewport edges (2026-10-27)
+
+All captures retain the cutout-alpha correction. Normal SMG/shotgun fire/reload captures
+still show fading when their gather footprints leave the viewport. The shader skipped
+outside taps but normalized both color and coverage by the requested count. It now counts
+in-frame taps and uses that divisor for both; in-frame background is still included. No
+exposure, reach cap, tap density, ownership rule, world/retail path or texture fetch changes.
+Normal fixed SMG fire/shotgun reload bursts were inspected alongside the earlier output.
+
+NO_BUILD=1 python3 scripts/checks/check_weapon_edges.py uses real animated geometry and
+13-frame bursts. A private old-divisor control detects 6,843 pixels losing coverage. All
+corrected cases report zero loss, with these peak counts proving real edge execution:
+
+| Case | No AA | 4x AA |
+| --- | ---: | ---: |
+| SMG fire | 5,098 | 5,078 |
+| SMG reload | 1,200 | 644 |
+| Shotgun fire | 9,933 | 10,426 |
+| Shotgun reload | 2,309 | 1,277 |
+
+The private shader is restored on failure/success. Evidence: artifacts/weapon-edges and
+artifacts/render-fixes. scripts/checks/validate.sh passes (1,186 Rust / 100 ignored,
+27 Python, strict Clippy/fmt/architecture), as does scripts/checks/check_windows.sh;
+release package rebuilt. NO_BUILD=1 ONLY='viewmodel_motion_blur coverage' python3
+scripts/checks/replays.py passes both groups. NO_BUILD=1 python3 scripts/checks/check_weapon_blur.py passes all eight pistol/switch/
+reload/SMG ownership cases at no AA/4x, with zero borrowed-motion and missing-coverage
+pixels. Strong crowbar reconstruction and pause/still/switch/off states remain verified. No new pass/resource or CPU work; only a scalar
+GPU tap count is added. Fresh FPS, Windows/other GPU runtime, every animation phase and
+native comparison are NOT TESTED. Current-frame reconstruction cannot recover hidden or
+offscreen source geometry/colors.
+
 ## Cutout alpha and sky-dependent fringes (2026-10-27)
 
 The accepted Source alpha-test output retained fractional texture alpha. Setting surviving

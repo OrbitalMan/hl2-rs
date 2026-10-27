@@ -164,10 +164,12 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let world = textureSampleLevel(background,linear_sampler,in.uv,0.0);
     var sum = vec3(0.0);
     var coverage = 0.0;
+    var valid_taps = 0.0;
     for (var i = 0; i < count; i++) {
         let offset = vector * ((f32(i)+0.5)/f32(count)-0.5);
         let uv = in.uv + offset;
         if any(uv < vec2(0.0)) || any(uv > vec2(1.0)) { continue; }
+        valid_taps += 1.0;
         let sample = weapon(uv);
         let exposure = sample.xy * data.params.y;
         let distance = length(offset * data.params.zw);
@@ -179,9 +181,12 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         sum += textureSampleLevel(frame,linear_sampler,uv,0.0).rgb * weight;
         coverage += weight;
     }
-    let alpha = min(coverage/f32(count),1.0);
+    // Offscreen taps are unknown, not transparent background. Normalize both color
+    // and coverage by available samples so clipped guns do not fade at screen edges.
+    let normalization = max(valid_taps,1.0);
+    let alpha = min(coverage/normalization,1.0);
     if alpha == 0.0 { return select(world,base,own.z < 0.5); }
-    let reconstructed = vec4(sum/f32(count) + world.rgb * (1.0-alpha),base.a);
+    let reconstructed = vec4(sum/normalization + world.rgb * (1.0-alpha),base.a);
     return mix(base, reconstructed, smoothstep(1.0,3.0,pixel_motion));
 }
 #else

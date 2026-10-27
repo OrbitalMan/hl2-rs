@@ -21,7 +21,7 @@ def artifact_count(path):
 
 def diagnostic(shader):
     motion = "    let pixel_motion = length(velocity * data.params.zw);"
-    alpha = "    let alpha = min(coverage/f32(count),1.0);"
+    alpha = "    let alpha = min(coverage/normalization,1.0);"
     replay.holds("motion diagnostic hook exists", motion in shader)
     replay.holds("coverage diagnostic hook exists", alpha in shader)
     return shader.replace(motion, motion + '''

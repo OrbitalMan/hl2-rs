@@ -1,5 +1,18 @@
 # Design
 
+## Preserve weapon coverage at clipped blur footprints (2026-10-27)
+
+Reproduce SMG/shotgun firing and reloading with the cutout-alpha fix retained. The weapon
+reconstruction skips offscreen taps but divides color and coverage by the full requested
+count. A clipped footprint therefore loses energy and becomes spuriously transparent near
+the bottom/right edges. Accumulate the number of in-frame taps and use it for both divisions;
+in-frame background remains part of coverage, while unknown offscreen pixels are excluded.
+Keep exposure, reach cap, tap density, source ownership and world/retail paths unchanged.
+A private GPU negative control restores only the old divisor and must report the failure
+on real animated geometry. Verify both weapons/animations at no AA and 4x AA, then run the
+existing crowbar/option-lifecycle coverage and inspect normal captures. The previous cutout
+fix stays active in every case. No new texture sampling/pass/resource is required.
+
 ## Opaque alpha for cutout survivors (2026-10-27)
 
 The Source color shader discarded below the authored cutoff but retained fractional alpha
