@@ -213,6 +213,12 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     let material_albedo = base.rgb;
     base *= material.tint * vertex_color;
     if base.a < material.parameters.x { discard; }
+#ifdef MAY_DISCARD
+    // Alpha-test survivors are opaque. Retaining texture alpha blends the sky back
+    // through cutout edges when later cameras compose the frame, creating bright rims.
+    base.a = 1.0;
+#endif
+
     let baked = select(textureSample(lightmap_texture, lightmap_sampler, mesh.uv_b).rgb, vec3(1.0), material.parameters.w > 0.5);
     // Lightmaps are linear and unclamped (Source HDR path); white fallbacks are 1.0.
     // Procedural camera images are sampled through an sRGB view and are already linear.

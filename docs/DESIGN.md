@@ -1,5 +1,17 @@
 # Design
 
+## Opaque alpha for cutout survivors (2026-10-27)
+
+The Source color shader discarded below the authored cutoff but retained fractional alpha
+for accepted masked fragments. Later camera composition blended sky through these edges,
+matching sky-dependent bright rims even with blur off; reconstructed blur could spread them.
+Use the existing MAY_DISCARD pipeline specialization to make surviving masked fragments
+opaque after the test. Preserve texture alpha for self-illumination/environment masks and
+leave translucent/additive materials unchanged. No texture replacement, mip/filtering/AA
+change, new pass or render resource is needed. Verify trees and fences on Metal with no AA,
+4x AA and Ultra; a private GPU probe reports partial survivor alpha, and a negative control
+must detect the old shader. Capture normal output as well as diagnostic colors.
+
 ## Loading and rendering regressions (2026-10-27)
 
 Address three owner reports as separate verified commits: (1) background-map handoff

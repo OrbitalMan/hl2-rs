@@ -1,5 +1,40 @@
 # MODLOG
 
+## 2026-10-27 Fix: stop sky bleeding through accepted cutout pixels
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** The Source color shader uses its existing MAY_DISCARD specialization to set
+accepted alpha-tested fragments to opaque alpha after the authored cutoff. The original
+texture alpha remains available for self-illumination/environment masks. Translucent and
+additive paths, alpha cutoff, geometry, filtering, mip chains, prepass and AA are unchanged.
+Add an isolated owned GPU regression with trees/fences, normal captures and a deliberately
+rejected shader lacking the correction. No new runtime dependency, pass, resource or sample.
+
+**Why:** Accepted masked fragments kept fractional texture alpha, so later camera composition
+blended background/sky through their edges. This explains bright borders affected by sky
+scenery and why reconstructed blur can spread them. Flat-color probes excluded uninitialized
+white MSAA samples. The isolated opaque-alpha comparison darkens 4,203 tree-edge pixels at
+4x AA (4,296 without AA), with no brightened pixels; this is not a texture-filter change.
+
+**Tested how:** scripts/checks/validate.sh and scripts/checks/check_windows.sh pass; release
+package rebuilt. NO_BUILD=1 python3 scripts/checks/check_cutout_alpha.py passes on M1 Pro/
+Metal at 1024x768. The negative control detects 7,339 partial survivors. Corrected trees
+produce 111,920/108,103 opaque diagnostic pixels at no AA/4x AA, zero partial survivors;
+Ultra/4x also passes. Fence/4x produces 57,334 opaque pixels and zero partial survivors.
+Inspect normal tree/fence captures alongside diagnostics. Logs: artifacts/render-fixes;
+owned GPU evidence: artifacts/cutout-alpha. Shader changes in probes affect only that copy.
+
+**Result:** 1,186 Rust tests pass (100 ignored), 27 Python tests, strict host/Windows-target
+Clippy, architecture/fmt and all GPU assertions pass. This fixes alpha semantics across
+platforms; only Metal runtime was exercised. No additional sampling/render work is added;
+steady-state performance was not benchmarked and no FPS claim is made.
+
+**Still broken or not tested:** Advanced SMG/shotgun artifacts are next. Other GPU backends,
+Windows runtime, all maps/resolutions and a native visual comparison are NOT TESTED.
+
+**Next:** Investigate Advanced weapon shooting/reloading transparency and screen-edge artifacts.
+
 ## 2026-10-27 Fix: reveal the authored background camera on installation
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

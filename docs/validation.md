@@ -1,5 +1,26 @@
 # Local validation — 2026-10-05
 
+## Cutout alpha and sky-dependent fringes (2026-10-27)
+
+The accepted Source alpha-test output retained fractional texture alpha. Setting surviving
+masked fragments to opaque alpha removes background/sky bleed during later camera composition.
+Flat-black probes ruled out uninitialized white MSAA samples. An isolated opaque-alpha color
+comparison darkens 4,203 tree-edge pixels at 4x AA and 4,296 without AA, with no brightened
+pixels. Ultra/4x shows the same static correction. The sample/cutoff/mip/filtering rules and
+prepass are unchanged; original texture alpha still controls material masks.
+
+Run NO_BUILD=1 python3 scripts/checks/check_cutout_alpha.py after release packaging. On M1 Pro/
+Metal at 1024x768 its private shader probe reports 7,339 partial-alpha survivors when the
+correction is removed. Corrected trees: no AA 111,920 opaque/0 partial; 4x and Ultra/4x
+108,103 opaque/0 partial. Corridor fence/4x: 57,334 opaque/0 partial. Real diagnostic execution
+and clean GPU logs are asserted; normal tree/fence captures are retained for visual review.
+The private copy's shader is restored even on failure. Evidence: artifacts/cutout-alpha and
+artifacts/render-fixes/cutout-*. No installation content or user settings are modified.
+
+scripts/checks/validate.sh passes (1,186 Rust / 100 ignored; 27 Python; strict Clippy/fmt/
+architecture), as does scripts/checks/check_windows.sh. Other GPU runtime, Windows runtime,
+all resolutions/maps, native visual parity and new FPS measurements are NOT TESTED.
+
 ## Background camera handoff regression (2026-10-27)
 
 The old install frame exposed the player spawn view; the next fixed tick enabled the

@@ -1,5 +1,15 @@
 # STATUS
 
+## Cutout material alpha fix (2026-10-27)
+
+Alpha-test survivors now output opaque alpha, avoiding sky/background being blended through
+accepted edges in later camera composition. Authored cutoff/masks, translucent materials,
+filtering, AA and prepass are preserved. Full validation passes (1,186 Rust / 100 ignored,
+27 Python, strict host/Windows Clippy, architecture/fmt). Owned Metal tree/fence GPU probes
+pass at no AA/4x and Ultra: zero partial survivors; the negative control detects 7,339.
+Normal captures inspected; evidence in artifacts/cutout-alpha and artifacts/render-fixes.
+Windows/other GPU runtime and native comparison NOT TESTED. Next: Advanced viewmodel blur.
+
 ## Background camera handoff fix (2026-10-27)
 
 Reproduced the first-frame spawn-view flash with an install-time screenshot; ordinary
