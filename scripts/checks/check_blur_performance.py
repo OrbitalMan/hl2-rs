@@ -12,7 +12,7 @@ import statistics
 import shutil
 import subprocess
 import replays as replay
-from bench_environment import Monitor, pair_environment
+from bench_environment import Monitor, known_interference, pair_environment
 from blur_environment_report import write as write_resource_report
 
 
@@ -41,6 +41,12 @@ def measure(scene, advanced, repeat):
     path = replay.OUT / (scene + ".input.json")
     path.write_text(json.dumps(fixture(scene)), encoding="utf-8")
     with Monitor(replay.EXE, float(os.environ.get("BLUR_TELEMETRY_INTERVAL", "1"))) as monitor:
+        blocked = known_interference(monitor.baseline)
+        (replay.OUT/(name+".preflight.json")).write_text(json.dumps({
+            "hardware": monitor.metadata, "baseline": monitor.baseline,
+            "baseline_history": monitor.baseline_history, "known_interference": blocked,
+        }, indent=2), encoding="utf-8")
+        replay.holds("no known competing workload before launch", not blocked, blocked)
         run = replay.game(name, "--map", "d1_trainstation_02", "--width", str(width), "--height", str(height),
                           "--movement-script", str(path), "--frames", "2400", "--profile", capture=False)
     replay.holds("no render errors", "ERROR" not in run.log and "Caught rendering error" not in run.log)

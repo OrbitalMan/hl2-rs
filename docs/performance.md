@@ -1,5 +1,17 @@
 # Performance measurements - 2026-10-05
 
+## Main-depth follow-up: incomplete timing (2026-10-27)
+
+Sampling main depth after drawing avoids its separate multisampled prepass export/copy.
+Packaged world and weapon probes pass, but cost remains unqualified. A first native batch
+overlaps another packaged replay and is interrupted, retaining its data. A second completes
+three idle pairs: Enabled mean-frame median 19.43 ms (19.39-19.45), Advanced 20.26 ms
+(20.11-20.30), median p95 24/24 ms. Both timing budgets pass. Two pairs are resource-comparable;
+one has a material baseline-memory shift. The guard then detects a competing compiler and
+stops before Advanced turns. No turning/swing qualification or direct-colour-versus-depth
+speedup is established. Artifacts main-depth-repeated and main-depth-isolated remain separate,
+including preflight evidence. Further timing requires an exclusive window; thresholds stand.
+
 ## Repeated direct-source experiment (2026-10-27; rejected for qualification)
 
 Completed 18 packaged runs: three alternating Enabled/Advanced pairs for idle, continuous

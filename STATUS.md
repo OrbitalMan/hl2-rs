@@ -6,6 +6,33 @@ guard are the first reviewable checkpoint. Advanced rendering optimisations are 
 and unqualified; the known high-resolution regression remains open. The primary checkout
 is reserved for the owner's manual testing. Sections below are newest first.
 
+## Main-depth candidate and benchmark deferral (2026-10-27)
+
+- Main-depth source is preserved on codex/experiment/blur-main-depth. World/projectile GPU
+  probes pass, including 4x MSAA, sky exclusion, silhouette expansion and off/pause omission.
+  Eight pistol/fire/reload/switch/SMG surface-motion cases pass with MSAA off and 4x: actual
+  reconstruction, zero borrowed-motion pixels, zero covered-pixel holes, no render errors.
+  Normal lamp/camera captures show continuous streaks. This does not qualify native cost.
+- Full workspace validation: 1,136 Rust tests pass, 92 ignored, strict Clippy/fmt/architecture
+  pass. After restricting depth bookkeeping to active/restoring cameras, eleven bloom tests,
+  host/Windows-target strict Clippy and architecture pass again. Native Windows runtime,
+  interactive FPS and the broader crowbar replay are not tested for this candidate.
+- Two native timing attempts cannot qualify the candidate. The first overlaps another
+  packaged replay and is interrupted by stopping only this task's benchmark processes.
+  The second completes three idle pairs, then preflight detects a competing compiler and
+  stops before starting Advanced turns. Idle medians are 19.43/20.26 ms Enabled/Advanced,
+  p95 24/24 ms; frame budgets pass, but one pair has a baseline-memory mismatch. Two
+  comparable idle pairs are insufficient for full qualification. No copy-removal speedup
+  against the previous candidate is established.
+- Retain artifacts/blur-performance-regression/main-depth-repeated (interrupted) and
+  main-depth-isolated (deferred), with all completed reports and preflight evidence.
+  Stop repeating interrupted timing attempts on the shared machine. The guard now saves
+  preflight counters and refuses known competing game/compiler workloads; moderate stable
+  utilisation remains valid. Twenty-five Python checks include proof that a busy preflight
+  saves evidence without invoking the game. Next: an exclusive native timing window, then
+  finish the crowbar replay. Rendering remains unqualified and uncommitted on this branch;
+  the primary checkout is untouched.
+
 ## Repeated direct-source experiment (2026-10-27)
 
 - Eighteen native packaged runs complete: three alternating pairs per scene, middle order

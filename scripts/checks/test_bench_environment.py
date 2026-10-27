@@ -1,13 +1,43 @@
 """Synthetic counters and alignment; no game, host queries or GPU required."""
+import json
 import plistlib
+import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from bench_environment import align, correlation, pair_environment, report, throughput
+from types import SimpleNamespace
+from bench_environment import align, correlation, known_interference, pair_environment, report, throughput
 from bench_environment_macos import Probe, cpu_percent, cpu_seconds, gpu_stats, vm_pages
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_preflight_distinguishes_known_workloads_from_moderate_utilisation(self):
+        self.assertEqual(known_interference([{"cpu_busy_percent": 40, "gpu_busy_percent": 35}]), [])
+        self.assertEqual(known_interference([{"other_game_processes": None}, {}]), [])
+        self.assertEqual(known_interference([{"other_game_processes": 1},
+                                             {"competing_build_processes": 2}]),
+                         ["competing_build_processes", "other_game_processes"])
+
+    def test_busy_preflight_saves_evidence_without_launching_a_game(self):
+        import check_blur_performance as guard
+        baseline = [{"other_game_processes": 1}]
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            with patch.object(guard, "Monitor") as monitor, \
+                 patch.object(guard.replay, "OUT", out), \
+                 patch.object(guard.replay, "CONFIG", out/"settings.json"), \
+                 patch.object(guard.replay, "settings"), \
+                 patch.object(guard.replay, "game") as game, \
+                 patch("builtins.print"):
+                monitor.return_value.__enter__.return_value = SimpleNamespace(
+                    baseline=baseline, baseline_history=baseline, metadata={})
+                with self.assertRaises(guard.replay.Failure):
+                    guard.measure("still", True, 0)
+                game.assert_not_called()
+            evidence = json.loads((out/"still-advanced-0.preflight.json").read_text())
+            self.assertEqual(evidence["known_interference"], ["other_game_processes"])
+            self.assertEqual(evidence["baseline"], baseline)
+
     def test_cpu_delta_is_host_normalized_and_handles_wrap(self):
         self.assertIsNone(cpu_percent(None, [1, 2, 3, 4]))
         self.assertEqual(cpu_percent([10, 20, 30, 0], [20, 25, 45, 0]), 50)

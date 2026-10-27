@@ -1,5 +1,33 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: refuse known-contended benchmark launches
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Native blur preflight saves baseline/hardware evidence and refuses a known
+competing game or compiler before launching. Shared interference classification also drives
+post-run flags. Moderate utilisation alone remains valid; no threshold or results are changed.
+Recorded main-depth image validation and both interrupted/deferred timing attempts.
+
+**Why:** Another replay appeared during the first batch; another compiler blocked the second.
+Do not consume shared GPU resources in a benchmark already known to be incomparable.
+
+**Tested how:** Twenty-five Python tests pass, including a busy preflight that saves its
+baseline and never calls the game. Architecture and diff whitespace checks pass. The native
+preflight catches the real compiler and exits before Advanced turns. Main-depth world and
+all eight weapon GPU probes pass; source validation details are in STATUS.md.
+
+**Result:** Idle medians are 19.43/20.26 ms Enabled/Advanced, p95 24/24 ms. Budgets pass, but
+only two pairs are comparable; the third has a memory-baseline shift. The full native guard
+is incomplete. Interrupted data, partial results and the candidate's source archive remain.
+Only this task's benchmark processes were stopped; the other replay and primary are untouched.
+
+**Still broken or not tested:** Native turning/swing performance is unqualified. Broader
+crowbar replay, interactive FPS, Windows runtime and archive-checkout rebuilds are not tested.
+
+**Next:** Use an exclusive timing window before further GPU benchmarks, then finish the
+crowbar probe and qualify the complete rendering candidate. Do not retry known contention.
+
 ## 2026-10-27 Checkpoint: repeated native blur results and retained candidates
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

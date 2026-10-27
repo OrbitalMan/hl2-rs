@@ -29,6 +29,12 @@ class Unavailable:
         return {}
 
 
+def known_interference(samples):
+    """Known competing workloads; missing counters do not establish idleness."""
+    return [key for key in ("competing_build_processes", "other_game_processes")
+            if any((s.get(key) or 0) > 0 for s in samples)]
+
+
 def correlation(pairs):
     pairs = [(x, y) for x, y in pairs if x is not None and y is not None
              and math.isfinite(x) and math.isfinite(y)]
@@ -83,9 +89,7 @@ def report(samples, baseline, frame, metadata, size):
     for key in ("cpu_busy_percent", "gpu_busy_percent"):
         if sum(s.get(key) is not None for s in active) < 3:
             issues.append(key + " unavailable or insufficient")
-    for key in ("competing_build_processes", "other_game_processes"):
-        if any(s.get(key, 0) > 0 for s in active):
-            issues.append(key)
+    issues.extend(known_interference(active))
     if any(s.get("memory_pressure_level", 1) != 1 for s in active):
         issues.append("memory pressure during measured frames")
     for counter in ("swapout_bytes_counter", "pageout_bytes_counter"):

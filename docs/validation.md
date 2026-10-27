@@ -5,6 +5,29 @@ order reversed in the middle pair. Report every iteration, paired cost ratios an
 minimum/maximum frame means and p95/p99 values. Medians smooth ordinary noise; known
 interference remains flagged rather than averaged away. The raw evidence is never hidden.
 
+## Known-workload preflight and main-depth probes (2026-10-27)
+
+The native guard saves each .preflight.json before launch. Known other games or compiler
+processes in the current baseline abort the batch before invoking a game; moderate CPU/GPU
+utilisation alone does not. Unknown counters do not establish idleness and still fail later
+resource qualification. A workload beginning during a run remains flagged in its retained
+samples. No automatic retry, data removal or threshold change is introduced. Twenty-five
+Python tests include a busy-baseline case proving saved evidence and no game launch.
+
+The main-depth candidate passes check_world_blur.py and all eight check_weapon_blur.py
+cases (no AA/4x). Normal camera/lamp images were inspected. Full validate.sh passes 1,136
+Rust tests (92 ignored), 23 Python tests at that point, strict Clippy, fmt and architecture;
+the later harness checks raise the Python total to 25. The active-camera bookkeeping
+refinement passes eleven bloom tests and host/Windows-target strict Clippy. These are
+packaged Metal image and cross-compilation checks, not Windows runtime validation.
+
+Native attempts main-depth-repeated and main-depth-isolated are retained separately. The
+former overlaps another replay; only this task's harness/children are stopped. The latter
+passes idle budgets with two comparable pairs and one memory-mismatched pair, then refuses
+a compiler-contended preflight. Three pairs across all scenes, the broader crowbar replay
+and interactive FPS are not qualified. After two interrupted attempts, further timing waits
+for an exclusive window instead of launching more known-contended batches.
+
 ## Repeated direct-colour candidate (2026-10-27)
 
 NO_BUILD=1 BLUR_LABEL=direct-sources-repeated BLUR_RUNS=3 python3
