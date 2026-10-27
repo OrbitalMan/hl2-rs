@@ -28,6 +28,7 @@ pub mod motion_blur;
 mod motion_blur_pass;
 mod viewmodel_blur;
 mod weapon_blur;
+mod world_blur;
 
 /// Bloom amount on the last 3D camera of the main view, and the image that receives the
 /// pre-bloom frame for auto exposure.
@@ -54,7 +55,8 @@ impl Plugin for SourceBloomPlugin {
         .add_systems(Update, motion_blur::update)
         .add_systems(
             PostUpdate,
-            viewmodel_blur::update
+            (viewmodel_blur::update, world_blur::update)
+                .after(crate::camera::present_player_view)
                 .after(crate::rendering::present_weapons)
                 .after(crate::rendering::present_entities)
                 .before(TransformSystems::Propagate),

@@ -1,5 +1,41 @@
 # Performance measurements - 2026-10-05
 
+## Advanced world/projectile reconstruction (2026-10-27)
+
+Packaged Metal / Apple M1 Pro, hl2/d1_trainstation_02, 1024x768, HDR None, MSAA off,
+VSync off, muted background. Baseline a8a050b and final implementation use identical
+900-tick fixtures: fixed plaza view, or repeated yaw sweeps of +/-70 degrees. Three
+alternating pairs per scene, reversed order in the middle pair. All 12 scripts finish;
+555-572 frames are measured after 120 warm-up frames over 10.900-11.076 seconds each.
+No overlapping builds, game captures or image analysis in this final batch.
+
+| View | Prior Advanced mean | Current Advanced mean | Prior range | Current range |
+| --- | ---: | ---: | ---: | ---: |
+| Still | 19.694 ms | 19.638 ms | 19.639-19.758 ms | 19.570-19.680 ms |
+| Repeated turns | 19.510 ms | 19.258 ms | 19.465-19.550 ms | 19.225-19.309 ms |
+
+No frame-time regression in this scene; the observed reductions do not establish a general
+speedup, native equivalence or FPS guarantee. The new world prepass can also reduce main-pass
+overdraw, so scene totals are not an isolated blur GPU cost. GPU timestamps are unavailable.
+CPU encoding spans for still/turn (ms): prepass 0.17848/0.20674, 4x reduction
+0.000501/0.000416, 32-pixel reduction 0.000330/0.000336, dilation 0.000377/0.000302,
+world composite 0.000386/0.000350. These exclude GPU execution and color-copy cost.
+
+Advanced adds world motion/depth prepasses and shares three reduced motion passes plus a
+composite with the weapon backend. The world owns one full-size color copy and three small
+fields (1/4, 1/32, 1/32 resolution); it skips the weapon background snapshot. Textures,
+bind groups and pipelines are reused; there is no steady-frame allocation or asset access.
+Camera-only regions avoid dynamic-object gathers; static regions return immediately.
+World gathers use dense odd 17-257 taps, 1.25-frame exposure and 12% UV reach. Disabled/retail
+Enabled do not add world prepass/reconstruction work; weapon taps remain 17-97.
+
+The exploratory timing-summary.json batch overlapped architecture/fmt work and predates the
+sky/history fixes; it is rejected for final timing claims. Accepted evidence:
+artifacts/advanced-world-blur/benchmark-final.py, timing-final-summary.json,
+timing-final-aggregate.json and final-*.json/log. Windows/Linux runtime and other scenes,
+resolutions, frame rates or particle-heavy cases are not tested.
+
+
 ## Advanced surface-motion fix (2026-10-27)
 
 Packaged Metal / Apple M1 Pro, 1024x768, HDR None, MSAA off, VSync off, muted background

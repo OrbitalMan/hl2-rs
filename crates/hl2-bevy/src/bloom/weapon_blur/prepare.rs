@@ -1,13 +1,13 @@
 //! Cached textures, pipelines and bind groups; no steady-frame allocations.
 use super::{Data, Pipelines, Prepared, Textures, WeaponBlur, pipeline};
 use bevy::{
-    core_pipeline::prepass::ViewPrepassTextures,
+    core_pipeline::prepass::{PreviousViewData, ViewPrepassTextures},
     ecs::{
         entity::Entity,
         query::{Or, With, Without},
-        system::{Commands, Local, Query, Res, ResMut},
+        system::{Commands, Local, Query, Res},
     },
-    math::Vec4,
+    math::{Mat4, Vec4},
     prelude::Msaa,
     render::{
         camera::ExtractedCamera,
@@ -16,7 +16,7 @@ use bevy::{
             TextureDimension, TextureFormat, TextureUsages, TextureViewId, UniformBuffer,
         },
         renderer::{RenderDevice, RenderQueue},
-        texture::TextureCache,
+        texture::CachedTexture,
         view::ExtractedView,
     },
 };
@@ -27,11 +27,18 @@ type Stale = (
     Without<WeaponBlur>,
 );
 
+type TextureViewData<'w> = (
+    Entity,
+    &'w ExtractedCamera,
+    &'w ExtractedView,
+    &'w WeaponBlur,
+    Option<&'w Textures>,
+);
+
 pub(super) fn textures(
     mut commands: Commands,
-    mut cache: ResMut<TextureCache>,
     device: Res<RenderDevice>,
-    views: Query<(Entity, &ExtractedCamera, &ExtractedView, Option<&Textures>), With<WeaponBlur>>,
+    views: Query<TextureViewData>,
     stale: Query<Entity, Stale>,
 ) {
     for entity in &stale {
@@ -39,39 +46,46 @@ pub(super) fn textures(
             .entity(entity)
             .remove::<(Textures, Prepared, Key)>();
     }
-    for (entity, camera, view, current) in &views {
+    for (entity, camera, view, blur, current) in &views {
         let Some(size) = camera.physical_viewport_size else {
             continue;
         };
         if current.is_some_and(|t| {
-            t.frame.texture.width() == size.x
+            t.world == blur.world
+                && t.frame.texture.width() == size.x
                 && t.frame.texture.height() == size.y
                 && t.frame.texture.format() == view.target_format
         }) {
             continue;
         }
-        let mut texture = |width, height, format, usage| {
-            cache.get(
-                &device,
-                TextureDescriptor {
-                    label: Some("weapon_motion_texture"),
-                    size: Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: TextureDimension::D2,
-                    format,
-                    usage,
-                    view_formats: &[],
+        let texture = |width, height, format, usage| {
+            let texture = device.create_texture(&TextureDescriptor {
+                label: Some("weapon_motion_texture"),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
                 },
-            )
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            });
+            let default_view = texture.create_view(&Default::default());
+            CachedTexture {
+                texture,
+                default_view,
+            }
         };
         let copied = TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING;
-        let background = texture(size.x, size.y, view.target_format, copied);
         let frame = texture(size.x, size.y, view.target_format, copied);
+        let background = if blur.world {
+            frame.clone()
+        } else {
+            texture(size.x, size.y, view.target_format, copied)
+        };
         let reduced = [4, 32, 32].map(|factor| {
             texture(
                 size.x.div_ceil(factor),
@@ -84,6 +98,7 @@ pub(super) fn textures(
             background,
             frame,
             reduced,
+            world: blur.world,
         });
     }
 }
@@ -92,6 +107,7 @@ pub(super) fn textures(
 pub(super) struct Key {
     textures: [TextureViewId; 7],
     samples: u32,
+    world: bool,
 }
 type View<'w> = (
     Entity,
@@ -100,6 +116,7 @@ type View<'w> = (
     &'w Msaa,
     &'w ExtractedView,
     &'w ViewPrepassTextures,
+    Option<&'w PreviousViewData>,
     Option<&'w Key>,
     Option<&'w mut Prepared>,
 );
@@ -108,10 +125,10 @@ pub(super) fn groups(
     mut commands: Commands,
     (p, cache): (Res<Pipelines>, Res<PipelineCache>),
     (device, queue): (Res<RenderDevice>, Res<RenderQueue>),
-    mut known: Local<HashMap<(TextureFormat, u32), [CachedRenderPipelineId; 4]>>,
+    mut known: Local<HashMap<(TextureFormat, u32, bool), [CachedRenderPipelineId; 4]>>,
     mut views: Query<View>,
 ) {
-    for (entity, blur, textures, msaa, view, prepass, old, prepared) in &mut views {
+    for (entity, blur, textures, msaa, view, prepass, previous, old, prepared) in &mut views {
         let (Some(vectors), Some(depth)) = (prepass.motion_vectors_view(), prepass.depth_view())
         else {
             continue;
@@ -127,27 +144,25 @@ pub(super) fn groups(
                 textures.reduced[2].default_view.id(),
             ],
             samples: msaa.samples(),
+            world: blur.world,
         };
-        let data = Data {
-            params: Vec4::new(
-                blur.max,
-                1.25,
-                textures.frame.texture.width() as f32,
-                textures.frame.texture.height() as f32,
-            ),
-        };
+        let data = view_data(blur, textures, view, previous);
         if old == Some(&key)
             && let Some(mut prepared) = prepared
         {
-            if prepared._buffer.get().params != data.params {
+            if prepared._buffer.get().params != data.params
+                || prepared._buffer.get().reprojection != data.reprojection
+            {
                 prepared._buffer.set(data);
                 prepared._buffer.write_buffer(&device, &queue);
             }
             continue;
         }
         let pipelines = *known
-            .entry((view.target_format, msaa.samples()))
-            .or_insert_with(|| pipeline_set(&p, &cache, view.target_format, msaa.samples()));
+            .entry((view.target_format, msaa.samples(), blur.world))
+            .or_insert_with(|| {
+                pipeline_set(&p, &cache, view.target_format, msaa.samples(), blur.world)
+            });
         let mut buffer = UniformBuffer::from(data);
         buffer.write_buffer(&device, &queue);
         let binding = buffer.binding().expect("written buffer");
@@ -159,7 +174,7 @@ pub(super) fn groups(
             device.create_bind_group(
                 Some("weapon_reduce_raw"),
                 &raw,
-                &BindGroupEntries::sequential((vectors,)),
+                &BindGroupEntries::sequential((vectors, depth, binding.clone())),
             ),
             device.create_bind_group(
                 Some("weapon_reduce_tiles"),
@@ -196,16 +211,58 @@ pub(super) fn groups(
     }
 }
 
+fn view_data(
+    blur: &WeaponBlur,
+    textures: &Textures,
+    view: &ExtractedView,
+    previous: Option<&PreviousViewData>,
+) -> Data {
+    let mut reprojection = Mat4::IDENTITY;
+    if blur.world {
+        let current = view
+            .clip_from_world
+            .unwrap_or_else(|| view.clip_from_view * view.world_from_view.to_matrix().inverse());
+        let prior = previous.map_or(current, |previous| previous.clip_from_world);
+        if blur.max > 0. {
+            reprojection = prior * current.inverse();
+        }
+    }
+    Data {
+        reprojection,
+        params: Vec4::new(
+            blur.max,
+            1.25,
+            textures.frame.texture.width() as f32,
+            textures.frame.texture.height() as f32,
+        ),
+    }
+}
+
 fn pipeline_set(
     p: &Pipelines,
     cache: &PipelineCache,
     format: TextureFormat,
     samples: u32,
+    world: bool,
 ) -> [CachedRenderPipelineId; 4] {
     [
-        pipeline(p, cache, "reduce_raw", TextureFormat::Rgba16Float, samples),
-        pipeline(p, cache, "reduce_tiles", TextureFormat::Rgba16Float, 1),
-        pipeline(p, cache, "dilate", TextureFormat::Rgba16Float, 1),
-        pipeline(p, cache, "composite", format, samples),
+        pipeline(
+            p,
+            cache,
+            "reduce_raw",
+            TextureFormat::Rgba16Float,
+            samples,
+            world,
+        ),
+        pipeline(
+            p,
+            cache,
+            "reduce_tiles",
+            TextureFormat::Rgba16Float,
+            1,
+            world,
+        ),
+        pipeline(p, cache, "dilate", TextureFormat::Rgba16Float, 1, world),
+        pipeline(p, cache, "composite", format, samples, world),
     ]
 }

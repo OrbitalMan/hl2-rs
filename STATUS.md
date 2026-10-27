@@ -1,6 +1,34 @@
 # STATUS
 
- Checkpoint: 2026-10-27 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui in an isolated worktree. Advanced blur surface-motion ownership is fixed for the reproduced pistol/switch artifacts; existing fast-swing strength remains. Local validation passes; Windows/Linux runtime and native parity remain unverified. Sections below are newest first.
+Checkpoint: 2026-10-27 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui in the original checkout. Advanced world/projectile reconstruction is implemented alongside the existing weapon reconstruction. Local checks pass; packaged motion/occlusion approximations and performance evidence are recorded below. Native Windows/Linux runtime and native parity remain unverified. Sections below are newest first.
+
+## Advanced world and projectile blur (2026-10-27)
+
+- Advanced now reconstructs camera motion with dense centered 17-257 taps, plus independent
+  opaque/masked moving-model motion. Grenade, missile and bugbait GPU probes demonstrate
+  vectors and silhouette expansion with the camera held still. Disabled/retail Enabled
+  retain their existing behavior; the strong weapon reconstruction remains separate.
+- Shared render plumbing owns persistent per-view textures, skips the weapon background
+  snapshot for the world view, uses Bevy's PreviousViewData for reprojection, excludes sky from object tiles,
+  and subtracts camera motion per MSAA depth sample. World history warms after activation,
+  pause/loading, map/lens changes, time jumps and teleports. Off modes keep no active world reconstruction/prepass state.
+- Local validation: 1,127 Rust tests/92 ignored, 13 Python helpers, architecture, strict
+  Clippy/fmt; Windows-target Clippy. Owned probes/captures and paired frame timings are
+  detailed in docs/validation.md and docs/performance.md; scripts/checks/check_world_blur.py
+  is isolated from user settings and asserts actual GPU execution, not just a clean log.
+- Three isolated paired runs per scene: prior/current Advanced 19.694/19.638 ms still,
+  19.510/19.258 ms during turns. No scene frame-time regression; no general speedup or GPU
+  cost claim. Native Windows/Linux runtime remains untested.
+- Rejected first gather blurred scenery around small projectiles; fixed background ownership.
+  Rejected sky-relative and mixed-MSAA-depth motion classifications are fixed. Plaza stippling
+  also occurs with blur off; speculative depth bias was removed. Initial timing batch was
+  exploratory and overlapped checks; only the isolated final batch supports timing claims.
+- Transparent smoke/glow/additive particles lack independent motion vectors; current-frame
+  reconstruction cannot recover hidden/offscreen color or exactly integrate curved paths.
+  Native Windows/Linux, every weapon/effect/resolution/frame rate and ordinary campaign play
+  are not tested. Old detached app-primary worktree remains parked after app cleanup refusal;
+  original checkout is active, with unrelated scratch files untouched.
+
 
 ## Advanced weapon blur surface stability (2026-10-27)
 

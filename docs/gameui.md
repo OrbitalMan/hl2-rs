@@ -1729,16 +1729,22 @@ behavior. `motion_blur` keeps its existing persisted boolean; `motion_blur_viewm
 defaults false, so old saves retain retail behavior. Advanced selects both flags. The
 retail `mat_motion_blur_enabled 0/1` command selects retail modes and clears the extension.
 
-Advanced enables motion-vector and depth prepasses only on the viewmodel camera,
+Advanced enables motion-vector and depth prepasses on the world and viewmodel cameras,
 using current/previous GPU skinning and alpha-tested Source silhouettes. The weapon
 renderer snapshots the already-rendered world before drawing the weapon. Motion is
 reduced in 4x4 then 8x8 blocks to 32-pixel tiles, then dilated at tile resolution over the
-bounded shutter footprint. The final pass gathers 16-96 samples according to streak
+bounded shutter footprint. The weapon pass gathers centered odd 17-97 samples according to streak
 length, with a 1.25-frame exposure (formerly 0.5), capped at 12% of screen UV distance
 (formerly 4%). Weapon depth supplies coverage, allowing the silhouette itself to spread
 onto the preserved background; stationary hand detail stays sharp. There is no previous
 colour-frame accumulation or persistent trail. Reconstruction precedes bloom/HUD and
-retail world-camera blur remains independent.
+retail Enabled world-camera blur remains unchanged. Advanced instead reconstructs world
+camera motion and opaque/masked moving objects from the same prepass machinery, using
+17-257 centered samples, 1.25-frame exposure and the 12% cap. Reprojected depth separates
+camera motion from object motion; only relative object motion is expanded into neighboring
+tiles. Static background retains its own color unless an object actually contributes
+coverage. World reconstruction uses a cached current-frame copy, without the weapon
+background snapshot. Transparent smoke/glow sprites have no independent motion vectors.
 
 History warms for two rendered frames after activation, weapon changes, map changes,
 pause, holstering, lens/framing changes or discontinuous time. Disabled/retail Enabled,

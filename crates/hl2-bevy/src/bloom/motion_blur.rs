@@ -67,7 +67,10 @@ pub fn update(
         With<FlyCamera>,
     >,
 ) {
-    let enabled = ui.is_some_and(|ui| ui.source.config.video.advanced.motion_blur);
+    let enabled = ui.is_some_and(|ui| {
+        let a = &ui.source.config.video.advanced;
+        a.motion_blur && !a.motion_blur_viewmodel
+    });
     let Ok((camera, transform, projection, current)) = cameras.single_mut() else {
         return;
     };

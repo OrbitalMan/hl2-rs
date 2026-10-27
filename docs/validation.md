@@ -1,5 +1,60 @@
 # Local validation — 2026-10-05
 
+## Advanced world/projectile reconstruction (2026-10-27)
+
+Baseline a8a050b uses camera-only retail world blur even in Advanced; a still camera gives
+projectile models no independent blur. The new world path shares cached reconstruction
+plumbing with the weapon path. Relative object motion comes from depth reprojection;
+camera gathers use odd 17-257 densely spaced samples, and dynamic gathers extend moving
+opaque/masked silhouettes while rejecting objects behind a nearer stationary surface.
+Transparent smoke/glow/additive sprites do not supply independent motion vectors.
+
+The owned isolated/muted GPU probe is `NO_BUILD=1 python3 scripts/checks/check_world_blur.py`.
+Generated fixtures reuse existing grenade/RPG/bugbait inputs and recorded lamp coordinates.
+It asserts live projectile state, current poses, no render errors, actual camera/object
+motion at no AA/4x AA, expanded silhouettes, and absence of the Advanced world path in
+Disabled/retail Enabled. Projectile error-color counts are restricted to the projected
+projectile neighborhood, avoiding unrelated moving actors. Normal and diagnostic bursts
+are retained in artifacts/advanced-world-blur/runs. Shader probes restore the copied shader
+in finally; the owned installation and user config are untouched.
+
+Initial probes find 1,431/1,492 moving grenade pixels, 17/13 missile pixels and 563/591
+bugbait pixels at no AA/4x AA. Silhouette probes find 4,936/46/214 surrounding pixels for
+grenade/missile/bugbait. These are GPU-path evidence, not native-image fidelity or proof
+of every projectile/frame rate. Normal captures were inspected qualitatively; different
+live bursts are not exact pose/history-aligned before/after pixel comparisons.
+
+Rejected first composite: averaging static background along an object's ray smeared a
+neighborhood of scenery. Static background now keeps its own color except for actual
+foreground coverage; only moving center surfaces estimate hidden background from samples.
+Rejected world-prepass depth hypothesis: plaza stippling also exists with blur/prepasses
+off, so a speculative depth-bias experiment was removed. Initial Clippy type-complexity
+failure was fixed with the shared view-query alias. A later turn probe found sky pixels
+classified as relative object motion; zero-depth pixels now use camera-only motion and are
+excluded from object tiles. MSAA samples subtract their own depth-dependent camera motion
+before averaging; using the nearest sample depth for all samples falsely marked static
+edges as object motion. The superseded probe batch was stopped before completion.
+Reprojection now consumes the same PreviousViewData as Bevy's prepass. Persistent per-view
+textures are owned directly: Bevy's one-frame texture pool cannot safely reserve retained
+textures for independently activated cameras. No third-party changes were made.
+
+Existing `viewmodel_motion_blur coverage` and standalone weapon-surface probes preserve
+crowbar trails and slow pistol/switch ownership. Final local validation passes (1,127 Rust
+tests, 92 ignored, 13 Python helpers,
+architecture, strict Clippy/fmt), as does Windows-target Clippy. The full owned world batch
+passes; the final affected MSAA, pause and normal lamp/turn cases are rerun separately
+(final-extra.log), with at most 254 relative-motion pixels in the camera-only MSAA case
+instead of the earlier sky-sized classification. The standalone weapon-surface suite passes
+all eight animation/AA combinations with zero borrowed-motion or lost-center pixels.
+Normal lamp and projectile captures inspected. Final package executable and all ten shader
+hashes match metadata and the tested copies. Native Windows/Linux execution, native visual
+comparison, all frame rates/resolutions, arbitrary transparent effects and ordinary campaign play are **not tested**.
+Performance evidence is in docs/performance.md. The old detached worktree remains parked:
+archival was rejected because the app identifies it as this chat's primary checkout;
+attaching the original checkout was rejected because it is not app-managed. Work continued
+in the original hl2-ui checkout without changing unrelated scratch files.
+
+
 ## Advanced weapon blur surface stability (2026-10-27)
 
 The owner reports blinking/twitching on pistol and weapon-change animations in Advanced.

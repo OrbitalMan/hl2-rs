@@ -77,6 +77,7 @@ pub(super) fn update(
         }
         let blur = WeaponBlur {
             max: if ready { 0.12 } else { 0. },
+            world: false,
         };
         if current != Some(&blur) {
             commands
@@ -105,7 +106,10 @@ mod tests {
                 ViewmodelCamera,
                 Transform::IDENTITY,
                 Projection::default(),
-                WeaponBlur { max: 0.12 },
+                WeaponBlur {
+                    max: 0.12,
+                    world: false,
+                },
                 MotionVectorPrepass,
                 DepthPrepass,
             ))

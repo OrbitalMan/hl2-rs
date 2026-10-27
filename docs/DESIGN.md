@@ -1,5 +1,19 @@
 # Design
 
+## Advanced world and projectile blur (2026-10-27)
+
+Reuse the Advanced reconstruction backend for the world camera, with its own lifecycle.
+Enable depth/motion prepasses only in Advanced gameplay, warm after discontinuities, and
+keep Disabled/Enabled on their existing paths. Use the prepass's PreviousViewData and reproject depth to separate camera motion
+from object motion; reduce relative object motion for silhouette expansion. Use dense,
+centered camera gathers and depth-aware moving-surface gathers, with no color history.
+World reconstruction must use the rendered world rather than the weapon-only background
+snapshot; sky has camera-only motion. Own persistent textures per view rather than borrowing
+from a one-frame pool. Cache GPU resources; skip static pixels and all option-off work. Transparent
+particles lack motion vectors and remain an explicit limitation. Validate model projectiles,
+fast turns and bright lamps with packaged GPU probes/captures, check weapon regressions,
+measure paired timings, run local/Windows-target checks and commit the bounded checkpoint.
+
 ## Advanced weapon blur flicker (2026-10-27)
 
 Work in the isolated hl2-ui checkout while chapter-selection work proceeds separately.

@@ -1,4 +1,4 @@
-//! Silhouette motion reconstruction for the optional Advanced weapon blur.
+//! Shared Advanced motion reconstruction for world and weapon cameras.
 use bevy::{
     core_pipeline::{
         FullscreenShader,
@@ -35,6 +35,7 @@ mod prepare;
 #[derive(Component, Clone, Copy, PartialEq, ExtractComponent)]
 pub(super) struct WeaponBlur {
     pub max: f32,
+    pub world: bool,
 }
 
 pub(super) struct WeaponBlurPlugin;
@@ -81,6 +82,7 @@ struct Pipelines {
 #[derive(Clone, Copy, Default, ShaderType)]
 struct Data {
     params: bevy::math::Vec4,
+    reprojection: bevy::math::Mat4,
 }
 
 fn motion_binding(
@@ -107,7 +109,11 @@ fn init(
             "weapon_motion_reduce_raw",
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::FRAGMENT,
-                (motion_binding(msaa, float),),
+                (
+                    motion_binding(msaa, float),
+                    motion_binding(msaa, TextureSampleType::Depth),
+                    uniform_buffer::<Data>(false),
+                ),
             ),
         )
     });
@@ -155,6 +161,7 @@ fn pipeline(
     entry: &'static str,
     format: TextureFormat,
     samples: u32,
+    world: bool,
 ) -> CachedRenderPipelineId {
     let msaa = usize::from(samples > 1);
     let layout = match entry {
@@ -170,6 +177,9 @@ fn pipeline(
             shader: p.shader.clone(),
             shader_defs: {
                 let mut defs = Vec::new();
+                if world {
+                    defs.push("WORLD_RECONSTRUCTION".into());
+                }
                 if msaa == 1 {
                     defs.push("MULTISAMPLED".into());
                 }
@@ -200,6 +210,7 @@ struct Textures {
     background: CachedTexture,
     frame: CachedTexture,
     reduced: [CachedTexture; 3],
+    world: bool,
 }
 
 #[derive(Component)]
@@ -211,7 +222,7 @@ struct Prepared {
 
 fn snapshot(view: ViewQuery<(&ViewTarget, &Textures, &WeaponBlur)>, mut ctx: RenderContext) {
     let (target, textures, blur) = view.into_inner();
-    if blur.max == 0. {
+    if blur.max == 0. || blur.world {
         return;
     }
     ctx.command_encoder().copy_texture_to_texture(
@@ -297,7 +308,14 @@ fn reconstruct(
         occlusion_query_set: None,
         multiview_mask: None,
     });
-    let span = diagnostics.pass_span(&mut pass, "viewmodel_animation_blur");
+    let span = diagnostics.pass_span(
+        &mut pass,
+        if blur.world {
+            "world_motion_blur"
+        } else {
+            "viewmodel_animation_blur"
+        },
+    );
     pass.set_render_pipeline(
         cache
             .get_render_pipeline(prepared.pipelines[3])

@@ -1,5 +1,50 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: Advanced world and projectile motion blur
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Advanced now shares the reconstruction backend between world and weapon
+cameras. World depth/motion vectors drive independent moving-model streaks; camera turns
+use centered odd 17-257 taps, 1.25-frame exposure and 12% reach. Reprojection separates
+camera/object motion; sky is camera-only, and MSAA subtracts camera motion per depth sample.
+World silhouettes extend onto stationary scenery with a foreground-depth guard. The world
+uses one persistent color copy and three reduced motion fields, without a background
+snapshot. Persistent textures are owned per view instead of retained from a one-frame pool.
+The existing strong weapon filter remains 17-97 taps; Disabled/Enabled keep retail behavior.
+World state warms/resets around activation, pause/loading, map/lens changes and discontinuities.
+README capability prose is updated in place; no feature history or chapter UI changes.
+
+**Why:** The owner asked whether grenades, rockets and bugbait blur during flight, and
+reported sparse bright afterimages on abrupt turns. Previously world blur had only camera
+motion, even in Advanced, with retail's fixed 7/11/15 samples. Models moving under a still
+camera therefore had no independent filter. Bevy's prepass covers opaque/masked geometry;
+transparent particle motion remains outside this implementation.
+
+**Tested how:** Local validation passes: 1,127 Rust tests/92 ignored, 13 Python helpers,
+architecture, strict Clippy/fmt and Windows-target Clippy. Owned isolated GPU probes cover
+frag grenades, RPG missiles, bugbait, plaza turns and canal fluorescent lamps at no AA/4x AA,
+silhouette extension and Disabled/retail/pause controls. Existing weapon regressions retain
+slow-surface ownership and crowbar trails. Release packaging and hashes are checked. Exact
+commands and limitations are recorded in docs/validation.md; paired timings and CPU spans
+are recorded in docs/performance.md.
+
+**Result:** Moving projectile models and dense Advanced camera blur are implemented and
+GPU-exercised. Paired prior/current scene means: 19.694/19.638 ms still, 19.510/19.258 ms
+during repeated turns; no measured scene regression or general speedup claim. First-pass
+scenery smearing, sky misclassification and mixed-MSAA-depth classification were corrected during inspection. A speculative depth-bias change was
+removed because the observed plaza stippling also exists with blur off. Initial overlapping
+measurements are exploratory; only the isolated final batch is used for timing claims.
+
+**Still broken or not tested:** Transparent smoke/glow particles have no independent blur;
+this screen-space approximation cannot reconstruct hidden/offscreen detail or curved motion
+exactly. Native Windows/Linux execution, native visual parity, all resolutions/frame rates
+and ordinary campaign play are not tested.
+
+**Next:** Owner ordinary-play feedback on fast lamp sweeps, projectile launches and weapon
+switches; treat particle-vector support as separate work.
+
+
 ## 2026-10-27 Checkpoint: Advanced weapon blur surface stability
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
