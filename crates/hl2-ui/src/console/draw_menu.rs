@@ -73,4 +73,207 @@ impl Console {
             );
         }
     }
+
+    pub(super) fn draw_menu_titles(
+        &self,
+        geometry: MenuGeometry,
+        alpha_mult: f32,
+        base_focus: f32,
+    ) {
+        let title_color = Color::new(1., 1., 1., alpha_mult);
+        let sub_color = if alpha_mult >= 1.0 - 1e-4 {
+            Color::from_rgba(255, 255, 255, 200)
+        } else {
+            Color::new(1., 1., 1., (200.0 / 255.0) * alpha_mult)
+        };
+        let title_outline = if base_focus >= 1.0 - 1e-4 {
+            TextOutline::DEFAULT
+        } else if base_focus > 1e-4 {
+            TextOutline::new(
+                Color::new(
+                    TextOutline::DEFAULT.color.r,
+                    TextOutline::DEFAULT.color.g,
+                    TextOutline::DEFAULT.color.b,
+                    TextOutline::DEFAULT.color.a * base_focus,
+                ),
+                1.0,
+            )
+        } else {
+            TextOutline::NONE
+        };
+        let sub_outline = if base_focus >= 1.0 - 1e-4 {
+            TextOutline::DEFAULT
+        } else if base_focus > 1e-4 {
+            TextOutline::new(
+                Color::new(
+                    TextOutline::DEFAULT.color.r,
+                    TextOutline::DEFAULT.color.g,
+                    TextOutline::DEFAULT.color.b,
+                    TextOutline::DEFAULT.color.a * base_focus,
+                ),
+                1.0,
+            )
+        } else {
+            TextOutline::NONE
+        };
+
+        if let Some(face) = &self.title_face {
+            self.draw_face_menu_titles(
+                face,
+                geometry,
+                title_color,
+                sub_color,
+                title_outline,
+                sub_outline,
+            );
+        } else {
+            self.draw_fallback_menu_titles(
+                geometry,
+                title_color,
+                sub_color,
+                title_outline,
+                sub_outline,
+            );
+        }
+    }
+
+    fn draw_face_menu_titles(
+        &self,
+        face: &fontdue::Font,
+        geometry: MenuGeometry,
+        title_color: Color,
+        sub_color: Color,
+        title_outline: TextOutline,
+        sub_outline: TextOutline,
+    ) {
+        let title = self.current_title();
+        let em = geometry.title_tall * self.title_metrics.em_per_cell;
+        for (line_idx, line) in title.lines().enumerate() {
+            let mut pen = match line_idx {
+                0 => geometry.title,
+                1 => geometry.title2,
+                _ => {
+                    geometry.title2
+                        + vec2(
+                            0.,
+                            (line_idx - 1) as f32 * (geometry.title2.y - geometry.title.y).max(1.),
+                        )
+                }
+            };
+            if line_idx == 0 {
+                let mut chars = Vec::with_capacity(line.len());
+                for character in line.chars() {
+                    chars.push((character, pen));
+                    // GDI supplies integer ABC advances. Fractional accumulation visibly widens this logo.
+                    pen.x += face.metrics(character, em).advance_width.round();
+                }
+                if title_outline.is_visible() {
+                    for &(character, char_pen) in &chars {
+                        draw_cell_text_outlined(
+                            &character.to_string(),
+                            char_pen,
+                            geometry.title_tall,
+                            self.title_font.as_ref(),
+                            self.title_metrics,
+                            Color::new(0., 0., 0., 0.),
+                            title_outline,
+                        );
+                    }
+                }
+                for &(character, char_pen) in &chars {
+                    draw_cell_text_outlined(
+                        &character.to_string(),
+                        char_pen,
+                        geometry.title_tall,
+                        self.title_font.as_ref(),
+                        self.title_metrics,
+                        title_color,
+                        TextOutline::NONE,
+                    );
+                }
+            } else {
+                // Subtitle line (e.g. episode or lost coast submenu subtitle).
+                let is_lostcoast =
+                    line.to_ascii_lowercase().contains("lost coast") || line.contains("lost coasT");
+                if is_lostcoast && self.lostcoast_title_font.is_some() {
+                    draw_cell_text_outlined(
+                        line,
+                        pen,
+                        geometry.title_tall,
+                        self.lostcoast_title_font.as_ref(),
+                        self.lostcoast_title_metrics,
+                        sub_color,
+                        sub_outline,
+                    );
+                } else if self.title_font_can_render(line) {
+                    draw_cell_text_outlined(
+                        line,
+                        pen,
+                        geometry.title_tall,
+                        self.title_font.as_ref(),
+                        self.title_metrics,
+                        sub_color,
+                        sub_outline,
+                    );
+                } else {
+                    let sub_tall = (geometry.title_tall * 0.55).round().max(14.);
+                    draw_cell_text_outlined(
+                        line,
+                        pen,
+                        sub_tall,
+                        self.menu_font.as_ref(),
+                        self.menu_metrics,
+                        sub_color,
+                        sub_outline,
+                    );
+                }
+            }
+        }
+    }
+
+    fn draw_fallback_menu_titles(
+        &self,
+        geometry: MenuGeometry,
+        title_color: Color,
+        sub_color: Color,
+        title_outline: TextOutline,
+        sub_outline: TextOutline,
+    ) {
+        let title = self.current_title();
+        for (line_idx, line) in title.lines().enumerate() {
+            let pen = match line_idx {
+                0 => geometry.title,
+                1 => geometry.title2,
+                _ => {
+                    geometry.title2
+                        + vec2(
+                            0.,
+                            (line_idx - 1) as f32 * (geometry.title2.y - geometry.title.y).max(1.),
+                        )
+                }
+            };
+            let tall = if line_idx == 0 {
+                geometry.title_tall
+            } else {
+                (geometry.title_tall * 0.55).round().max(14.)
+            };
+            draw_cell_text_outlined(
+                line,
+                pen,
+                tall,
+                self.menu_font.as_ref(),
+                self.menu_metrics,
+                if line_idx == 0 {
+                    title_color
+                } else {
+                    sub_color
+                },
+                if line_idx == 0 {
+                    title_outline
+                } else {
+                    sub_outline
+                },
+            );
+        }
+    }
 }

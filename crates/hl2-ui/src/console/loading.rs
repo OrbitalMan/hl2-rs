@@ -30,6 +30,8 @@ impl Console {
         self.loading_background = None;
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new_background(map));
         self.loading_progress.reset();
+        self.base = Mode::MainMenu;
+        self.sync_mode();
     }
 
     /// Draws the full-screen gameplay loading screen (pre-blurred chapter background texture and
@@ -55,7 +57,7 @@ impl Console {
             self.draw_loading();
             return true;
         }
-        if self.mode == Mode::Gameplay {
+        if self.mode == Mode::Gameplay && !self.is_background_loading() {
             self.draw_loading();
             return true;
         }

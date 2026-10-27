@@ -16,7 +16,7 @@ pub(crate) fn target_map(options: &crate::Options) -> Result<StartupTarget> {
     let base_game = source_assets::install::BASE_GAME;
     let config = hl2_ui::config::Config::load_or_default();
     if let Some(map) = options.map.as_ref() {
-        let is_bg = options.main_menu || map.contains("background");
+        let is_bg = options.main_menu;
         let game = source_assets::install::game_for_map(&options.game, map, None)
             .unwrap_or_else(|| base_game.to_owned());
         return Ok(StartupTarget {
@@ -61,7 +61,7 @@ pub(crate) fn target_map(options: &crate::Options) -> Result<StartupTarget> {
 /// before asynchronous map loading begins in the worker thread.
 pub(crate) fn load_stub(root: &std::path::Path, game: &str) -> Result<crate::assets::LoadedMap> {
     let vfs = Arc::new(
-        source_assets::vpk::Vfs::mount(root)
+        source_assets::vpk::Vfs::mount_game(root, game)
             .context("mount installed owned content for startup stub")?,
     );
     let canvas = source_ui::canvas::Canvas::default();
@@ -249,7 +249,7 @@ mod tests {
                 .unwrap();
         let bg_target = target_map(&bg_opt).unwrap();
         assert_eq!(bg_target.map, "background01");
-        assert!(bg_target.background);
+        assert!(!bg_target.background);
 
         let (menu_opt, _) = Options::parse_from(
             [

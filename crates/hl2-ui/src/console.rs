@@ -216,17 +216,6 @@ fn draw_cell_text_outlined(
     }
 }
 
-fn draw_cell_text(
-    _canvas: &Canvas,
-    value: &str,
-    origin: Vec2,
-    tall: f32,
-    font: Option<&FontFace>,
-    metrics: CellMetrics,
-    color: Color,
-) {
-    draw_cell_text_outlined(value, origin, tall, font, metrics, color, TextOutline::NONE);
-}
 fn text(
     _canvas: &Canvas,
     value: &str,
@@ -613,221 +602,61 @@ impl Console {
             })
     }
 
-    pub fn draw(&self, time: f64) {
-        if self.draw_video() {
-            return;
-        }
-        if self.draw_loading_screen() {
-            return;
-        }
-        // The windows (Options, the console) are drawn over the base, bottom to top.
-        let shown = self.base;
-        let menu_shown = shown == Mode::Pause || shown == Mode::MainMenu;
-        if menu_shown {
-            let menu_cat = if shown == Mode::Pause {
-                self.pause_menu.category()
-            } else {
-                self.main_menu.category()
-            };
-            let is_widescreen = self.canvas.width() / self.canvas.height().max(1.0) >= 1.6;
-            // The pre-blurred image of the upcoming background: the transition's target, else
-            // the loaded map, else the menu category's own background.
-            let upcoming = self.upcoming_background(menu_cat);
-            let bg_tex =
-                upcoming.and_then(|(game, map)| self.background_texture(game, map, is_widescreen));
-            if let Some(loading) = &self.loading_dialog {
-                if loading.is_background() {
-                    loading.draw_background_overlay(&self.canvas, bg_tex);
-                }
-            } else if self.background_transition.is_active() {
-                let (w, h) = (self.canvas.width(), self.canvas.height());
-                if let Some(tex) = bg_tex {
-                    crate::gameui::loading::draw_background_texture(&self.canvas, tex);
-                }
-                self.canvas.rectangle(
-                    0.,
-                    0.,
-                    w,
-                    h,
-                    crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP,
-                );
-            } else {
-                let dim_alpha = self.dim_overlay_alpha(time);
-                if dim_alpha > 0.001 {
-                    let (w, h) = (self.canvas.width(), self.canvas.height());
-                    self.canvas
-                        .rectangle(0., 0., w, h, Color::new(0., 0., 0., dim_alpha));
-                }
+    fn draw_menu_background(&self, shown: Mode, time: f64) {
+        let menu_cat = if shown == Mode::Pause {
+            self.pause_menu.category()
+        } else {
+            self.main_menu.category()
+        };
+        let is_widescreen = self.canvas.width() / self.canvas.height().max(1.0) >= 1.6;
+        let upcoming = self.upcoming_background(menu_cat);
+        let bg_tex =
+            upcoming.and_then(|(game, map)| self.background_texture(game, map, is_widescreen));
+        if let Some(loading) = &self.loading_dialog {
+            if loading.is_background() {
+                loading.draw_background_overlay(&self.canvas, bg_tex);
             }
+        } else if self.background_transition.is_active() {
+            let (w, h) = (self.canvas.width(), self.canvas.height());
+            if let Some(tex) = bg_tex {
+                crate::gameui::loading::draw_background_texture(&self.canvas, tex);
+            }
+            self.canvas.rectangle(
+                0.,
+                0.,
+                w,
+                h,
+                crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP,
+            );
+        } else {
+            let dim_alpha = self.dim_overlay_alpha(time);
+            if dim_alpha > 0.001 {
+                let (w, h) = (self.canvas.width(), self.canvas.height());
+                self.canvas
+                    .rectangle(0., 0., w, h, Color::new(0., 0., 0., dim_alpha));
+            }
+        }
+    }
+
+    pub fn draw(&self, time: f64) {
+        if self.draw_video() || self.draw_loading_screen() {
+            return;
+        }
+        let shown = self.base;
+        let menu_shown =
+            shown == Mode::Pause || shown == Mode::MainMenu || self.is_background_loading();
+        if menu_shown {
+            self.draw_menu_background(shown, time);
             if self.is_background_loading() {
                 self.draw_windows(time);
                 return;
             }
             let geometry = self.menu_layout.geometry_for(self.canvas_size());
-            let title = self.current_title();
             let base_focus = self.shell.windows.base_focus_amount(time);
             let unfocused_alpha = crate::tuning::unfocused_alpha_factor();
             let alpha_mult = unfocused_alpha + (1.0 - unfocused_alpha) * base_focus;
 
-            let title_color = Color::new(1., 1., 1., alpha_mult);
-            let sub_color = if alpha_mult >= 1.0 - 1e-4 {
-                Color::from_rgba(255, 255, 255, 200)
-            } else {
-                Color::new(1., 1., 1., (200.0 / 255.0) * alpha_mult)
-            };
-            let title_outline = if base_focus >= 1.0 - 1e-4 {
-                TextOutline::DEFAULT
-            } else if base_focus > 1e-4 {
-                TextOutline::new(
-                    Color::new(
-                        TextOutline::DEFAULT.color.r,
-                        TextOutline::DEFAULT.color.g,
-                        TextOutline::DEFAULT.color.b,
-                        TextOutline::DEFAULT.color.a * base_focus,
-                    ),
-                    1.0,
-                )
-            } else {
-                TextOutline::NONE
-            };
-            let sub_outline = if base_focus >= 1.0 - 1e-4 {
-                TextOutline::DEFAULT
-            } else if base_focus > 1e-4 {
-                TextOutline::new(
-                    Color::new(
-                        TextOutline::DEFAULT.color.r,
-                        TextOutline::DEFAULT.color.g,
-                        TextOutline::DEFAULT.color.b,
-                        TextOutline::DEFAULT.color.a * base_focus,
-                    ),
-                    1.0,
-                )
-            } else {
-                TextOutline::NONE
-            };
-
-            if let Some(face) = &self.title_face {
-                let em = geometry.title_tall * self.title_metrics.em_per_cell;
-                for (line_idx, line) in title.lines().enumerate() {
-                    let mut pen = match line_idx {
-                        0 => geometry.title,
-                        1 => geometry.title2,
-                        _ => {
-                            geometry.title2
-                                + vec2(
-                                    0.,
-                                    (line_idx - 1) as f32
-                                        * (geometry.title2.y - geometry.title.y).max(1.),
-                                )
-                        }
-                    };
-                    if line_idx == 0 {
-                        let mut chars = Vec::with_capacity(line.len());
-                        for character in line.chars() {
-                            chars.push((character, pen));
-                            // GDI supplies integer ABC advances. Fractional accumulation visibly widens this logo.
-                            pen.x += face.metrics(character, em).advance_width.round();
-                        }
-                        if title_outline.is_visible() {
-                            for &(character, char_pen) in &chars {
-                                draw_cell_text_outlined(
-                                    &character.to_string(),
-                                    char_pen,
-                                    geometry.title_tall,
-                                    self.title_font.as_ref(),
-                                    self.title_metrics,
-                                    Color::new(0., 0., 0., 0.),
-                                    title_outline,
-                                );
-                            }
-                        }
-                        for &(character, char_pen) in &chars {
-                            draw_cell_text(
-                                &self.canvas,
-                                &character.to_string(),
-                                char_pen,
-                                geometry.title_tall,
-                                self.title_font.as_ref(),
-                                self.title_metrics,
-                                title_color,
-                            );
-                        }
-                    } else {
-                        // Subtitle line (e.g. episode or lost coast submenu subtitle).
-                        let is_lostcoast = line.to_ascii_lowercase().contains("lost coast")
-                            || line.contains("lost coasT");
-                        if is_lostcoast && self.lostcoast_title_font.is_some() {
-                            draw_cell_text_outlined(
-                                line,
-                                pen,
-                                geometry.title_tall,
-                                self.lostcoast_title_font.as_ref(),
-                                self.lostcoast_title_metrics,
-                                sub_color,
-                                sub_outline,
-                            );
-                        } else if self.title_font_can_render(line) {
-                            draw_cell_text_outlined(
-                                line,
-                                pen,
-                                geometry.title_tall,
-                                self.title_font.as_ref(),
-                                self.title_metrics,
-                                sub_color,
-                                sub_outline,
-                            );
-                        } else {
-                            let sub_tall = (geometry.title_tall * 0.55).round().max(14.);
-                            draw_cell_text_outlined(
-                                line,
-                                pen,
-                                sub_tall,
-                                self.menu_font.as_ref(),
-                                self.menu_metrics,
-                                sub_color,
-                                sub_outline,
-                            );
-                        }
-                    }
-                }
-            } else {
-                for (line_idx, line) in title.lines().enumerate() {
-                    let pen = match line_idx {
-                        0 => geometry.title,
-                        1 => geometry.title2,
-                        _ => {
-                            geometry.title2
-                                + vec2(
-                                    0.,
-                                    (line_idx - 1) as f32
-                                        * (geometry.title2.y - geometry.title.y).max(1.),
-                                )
-                        }
-                    };
-                    let tall = if line_idx == 0 {
-                        geometry.title_tall
-                    } else {
-                        (geometry.title_tall * 0.55).round().max(14.)
-                    };
-                    draw_cell_text_outlined(
-                        line,
-                        pen,
-                        tall,
-                        self.menu_font.as_ref(),
-                        self.menu_metrics,
-                        if line_idx == 0 {
-                            title_color
-                        } else {
-                            sub_color
-                        },
-                        if line_idx == 0 {
-                            title_outline
-                        } else {
-                            sub_outline
-                        },
-                    );
-                }
-            }
+            self.draw_menu_titles(geometry, alpha_mult, base_focus);
             self.draw_menu_buttons(shown, geometry, alpha_mult, base_focus);
         }
         self.draw_windows(time);

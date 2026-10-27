@@ -1,5 +1,17 @@
 # STATUS
 
+## Chapter background presentation during background loading and unclipped QuickInfo crosshair hud (2026-10-27)
+
+- Fixed background map loading presentation: when launching the game into the main menu without a gameplay map, the chapter's pre-blurred background texture (`materials/console/<background>.vtf` / `_widescreen.vtf`) is now immediately rendered alongside the `#GameUI_Loading` tip plaque in the bottom-right corner rather than showing a plain black screen.
+- Traced root causes: `start_background_loading` retained `Mode::Gameplay` which short-circuited `draw_loading_screen` to only draw the plaque, skipping background texture rendering; `Console::draw` menu background check did not treat background loading as an active menu display; and `load_stub` in `hl2-bevy` mounted base `hl2` rather than the target expansion's mounted game paths via `Vfs::mount_game`.
+- Fixed QuickInfo HUD crosshair clipping: in `source-ui::font`, updated `FontFace::draw_cropped` to crop glyphs using normalized vertical fractions `[0.0, 1.0]` of the rendered glyph texture height instead of subtracting absolute font size from cap height (`cell_height + cap) * 0.5`). Previously, `HL2crosshairs.ttf` metrics (`unitsPerEm = 1000`, `winAscent = 573`, `capHeight = 700`) shifted `glyph.y` down by ~11.1% of the character height, clipping off the bottom pixels of health and ammo brackets `( + )`.
+- Updated `QuickInfoHud::progress` to pass normalized vertical fractions (`vec2(0., p)` for empty and `vec2(p, 1.)` for full), matching Source SDK `CHudTexture::DrawSelfCropped` UV / vertex lerp cropping and preserving full bottom bracket extents.
+- In `hl2-bevy::startup`, ensured `target_map` sets `background = true` only when `--main-menu` is explicitly requested, allowing test fixtures specifying `--map <name>` without `--main-menu` to run as gameplay levels.
+- Refactored `Console::draw` in `crates/hl2-ui/src/console.rs` (reducing production lines from 219 to 21 lines), modularizing `draw_menu_buttons` and `draw_menu_titles` into `draw_menu.rs`, tightening `architecture-baseline.json`.
+- Corrected Play button pointer coordinates in `test-inputs/bevy-chapters-lostcoast.json` (`[640, 508]`), ensuring `chapter_selection` replay test clicks Play in the 600-unit layout.
+- `validate.sh`, `check_windows.sh`, and packaged replay checks (`chapter_selection`, `power_hud`, `hud`, `hud_aspect`, `submenus`, `return_menu`, `chapter_menu`) pass with 0 failures.
+
+
 ## Asynchronous startup map loading with chapter background and progress UI verified (2026-10-27)
 
 - Fixed initial loading sequence when launching without `--map`: immediately presents the chapter's pre-blurred background (`materials/console/<background>.vtf` / `_widescreen.vtf`) with the localized corner loading plaque (`#GameUI_Loading`) and occluded main menu buttons/titles until background level loading completes.

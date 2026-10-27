@@ -304,6 +304,8 @@ impl FontFace {
     pub fn draw_baseline(&self, value: &str, origin: Vec2, em: f32, scale: f32, color: Color) {
         self.draw_baseline_outlined(value, origin, em, scale, color, TextOutline::NONE);
     }
+    /// Draws `value` vertically cropped between normalized fractions `fraction.x` and `fraction.y`
+    /// (both in `[0.0, 1.0]`) of the glyph's bitmap height.
     pub fn draw_cropped(
         &self,
         value: &str,
@@ -311,7 +313,7 @@ impl FontFace {
         size: f32,
         effects: (u16, u16),
         color: Color,
-        rows: Vec2,
+        fraction: Vec2,
     ) {
         let (blur, scanlines) = effects;
         let size = size.round().clamp(1., 1024.) as u16;
@@ -319,8 +321,9 @@ impl FontFace {
         for c in value.chars() {
             let glyph = self.glyph(c, size, blur.min(64), scanlines);
             if let Some(texture) = &glyph.texture {
-                let first = (rows.x - glyph.y).clamp(0., texture.height());
-                let last = (rows.y - glyph.y).clamp(0., texture.height());
+                let th = texture.height();
+                let first = (fraction.x.clamp(0., 1.) * th).round();
+                let last = (fraction.y.clamp(0., 1.) * th).round();
                 if last > first {
                     draw_texture_ex(
                         &self.canvas,
@@ -414,5 +417,38 @@ mod tests {
         let fg_count = quads.iter().filter(|q| q.color == WHITE).count();
         assert_eq!(outline_count, 8);
         assert_eq!(fg_count, 1);
+    }
+
+    #[test]
+    fn font_draw_cropped_uses_normalized_fractions_without_bottom_truncation() {
+        let canvas = Canvas::default();
+        let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");
+        let font = FontFace::load(font_bytes, canvas.clone()).expect("load font");
+
+        // Full vertical span (0.0 to 1.0) must render the full glyph height
+        font.draw_cropped("A", vec2(10., 20.), 16., (0, 0), WHITE, vec2(0., 1.));
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1);
+        let quad = &quads[0];
+        let th = quad.texture.as_ref().unwrap().height();
+        assert_eq!(quad.source.y, 0.);
+        assert_eq!(quad.source.h, th);
+        assert_eq!(quad.destination.h, th);
+
+        // Half vertical span (0.0 to 0.5) must render top half
+        font.draw_cropped("A", vec2(10., 20.), 16., (0, 0), WHITE, vec2(0., 0.5));
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].source.y, 0.);
+        assert_eq!(quads[0].source.h, (0.5 * th).round());
+        assert_eq!(quads[0].destination.h, (0.5 * th).round());
+
+        // Bottom half (0.5 to 1.0) must render bottom half through th
+        font.draw_cropped("A", vec2(10., 20.), 16., (0, 0), WHITE, vec2(0.5, 1.));
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].source.y, (0.5 * th).round());
+        assert_eq!(quads[0].source.h, th - (0.5 * th).round());
+        assert_eq!(quads[0].destination.h, th - (0.5 * th).round());
     }
 }

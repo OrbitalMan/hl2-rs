@@ -559,3 +559,30 @@ fn a_normal_chapter_start_clears_commentary_and_cheats() {
     assert!(!console.config.gameplay.commentary);
     assert!(!console.cheats);
 }
+
+#[test]
+fn start_background_loading_sets_main_menu_mode_and_draws_blurred_background() {
+    let mut console = Console::default();
+    console.canvas.resize(1920., 1080.);
+    assert_eq!(console.mode(), Mode::Gameplay);
+
+    console.start_background_loading("hl2", "background01");
+    assert_eq!(console.mode(), Mode::MainMenu);
+    assert!(console.is_background_loading());
+
+    console.draw(0.0);
+    let quads = console.canvas.drain();
+    let backdrop_quads: Vec<_> = quads
+        .iter()
+        .filter(|q| {
+            q.destination.w == 1920.
+                && q.destination.h == 1080.
+                && q.color == crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP
+        })
+        .collect();
+    assert_eq!(
+        backdrop_quads.len(),
+        1,
+        "backdrop overlay quad must be drawn during background loading from default gameplay mode"
+    );
+}

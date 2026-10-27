@@ -1,5 +1,44 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: chapter background presentation during background loading and unclipped QuickInfo hud
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+
+**Changed:** Resolved black screen when loading background maps into the main menu, and resolved vertical clipping on QuickInfo crosshair health/ammo arc brackets `( + )`:
+- Root-cause 1 (black background on background map load):
+  - In `hl2-ui::console::loading::start_background_loading`, `self.base` and `self.mode` remained `Mode::Gameplay`, which caused `draw_loading_screen` to short-circuit via `if self.mode == Mode::Gameplay` and only render the corner loading plaque (`#GameUI_Loading`), skipping chapter background texture rendering.
+  - In `hl2-ui::console::draw`, the `menu_shown` check only considered `shown == Mode::Pause || shown == Mode::MainMenu`, failing to draw the background image when loading a background map into the menu.
+  - In `hl2-bevy::startup::load_stub`, stub initialization mounted `source_assets::vpk::Vfs::mount(root)` (mounting only base `hl2`), failing to resolve expansion-specific chapter background VTFs.
+- Fix 1:
+  - Updated `start_background_loading` in `crates/hl2-ui/src/console/loading.rs` to set `self.base = Mode::MainMenu; self.sync_mode();`.
+  - Updated `draw_loading_screen` to guard gameplay plaque rendering on `self.mode == Mode::Gameplay && !self.is_background_loading()`.
+  - Extracted `draw_menu_background` helper in `crates/hl2-ui/src/console.rs` and included `self.is_background_loading()` in `menu_shown`, ensuring the active chapter's pre-blurred background texture is presented under the plaque.
+  - Updated `load_stub` in `crates/hl2-bevy/src/startup.rs` to use `source_assets::vpk::Vfs::mount_game(root, game)`.
+  - Added unit test `start_background_loading_sets_main_menu_mode_and_draws_blurred_background` in `crates/hl2-ui/src/console/tests/chapters.rs`.
+- Root-cause 2 (QuickInfo crosshair health and ammo arc brackets clipped from below):
+  - In `source-ui::font::FontFace::draw_cropped`, character cropping was calculated relative to cell bounds using absolute row pixel coordinates: `let last = (rows.y - glyph.y).clamp(0., texture.height())`.
+  - `HL2crosshairs.ttf` metrics (`unitsPerEm = 1000`, `winAscent = 573`, `capHeight = 700`) resulted in an ascent calculation `(cell_height + cap) * 0.5 = 0.6365`. Because `glyph.y = ascent - ymin - g_height`, `glyph.y` was positive (~3.1px at 28pt to ~12.5px at high resolution).
+  - Passing `rows = vec2(offset, height)` with `height = font.size().round()` resulted in `last = (height - glyph.y).clamp(0., texture.height())`, clamping the bottom `glyph.y` pixels (~11.1% of the glyph) off every rendered arc character (`[`, `]`, `{`, `}`).
+- Fix 2:
+  - Updated `FontFace::draw_cropped` in `crates/source-ui/src/font.rs` to accept normalized vertical crop fractions `fraction: Vec2` in `[0.0, 1.0]` of `texture.height()`, directly matching Source SDK `CHudTexture::DrawSelfCropped` UV / vertex lerp math.
+  - Added unit test `font_draw_cropped_uses_normalized_fractions_without_bottom_truncation` in `crates/source-ui/src/font.rs`.
+  - Updated `QuickInfoHud::progress` in `crates/hl2-ui/src/hud.rs` to pass `vec2(0., p)` for empty and `vec2(p, 1.)` for full progress, preserving the full bottom extent of health and ammo brackets without clipping.
+- In `hl2-bevy::startup::target_map`, set `background = options.main_menu` for explicit maps, ensuring test fixture maps specifying `--map` without `--main-menu` (e.g. `check_power_hud` running `--map ep2_background01`) run as gameplay simulations.
+- Refactored `Console::draw` in `crates/hl2-ui/src/console.rs` (reducing production lines from 219 to 21 lines), modularizing `draw_menu_buttons` and `draw_menu_titles` (split into `draw_face_menu_titles` and `draw_fallback_menu_titles`, all <= 80 lines) in `draw_menu.rs`. Removed unused `draw_cell_text`.
+- Tightened `architecture-baseline.json` (`Console::draw` removed from long functions list, `hud.rs` file size reduced).
+- Corrected Play button pointer coordinates in `test-inputs/bevy-chapters-lostcoast.json` (`[640, 508]`), fixing `chapter_selection` replay test.
+
+**Why:** Retail Half-Life 2 displays the chapter's pre-blurred background texture with the `#GameUI_Loading` tip plaque in the bottom-right corner when launching into the main menu without a map. On gameplay maps, the QuickInfo health and ammo arc brackets surround the crosshair symmetrically without clipping at the bottom; cropping font textures by absolute height with font cell metrics caused a 11% bottom clipping bug.
+
+**Tested how:** `scripts/checks/validate.sh` (architecture guardrails, 13 Python helper tests, all 154 `hl2-bevy` tests, 124 `source-ui` tests, all `hl2-ui` tests, doc-tests, strict Clippy, `cargo fmt --check`), `scripts/checks/check_windows.sh` (Windows cross-compilation clippy), unit tests `font_draw_cropped_uses_normalized_fractions_without_bottom_truncation` and `start_background_loading_sets_main_menu_mode_and_draws_blurred_background`, and packaged replay checks (`chapter_selection`, `power_hud`, `hud`, `hud_aspect`, `submenus`, `return_menu`, `chapter_menu`).
+
+**Result:** Clean presentation of the chapter's pre-blurred background with loading plaque on startup into the menu; full-height unclipped QuickInfo crosshair arcs in gameplay; all tests and architecture checks pass.
+
+**Still broken or not tested:** Windows/Linux native platform runtime execution not tested in this session.
+
+**Next:** Await owner instructions.
+
+
 ## 2026-10-27 Checkpoint: asynchronous startup map loading with chapter background and progress UI
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

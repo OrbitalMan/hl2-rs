@@ -187,7 +187,7 @@
   "crates/hl2-simulation/src/sounds.rs": 1208,
   "crates/hl2-ui/src/closecaption.rs": 1182,
   "crates/hl2-ui/src/gameui/options.rs": 2694,
-  "crates/hl2-ui/src/hud.rs": 2047,
+  "crates/hl2-ui/src/hud.rs": 2044,
   "crates/source-assets/src/models.rs": 1426,
   "crates/source-ui/src/console/panel.rs": 1105,
   "crates/source-ui/src/widgets.rs": 2381
@@ -432,9 +432,6 @@
   ],
   "crates/hl2-ui/src/config.rs::migrate": [
    123
-  ],
-  "crates/hl2-ui/src/console.rs::draw": [
-   219
   ],
   "crates/hl2-ui/src/gameui/chapters.rs::assign": [
    102

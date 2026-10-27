@@ -982,12 +982,9 @@ impl QuickInfoHud {
         })
     }
     fn progress(&self, full: &str, empty: &str, origin: Vec2, percentage: f32, color: Color) {
-        let height = self.font.size().round();
-        let offset = (height * percentage.clamp(0., 1.)).trunc();
-        self.font
-            .draw_cropped(empty, origin, vec2(0., offset), color);
-        self.font
-            .draw_cropped(full, origin, vec2(offset, height), color);
+        let p = percentage.clamp(0., 1.);
+        (p > 0.).then(|| self.font.draw_cropped(empty, origin, vec2(0., p), color));
+        (p < 1.).then(|| self.font.draw_cropped(full, origin, vec2(p, 1.), color));
     }
     fn draw(&self, inv: &Inventory, weapons: &BTreeMap<String, Weapon>, time: f64) {
         let Some(weapon) = weapons.get(&inv.active) else {

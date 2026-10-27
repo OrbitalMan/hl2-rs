@@ -92,9 +92,9 @@ impl HudFont {
     pub(super) fn width(&self, value: &str) -> f32 {
         self.face.width(value, self.size())
     }
-    pub(super) fn draw_cropped(&self, value: &str, origin: Vec2, rows: Vec2, color: Color) {
+    pub(super) fn draw_cropped(&self, value: &str, origin: Vec2, fraction: Vec2, color: Color) {
         self.face
-            .draw_cropped(value, origin, self.size(), self.effects(), color, rows);
+            .draw_cropped(value, origin, self.size(), self.effects(), color, fraction);
     }
 }
 
