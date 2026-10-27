@@ -1,5 +1,16 @@
 # Design
 
+## Horizontal HUD symbol centering follow-up (2026-10-27)
+
+- Reproduce residual left drift with installed glyph bearings and emitted bounds.
+- Preserve authored arc spacing, translate the pair by its actual horizontal midpoint,
+  and center the portable crosshair by ink bounds rather than advance width.
+- Compare retained accepted native 720p/1080p captures. Use the installed desktop
+  QuickInfo font definition with our character-cell rasterizer; do not apply macOS
+  backend-specific font sizes as Windows cell sizes or alter global resource conditions.
+- Assert both axes, retail size/spacing and equal outer margins across viewport/aspect/state cases;
+  compare packaged captures and timings, run workspace and Windows-target checks.
+
 ## Quick-info arc alignment and HUD layout coverage (2026-10-27)
 
 - Reproduce the vertical offset using actual installed glyphs and emitted canvas quads.

@@ -78,7 +78,7 @@ impl WeaponHud {
         );
         self.crosshairs.draw(
             character,
-            (self.canvas.width() - self.crosshairs.width(character)) * 0.5,
+            self.canvas.width() * 0.5 - bounds.center().x,
             self.canvas.height() * 0.5 - bounds.center().y,
             self.crosshair_color,
         );

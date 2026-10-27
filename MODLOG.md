@@ -1,5 +1,43 @@
 # MODLOG
 
+## 2026-10-27 — Match retail quick-info size and horizontal alignment
+
+**Agent/model:** Codex desktop; GPT-6 family, exact model identifier unavailable.
+
+**Changed:** Center the arc pair by bitmap bearings while preserving authored
+spacing; center portable reticle ink horizontally. Resolve QuickInfo's installed
+desktop font definition for the character-cell rasterizer, rather than interpreting
+the macOS backend's larger font height in Windows units. Add a consumer-local
+resource-condition resolver without changing normal host parsing or other controls.
+Extend owned layout tests to constrain horizontal midpoint and measured retail
+footprints; test that consumer conditions cannot change host resource policy.
+
+**Why:** The previous tests only checked that arcs straddled the reticle; the
+640x480 midpoint was still 0.726 pixels left. Retained accepted retail 720p and
+verified 1080p references also exposed 75-pixel-tall arcs instead of 42 at 720p.
+The installed desktop font height produces 42/63-pixel arcs at 720p/1080p.
+
+**Tested how:** scripts/checks/validate.sh (1,166 Rust tests, 100 ignored, 13 Python
+helper tests, strict Clippy/fmt/architecture); scripts/checks/check_windows.sh;
+`cargo test -p hl2-ui hud:: -- --ignored --nocapture` (5 pass). Before packaged
+HUD/aspect 2/2; after HUD/aspect/power 3/3, 101 s. Inspected side-by-side native and
+packaged crops. Verified all four native reference module hashes match the current
+owned installation; recorded session cleanup preserved settings. Initial failed
+midpoint assertion and excluded reference sessions remain documented.
+
+**Result:** Centered arc pair; retail-sized arcs and spacing with at most two-pixel
+antialias fringe differences. Two alternating pairs: 18.9647 -> 19.0175 ms/frame,
+HUD CPU 0.08457 -> 0.07553 ms, overlapping ranges; no causal performance claim.
+Evidence: artifacts/quickinfo-horizontal; details in docs/validation.md and performance.md.
+
+**Still broken or not tested:** Comparison uses retained native captures, not a
+fresh native run. Native Windows execution of this change and exact antialias/color
+parity are not tested. An empty first 1080p module manifest and mislabeled native
+SMG captures were excluded; accepted references have explicit provenance.
+
+**Next:** Broader native HUD comparisons.
+
+
 ## 2026-10-27 — Align quick-info arcs and test HUD symbol layout
 
 **Agent/model:** Codex desktop; GPT-6 family, exact model identifier unavailable.

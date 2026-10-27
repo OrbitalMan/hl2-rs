@@ -41,7 +41,13 @@ view center. Their installed symbol fonts have asymmetric ascent/cell metrics;
 centering the nominal font height offsets visible ink. Full/progress/warning arcs
 share one origin; cropping changes only the bitmap span. Text fonts retain their
 text ascent, and Windows monochrome reticles retain their native raster placement.
-Owned layout checks include portrait, odd dimensions and every HUD aspect frame.
+The arc pair is centered using both glyph bearings while retaining authored spacing;
+the portable reticle uses ink bounds horizontally as well. QuickInfo selects the
+installed desktop character-cell font definition: the macOS-specific larger height
+belongs to a different native font backend and must not be treated as a Windows
+character-cell size. This selection is local to QuickInfo; normal resource parsing
+and all other platform restrictions stay host-specific. Owned layout checks include
+portrait, odd dimensions, every HUD aspect frame and retained retail size references.
 
 ### Widget Interaction & Audio
 

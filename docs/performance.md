@@ -1,5 +1,22 @@
 # Performance measurements - 2026-10-05
 
+## Retail quick-info size and horizontal centering (2026-10-27)
+
+Before/after/after/before packaged runs on Metal / Apple M1 Pro, default settings,
+1280x720 d1_trainstation_02 HUD fixture, background/muted, profiling enabled.
+No concurrent builds, replays or image analysis; only brief documentation writes.
+120 warm-up frames, 148-151 measured frames per run. Mean frame times:
+18.9647 ms before (range 18.6965-19.2329), 19.0175 ms after (18.7215-19.3136).
+HUD CPU means: 0.08457 -> 0.07553 ms. The ranges overlap; +0.0528 ms overall
+cannot establish a causal regression, and the lower HUD mean is not a speed claim.
+
+The change preserves quad counts and arc spacing. Glyph bounds stay cached; no
+new render pass, per-frame allocation or file access is introduced. Font-profile
+selection parses the already-read scheme once more during load, never in a frame
+system. Reproduce with artifacts/quickinfo-horizontal/benchmark.py; paired reports,
+packages and timing-summary.json are retained. This bounded replay does not establish
+sustained FPS or exact native renderer performance.
+
 ## Quick-info symbol placement (2026-10-27)
 
 Metal / Apple M1 Pro, packaged before/after builds, default settings, 1280x720,

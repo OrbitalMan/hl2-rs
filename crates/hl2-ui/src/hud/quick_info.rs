@@ -82,13 +82,31 @@ impl QuickInfoHud {
         (p > 0.).then(|| self.font.draw_cropped(empty, origin, vec2(0., p), color));
         (p < 1.).then(|| self.font.draw_cropped(full, origin, vec2(p, 1.), color));
     }
-    fn arc_origin(&self, glyph: &str, x: f32) -> Vec2 {
-        let bounds = self.font.face.glyph_bounds(
-            glyph.chars().next().expect("installed quick-info glyph"),
-            self.font.size(),
-            self.font.effects(),
-        );
-        vec2(x, (self.canvas.height() * 0.5).trunc() - bounds.center().y)
+    fn arc_origins(&self) -> [Vec2; 2] {
+        let size = self.font.size();
+        let effects = self.font.effects();
+        let bounds = [&self.left, &self.right].map(|glyph| {
+            self.font.face.glyph_bounds(
+                glyph.chars().next().expect("installed quick-info glyph"),
+                size,
+                effects,
+            )
+        });
+        let mut origins = [
+            -self.font.width(&self.left) * 2.,
+            self.font.width(&self.right),
+        ];
+        // Preserve authored spacing, but account for side bearings when centering the pair.
+        let left = origins[0] + bounds[0].x;
+        let right = origins[1] + bounds[1].x + bounds[1].w;
+        let offset = self.canvas.width() * 0.5 - (left + right) * 0.5;
+        origins.iter_mut().for_each(|x| *x += offset);
+        std::array::from_fn(|i| {
+            vec2(
+                origins[i],
+                (self.canvas.height() * 0.5).trunc() - bounds[i].center().y,
+            )
+        })
     }
     pub(super) fn draw(&self, inv: &Inventory, weapons: &BTreeMap<String, Weapon>, time: f64) {
         let Some(weapon) = weapons.get(&inv.active) else {
@@ -121,6 +139,7 @@ impl QuickInfoHud {
                 ..Default::default()
             },
         );
+        let [left_origin, right_origin] = self.arc_origins();
         let warn_health = state.warn_health;
         if let Some((color, full)) = QuickInfoState::warning_color(
             warn_health,
@@ -130,7 +149,7 @@ impl QuickInfoHud {
             self.normal,
             self.caution,
         ) {
-            let origin = self.arc_origin(&self.left, x - self.font.width(&self.left) * 2.);
+            let origin = left_origin;
             let color = alpha(color, opacity);
             if full {
                 self.font.draw(&self.left, origin.x, origin.y, color);
@@ -153,7 +172,7 @@ impl QuickInfoHud {
             self.normal,
             self.caution,
         ) {
-            let origin = self.arc_origin(&self.right, x + self.font.width(&self.right));
+            let origin = right_origin;
             let color = alpha(color, opacity);
             if full {
                 self.font.draw(&self.right, origin.x, origin.y, color);

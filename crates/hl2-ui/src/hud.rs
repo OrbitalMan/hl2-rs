@@ -1067,10 +1067,7 @@ impl WeaponHud {
     }
 
     pub fn load(vfs: &Vfs, canvas: Canvas) -> Result<Self> {
-        let scheme = keyvalues::parse_resource(
-            &vfs.read("resource/ClientScheme.res")?
-                .context("ClientScheme.res missing")?,
-        )?;
+        let (scheme, quick_info_fonts) = font::schemes(vfs)?;
         let scheme = find(&scheme, "Scheme").context("Scheme block missing")?;
         let fonts = scheme.get("Fonts").context("HUD font scheme missing")?;
         let settings = scheme
@@ -1079,7 +1076,7 @@ impl WeaponHud {
             .clone();
         let quick_info = QuickInfoHud::load(
             vfs,
-            fonts,
+            &quick_info_fonts,
             scheme.get("Colors").unwrap_or(&settings),
             canvas.clone(),
         )?;

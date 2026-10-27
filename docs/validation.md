@@ -1,5 +1,40 @@
 # Local validation — 2026-10-05
 
+## Retail quick-info size and horizontal alignment follow-up (2026-10-27)
+
+The earlier vertical alignment checks did not constrain the horizontal midpoint
+or native size. A new midpoint assertion fails on the previous revision: x319.274
+instead of x320 at 640x480. Center the pair's bitmap bounds while preserving the
+installed glyph spacing, and center the portable weapon glyph by ink width.
+
+Retained accepted retail captures at 720p and 1080p were inspected beside the
+packaged output. The 1080p capture's recorded hl2.exe, engine.dll, client.dll and
+server.dll hashes all match the current owned installation. Its session closed
+normally with settings unchanged. The first 1080p session had an empty module
+manifest; use the second verified session for provenance. Rejected SMG-labelled
+captures are excluded (they actually showed a pistol). The accepted 720p pistol
+reference and verified 1080p pistol reference contain the same reticle type as
+our SMG layout fixture; compare layout, not the captured weapon label.
+
+Retail arcs are about 55x42 pixels at 720p and 85x63 at 1080p. The previous macOS
+package drew 75-pixel-tall arcs at 720p: ClientScheme's macOS QuickInfo tall=50
+was interpreted using Windows character-cell metrics. The local QuickInfo font
+resolver now selects the installed desktop tall=28 for that raster contract.
+No global platform condition or stored option is changed. The corrected emitted
+bitmap bounds are approximately 57x42 and 86x63, with at most two pixels of fontdue
+antialias fringe versus the visible native footprint. Tests constrain those sizes,
+both axes, partial/warning geometry and all existing viewport/aspect cases.
+A parser test verifies a consumer override cannot alter normal host conditions.
+
+Reproduction uses the same commands in the section below. Workspace validation
+passes (1,166 Rust tests, 100 ignored, 13 Python helper tests, strict Clippy/fmt/
+architecture); Windows-target Clippy and five owned HUD tests pass. Packaged
+HUD/aspect checks pass before (2/2); HUD/aspect/power pass after (3/3, 101 s).
+Evidence, native module hashes, retained
+failed midpoint assertion and the nearest-neighbor comparison image are in
+artifacts/quickinfo-horizontal. The comparison uses retained retail captures;
+no fresh native game run or exact cross-platform antialias/color equivalence is claimed.
+
 ## Quick-info and crosshair layout (2026-10-27)
 
 The installed-resource regression fails on the prior geometry: at 640x480 the arc

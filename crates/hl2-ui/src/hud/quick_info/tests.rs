@@ -58,6 +58,10 @@ fn owned_quickinfo_arcs_center_on_crosshair_across_layouts_and_states() {
                 (crosshair_center.y - viewport.y * 0.5).abs() <= 1.,
                 "weapon crosshair must center on the view: {crosshair_center:?}"
             );
+            assert!(
+                (crosshair_center.x - viewport.x * 0.5).abs() <= 1.,
+                "weapon crosshair must center horizontally: {crosshair_center:?}"
+            );
             for (health, clip) in [(100., 45), (50., 23), (10., 2)] {
                 inv.health = health;
                 inv.owned.insert(inv.active.clone(), clip);
@@ -68,6 +72,27 @@ fn owned_quickinfo_arcs_center_on_crosshair_across_layouts_and_states() {
                 let arc_quads = &quads[1..];
                 assert!(arc_quads.len() >= 2, "both arcs must draw");
                 let arcs = bounds(arc_quads);
+                // Measured owned retail captures: 720p approx 55x42, 1080p 85x63.
+                // Fontdue antialias fringes can extend the bitmap by up to two pixels.
+                for (size, retail) in [
+                    (vec2(1280., 720.), vec2(55., 42.)),
+                    (vec2(1920., 1080.), vec2(85., 63.)),
+                ] {
+                    if viewport == size {
+                        assert!(
+                            (arcs.w - retail.x).abs() <= 2.,
+                            "retail arc width: {arcs:?}"
+                        );
+                        assert!(
+                            (arcs.h - retail.y).abs() <= 1.,
+                            "retail arc height: {arcs:?}"
+                        );
+                    }
+                }
+                assert!(
+                    (arcs.center().x - viewport.x * 0.5).abs() < 0.01,
+                    "horizontal arc center: {viewport:?} {aspect:?}: {arcs:?}"
+                );
                 assert!(
                     (arcs.center().y - crosshair_center.y).abs() <= 1.,
                     "arc and weapon crosshair must align"

@@ -1,5 +1,25 @@
 # STATUS
 
+## Retail quick-info size and horizontal placement corrected (2026-10-27)
+
+- Follow-up to the vertical fix: constrain horizontal midpoint instead of merely
+  checking that arcs straddle the reticle. Preserve authored spacing and account
+  for glyph bearings; center portable reticle ink horizontally too.
+- Retained accepted retail 720p and verified 1080p captures confirm oversized
+  macOS quick-info: 75-pixel height at 720p versus retail 42. Select the installed
+  desktop QuickInfo font definition for our character-cell rasterizer; leave other
+  resource consumers and platform restrictions untouched. Corrected heights are
+  42 pixels at 720p and 63 at 1080p, with 1-2 pixel antialias fringe differences.
+- All four recorded native executable/module hashes match the current owned install.
+  References are retained captures, not a fresh native run. Exclude earlier rejected
+  mislabeled screenshots and the 1080p session lacking a module manifest.
+- 1,166 Rust tests / 100 ignored, 13 Python checks, strict Clippy/fmt/architecture,
+  Windows-target Clippy and five owned HUD tests pass. Before HUD/aspect 2/2; after
+  HUD/aspect/power 3/3 (101 s). Final retail comparison image inspected.
+- Evidence: artifacts/quickinfo-horizontal; commands and raster tolerances in
+  docs/validation.md. Native Windows runtime of this change and exact antialias/
+  color parity are not tested. Next: broader HUD comparisons against native captures.
+
 ## Quick-info arcs aligned with the weapon crosshair (2026-10-27)
 
 - Center quick-info arc bitmap bounds on view center instead of nominal font height.
