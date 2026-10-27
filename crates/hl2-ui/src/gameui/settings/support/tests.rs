@@ -86,7 +86,6 @@ fn completed_features_have_no_development_status() {
         AdvancedChoice::TextureDetail,
         AdvancedChoice::ShadowDetail,
         AdvancedChoice::ColorCorrection,
-        AdvancedChoice::MotionBlur,
         AdvancedChoice::Antialiasing,
         AdvancedChoice::Filtering,
         AdvancedChoice::VSync,
@@ -121,4 +120,14 @@ fn unfinished_features_have_specific_localizable_status() {
         assert!(token.starts_with("#HL2RS_"));
         assert_ne!(localization.text(token), token);
     }
+}
+
+#[test]
+fn motion_blur_reports_the_experimental_ultra_tier() {
+    assert_eq!(
+        development(Binding::Choice(Choice::Advanced(
+            AdvancedChoice::MotionBlur
+        ))),
+        Some(crate::gameui::localize::placeholders::STATUS_MOTION_BLUR)
+    );
 }

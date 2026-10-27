@@ -1,5 +1,32 @@
 # Performance measurements - 2026-10-05
 
+## Final tier interpretation and native idle checkpoint (2026-10-27)
+
+The owner split legacy Advanced into Advanced (retail camera + strong weapon animation)
+and Ultra (adds dense world/camera and projectiles). Historical full-reconstruction series
+labelled Advanced therefore describe today's Ultra. No existing save is promoted to Ultra.
+
+| Current tier | Native idle median ms | FPS | p95 upper bound ms |
+| --- | ---: | ---: | ---: |
+| Enabled | 10.74 | 93.1 | 12 |
+| Advanced | 12.86 | 77.8 | 14 |
+| Ultra path measured before label split | 16.31 | 61.3 | 18 |
+
+3456x2168, 4x AA, HDR None, uncapped completion-bounded headless M1 Pro/Metal. Three
+alternating pairs per dataset, separately retained declared priming. Advanced's time guards
+pass but two pairs flag pressure; Ultra's strict guards fail. These are provisional/cross-
+batch observations, not interactive FPS guarantees or an isolated world-pass GPU timer.
+Artifacts: advanced-only-native, region-native-still, tier-activation. Weapon raw reduction
+processes about 24% of full texels in the idle probe; projection costs about 0.002 ms/call.
+
+Supported direct drawing is automatic only on the measured M1 Pro/Metal adapter, with a
+startup override. Other hardware defaults are unchanged. It cuts render buffer-write CPU
+cost from several ms to about 0.02 ms. At 720p the earlier Ultra path improves about 58 to
+110 FPS; CPU work/frame falls about 34% across batches. No watt/energy claim is made.
+Both cooperative kernels retain correct GPU results but no Metal speedup; their code,
+GPU comparator and timing are archived. Keep fragment reduction. Future work needs final
+Ultra probes and matched-resource turns/swings; 120 FPS/native Ultra is not established.
+
 ## Uncapped main-depth baseline (2026-10-27)
 
 The background profiler now runs with zero application-loop interval, keeping the two-GPU-

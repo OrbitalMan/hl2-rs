@@ -1,6 +1,8 @@
 //! Installation/output side effects after argument parsing has succeeded.
+mod app;
 use super::Options;
 use anyhow::Result;
+pub(super) use app::make_app;
 use std::path::PathBuf;
 
 pub(super) struct InstallationRequest {

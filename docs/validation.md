@@ -5,6 +5,22 @@ order reversed in the middle pair. Report every iteration, paired cost ratios an
 minimum/maximum frame means and p95/p99 values. Medians smooth ordinary noise; known
 interference remains flagged rather than averaged away. The raw evidence is never hidden.
 
+## Wrap-up validation and tier split (2026-10-27)
+
+validate.sh passes 1,143 Rust tests (92 ignored), 27 Python tests, strict Clippy, formatting
+and architecture. check_windows.sh passes strict cross-target Clippy; Windows runtime is
+not tested. Owned blur labels resolve. GPU counters verify Enabled has no reconstruction,
+Advanced has weapon-only reconstruction and Ultra has both. Existing saves and console
+master resets are tested. Eight normal weapon surface cases before the label split (same weapon algorithm) and final
+ONLY="viewmodel_motion_blur coverage" replays pass. No user-launched app is closed.
+
+Native idle frame budgets pass for new Advanced, but pressure flags leave qualification
+provisional. Ultra still fails the strict budget. Priming, cold/failed and every measured
+run are retained; no threshold is loosened. Historical full-blur Advanced series are now
+Ultra. Final-tier Ultra projectile/world suite and interactive FPS remain untested.
+The cooperative archive holds the GPU serial comparator/canary; both kernels were rejected
+for Metal cost and are not active in the preferred build. The normal fragment path remains.
+
 ## Known-workload preflight and main-depth probes (2026-10-27)
 
 The native guard saves each .preflight.json before launch. Known other games or compiler

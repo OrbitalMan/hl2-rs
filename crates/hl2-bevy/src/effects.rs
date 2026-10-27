@@ -1,17 +1,13 @@
 //! Depth-tested host adapter for shared owned projectile sprites and impact marks.
+mod material;
 mod model_reading;
 use crate::{assets::LoadedMap, gameplay::Gameplay, rendering, simulation::Simulation};
 use bevy::{
     asset::RenderAssetUsages,
     camera::primitives::MeshAabb,
-    mesh::{Indices, MeshVertexBufferLayoutRef},
-    pbr::{MaterialPipeline, MaterialPipelineKey},
+    mesh::Indices,
     prelude::*,
-    render::render_resource::{
-        AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, CompareFunction,
-        PrimitiveTopology, RenderPipelineDescriptor, SpecializedMeshPipelineError,
-    },
-    shader::ShaderRef,
+    render::render_resource::{AsBindGroup, PrimitiveTopology},
 };
 use hl2_simulation::{projectile_visuals::ProjectileVisuals, projectiles::ProjectileKind};
 pub(crate) use model_reading::read_effect_model_lod;
@@ -119,77 +115,6 @@ impl From<&EffectMaterial> for EffectKey {
             kind: m.kind,
             ignore_z: m.ignore_z,
         }
-    }
-}
-impl Material for EffectMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "shaders/effects.wgsl".into()
-    }
-    fn alpha_mode(&self) -> AlphaMode {
-        match self.kind {
-            0 => AlphaMode::Opaque,
-            1 => AlphaMode::Mask(0.5),
-            _ => AlphaMode::Blend,
-        }
-    }
-    fn specialize(
-        _: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        _: &MeshVertexBufferLayoutRef,
-        key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        descriptor.primitive.cull_mode = None;
-        if key.bind_group_data.ignore_z
-            && let Some(depth) = descriptor.depth_stencil.as_mut()
-        {
-            depth.depth_compare = Some(CompareFunction::Always);
-            depth.depth_write_enabled = Some(false);
-        }
-        if let Some(blend) = effect_blend(key.bind_group_data.kind) {
-            for target in descriptor
-                .fragment
-                .as_mut()
-                .into_iter()
-                .flat_map(|f| &mut f.targets)
-                .flatten()
-            {
-                target.blend = Some(blend);
-            }
-        }
-        Ok(())
-    }
-}
-fn effect_blend(kind: usize) -> Option<BlendState> {
-    match kind {
-        3 => Some(BlendState {
-            color: BlendComponent {
-                src_factor: BlendFactor::SrcAlpha,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
-            alpha: BlendComponent::OVER,
-        }),
-        hl2_simulation::projectile_visuals::KIND_ALPHA_ADD => Some(BlendState {
-            color: BlendComponent {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::OneMinusSrcAlpha,
-                operation: BlendOperation::Add,
-            },
-            alpha: BlendComponent::OVER,
-        }),
-        4 => Some(BlendState {
-            color: BlendComponent {
-                src_factor: BlendFactor::Dst,
-                dst_factor: BlendFactor::Zero,
-                operation: BlendOperation::Add,
-            },
-            alpha: BlendComponent {
-                src_factor: BlendFactor::Zero,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
-        }),
-        _ => None,
     }
 }
 #[derive(Component)]

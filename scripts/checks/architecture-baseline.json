@@ -170,10 +170,10 @@
  "files": {
   "crates/hl2-bevy/src/assets.rs": 1126,
   "crates/hl2-bevy/src/audio.rs": 1250,
-  "crates/hl2-bevy/src/effects.rs": 1255,
+  "crates/hl2-bevy/src/effects.rs": 1180,
   "crates/hl2-bevy/src/gameplay.rs": 1643,
-  "crates/hl2-bevy/src/main.rs": 1313,
-  "crates/hl2-bevy/src/rendering.rs": 1764,
+  "crates/hl2-bevy/src/main.rs": 1308,
+  "crates/hl2-bevy/src/rendering.rs": 1755,
   "crates/hl2-bevy/src/video.rs": 1191,
   "crates/hl2-simulation/src/ai/default_schedules.rs": 1247,
   "crates/hl2-simulation/src/ai/runtime.rs": 2621,
@@ -237,7 +237,7 @@
    138
   ],
   "crates/hl2-bevy/src/main.rs::main": [
-   331
+   326
   ],
   "crates/hl2-bevy/src/main.rs::monitor": [
    145

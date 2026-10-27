@@ -55,7 +55,11 @@ impl Plugin for SourceBloomPlugin {
         .add_systems(Update, motion_blur::update)
         .add_systems(
             PostUpdate,
-            (viewmodel_blur::update, world_blur::update)
+            (
+                (viewmodel_blur::update, world_blur::update),
+                weapon_blur::depth::update,
+            )
+                .chain()
                 .after(crate::camera::present_player_view)
                 .after(crate::rendering::present_weapons)
                 .after(crate::rendering::present_entities)

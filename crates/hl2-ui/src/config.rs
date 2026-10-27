@@ -5,6 +5,8 @@
 //! fields take their defaults, and the legacy `video.borderless` flag migrates to
 //! [`VideoSettings::display_mode`] in [`Config::migrate`].
 
+mod motion_blur;
+pub use motion_blur::MotionBlurMode;
 use serde::{Deserialize, Serialize};
 use source_ui::placement::DialogPlacement;
 use std::collections::BTreeMap;
@@ -221,6 +223,8 @@ pub struct AdvancedVideoSettings {
     pub motion_blur: bool,
     /// Opt-in animation blur; false preserves retail camera-only blur and old saves.
     pub motion_blur_viewmodel: bool,
+    /// Ultra-only camera/world and independent projectile reconstruction.
+    pub motion_blur_world: bool,
     /// `mat_queue_mode` (-1 multicore, 0 single).
     pub multicore: bool,
     /// Classic Effects (`r_classic_fire` / `r_classic_blood`).
@@ -243,6 +247,7 @@ impl Default for AdvancedVideoSettings {
             vsync: true,
             motion_blur: true,
             motion_blur_viewmodel: false,
+            motion_blur_world: false,
             multicore: true,
             classic_effects: false,
             d3d9ex: true,

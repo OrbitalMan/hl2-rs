@@ -1,5 +1,40 @@
 # MODLOG
 
+## 2026-10-27 Wrap-up: weapon-only Advanced, opt-in Ultra and bounded reductions
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Restore Advanced to retail camera plus strong viewmodel animation blur. Ultra
+adds dense camera/world and projectile reconstruction; legacy saves stay weapon-only.
+Share typed tier policy between UI and host, localize Ultra, add cyan tuning status and
+reset all extensions through the retail master cvar. Select direct drawing before camera
+creation only on measured M1 Pro/Metal hardware, with explicit overrides. Scissor the first
+weapon reduction to conservative current bounds while clearing the full image; retain all
+samples, exposure, geometry AA and trail dilation. Consolidate material-key/startup helpers
+to shrink oversized files. Retain direct colour/depth inputs and bounded world filtering.
+
+**Why:** The owner wants visible performance and less work/frame, then explicitly separates
+expensive world blur from Advanced. Wrap up before the weekly usage budget is exhausted.
+
+**Tested how:** Full validate.sh: 1,143 Rust passed, 92 ignored, 27 Python tests; strict Clippy,
+fmt and architecture pass. Windows-target Clippy passes. Owned labels, GPU tier activation,
+eight weapon surface cases before the label split and final crowbar/coverage replays pass. Three native idle pairs
+per tier dataset retain priming and every pressure flag. Rejected cooperative kernels pass
+GPU serial-reference comparisons but do not establish a Metal speedup; retain their history.
+
+**Result:** Native idle medians are about 93 FPS Enabled, 78 Advanced, 61 Ultra path (HDR None,
+4x AA). Advanced time budgets pass, with pressure flags preventing full qualification.
+The weapon reduction scans about 24% of texels for about 0.002 ms CPU. Earlier 720p Ultra
+path improves about 58 to 110 FPS with lower CPU work/frame. Details/limits are in STATUS
+and performance notes. Preferred fragment reduction is restored; experiments remain archived.
+
+**Still broken or not tested:** Complete native cost qualification, final-tier Ultra world/
+projectile suite, interactive FPS, Windows runtime and other GPUs remain NOT TESTED. Ultra
+is expensive; no 120 FPS/native or energy guarantee. The primary checkout is untouched.
+
+**Next:** Manual playtest, final-tier Ultra probes and quiet matched-resource turns/swings.
+Preserve the archives; do not restart rejected kernel attempts without new evidence.
+
 ## 2026-10-27 Checkpoint: opt-in direct-drawing profile experiment
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

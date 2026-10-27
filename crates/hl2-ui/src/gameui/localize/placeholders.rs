@@ -46,6 +46,8 @@ pub const STATUS_SPEAKERS: &str = "#HL2RS_StatusSpeakers";
 pub const STATUS_SOUND_QUALITY: &str = "#HL2RS_StatusSoundQuality";
 pub const STATUS_LANGUAGE: &str = "#HL2RS_StatusLanguage";
 pub const STATUS_GAMEPAD: &str = "#HL2RS_StatusGamepad";
+pub const MOTION_BLUR_ULTRA: &str = "#HL2RS_MotionBlurUltra";
+pub const STATUS_MOTION_BLUR: &str = "#HL2RS_StatusMotionBlur";
 pub const STATUS_SHADERS: &str = "#HL2RS_StatusShaders";
 pub const STATUS_WATER: &str = "#HL2RS_StatusWater";
 pub const STATUS_MULTICORE: &str = "#HL2RS_StatusMulticore";
@@ -56,6 +58,8 @@ pub const STATUS_UNIMPLEMENTED: &str = "#HL2RS_StatusUnimplemented";
 
 /// Temporary English text of each placeholder token (keys without the `#`).
 pub const PLACEHOLDER_STRINGS: &[(&str, &str)] = &[
+    ("HL2RS_MotionBlurUltra", "Ultra"),
+    ("HL2RS_StatusMotionBlur", "Advanced adds viewmodel animation blur. Ultra also reconstructs world/camera and projectile motion; GPU performance tuning is in progress."),
     ("HL2RS_StatusRawInput", "In development: raw input is always used. Turning it off has no effect yet."),
     ("HL2RS_StatusFocusAudio", "Partially implemented: muting works, but disabling it cannot keep audio playing while the game pauses on focus loss."),
     ("HL2RS_StatusAimAssist", "Not implemented: aim assistance and its strength setting have no effect yet."),

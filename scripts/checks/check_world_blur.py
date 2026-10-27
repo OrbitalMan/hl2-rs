@@ -36,11 +36,11 @@ def fixture(case):
     return frames
 
 
-def run(case, aa="none", mode="advanced", suffix="normal", paused=False):
+def run(case, aa="none", mode="advanced", suffix="normal", paused=False, size=(1024, 768)):
     if replay.CONFIG.exists():
         replay.CONFIG.unlink()
-    replay.settings(video={"hdr": "none", "hdr_migrated": True, "advanced": {
-        "motion_blur": mode != "off", "motion_blur_viewmodel": mode == "advanced",
+    replay.settings(video={"width": size[0], "height": size[1], "hdr": "none", "hdr_migrated": True, "advanced": {
+        "motion_blur": mode != "off", "motion_blur_viewmodel": mode == "advanced", "motion_blur_world": mode == "advanced",
         "antialiasing": aa, "vsync": False}})
     name = f"world_{case}_{aa}_{mode}_{suffix}"
     path = replay.OUT / (name + ".input.json")
@@ -48,10 +48,12 @@ def run(case, aa="none", mode="advanced", suffix="normal", paused=False):
     if paused:
         frames[-1]["paused"] = True
     path.write_text(json.dumps(frames), encoding="utf-8")
-    result = replay.game(name, "--map", "d1_canals_01" if case == "lamp" else "d1_trainstation_02", "--width", "1024", "--height", "768",
+    result = replay.game(name, "--map", "d1_canals_01" if case == "lamp" else "d1_trainstation_02", "--width", str(size[0]), "--height", str(size[1]),
                          "--movement-script", str(path), "--capture-live", "--capture-burst", "8")
     replay.holds("no rendering errors", "ERROR" not in result.log and "Caught rendering error" not in result.log)
     replay.expect("current poses", result.report["render"]["presentation"]["pose_or_visibility_mismatches"], 0)
+    replay.expect("actual render dimensions", result.report["render"]["presentation"]["hud"]["viewport"],
+                  [float(size[0]), float(size[1])])
     if case not in ("camera", "lamp"):
         replay.holds("projectile still flying", len(result.sample("flight")["gameplay"]["projectiles"]["active"]) > 0)
     return result
@@ -103,6 +105,7 @@ def main():
     try:
         for case in ("camera", "lamp", "grenade", "rocket", "bugbait"):
             run(case)
+        run("camera", aa="x4", suffix="partial_tiles", size=(1031, 773))
         shader.write_text(diagnostic(original), encoding="utf-8")
         for aa in ("none", "x4"):
             for case in ("camera", "lamp", "grenade", "rocket", "bugbait"):

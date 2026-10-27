@@ -2,9 +2,50 @@
 
 Checkpoint: 2026-10-27 (Codex desktop, GPT-6 family; exact model identifier not exposed),
 codex/blur-performance based on f7369cd. Profiled frame tails and an owned native-resolution
-guard are the first reviewable checkpoint. Advanced rendering optimisations are experimental
-and unqualified; the known high-resolution regression remains open. The primary checkout
+guard and subsequent rendering/tier changes are committed checkpoints on this worktree branch.
+Ultra cost and complete native qualification remain open. The primary checkout
 is reserved for the owner's manual testing. Sections below are newest first.
+
+## Wrap-up: four blur tiers and measured rendering savings (2026-10-27)
+
+Disabled/Enabled retain retail behavior. Advanced adds only viewmodel animation blur to
+retail camera blur; Ultra enables dense world/camera and opaque/masked projectile blur too.
+Old Advanced saves default to weapon-only, and Ultra requires an explicit new choice. The
+localized Ultra label and cyan tuning status pass owned-resource checks. GPU activation
+checks prove Advanced has zero world passes and Ultra has both world and weapon passes.
+
+Apple M1 Pro/Metal automatically uses supported direct drawing, selected before cameras
+spawn. Other adapters keep the old default. HL2RS_DIRECT_DRAW=0/1 is a startup override;
+HL2RS_PROFILE_DIRECT_DRAW overrides it only in background profiling. The weapon's first
+reduction scans conservative current visible bounds, clearing the whole attachment and
+leaving later dilation/gathers full. Near-plane/missing/invalid bounds fail open. A native
+idle probe scans about 24% of weapon reduction texels for about 0.002 ms CPU per call.
+
+Uncapped native 3456x2168/4x/HDR None idle medians: Enabled 10.74 ms (~93 FPS), Advanced
+12.86 ms (~78), Ultra path 16.31 ms (~61). Advanced mean/p95 budgets pass (p95 14 vs 12 ms),
+but two pairs flag memory pressure; full native qualification remains provisional. Ultra
+still fails the strict budget. Earlier series called Advanced measured today's Ultra.
+At 720p/no AA direct drawing improved that Ultra path about 58 to 110 FPS, with median
+CPU work/frame about 36.1 to 23.7 CPU-ms. Cross-batch comparisons remain observational.
+
+Final validate.sh: 1,143 Rust tests passed, 92 ignored, 27 Python tests; strict Clippy/fmt/
+architecture pass. Windows-target strict Clippy passes; Windows runtime is NOT TESTED.
+Owned labels, three tier GPU activation checks, eight normal weapon surface probes and
+final crowbar/coverage replays pass. Full final-tier world/projectile suite, interactive
+FPS, other adapters and ordinary campaign playthrough are NOT TESTED. Earlier world probes
+passed, but do not substitute for final-tier runtime qualification. No quality taps,
+exposure or geometry AA were reduced by the new region optimization.
+
+Both cooperative reduction kernels are archived: exact GPU reference comparisons passed,
+including synthetic ties/eight samples and a deliberate-error detector, but Metal timing
+showed no win (parallel ~18.15 ms; serial-leader ~25 ms versus fragment ~17.78). The faster
+fragment kernel is retained. All failed, pressure-affected and priming runs remain in
+ignored artifacts/blur-performance-regression; no flags or thresholds were weakened.
+
+Next: manual test the packaged build, finish matched-resource Advanced turns/swings and
+final-tier Ultra projectile probes, then investigate world-motion prepass/read cost only
+if more optimization is requested. Do not repeat the rejected cooperative kernels on this
+GPU without new evidence. Watts are deprioritized; continue work/frame and memory metrics.
 
 ## Direct-drawing experiment: CPU win, native blur still open (2026-10-27)
 
@@ -111,9 +152,9 @@ Multicore explicitly report unfinished/no-effect behavior in the current setting
 
 ## Experiment preservation (2026-10-27)
 
-Eleven local codex/experiment branches preserve meaningful blur approaches. The source-only
+Thirteen local codex/experiment branches preserve meaningful blur approaches. The source-only
 index is docs/blur-experiments.md; every branch has docs/blur-experiment.md with provenance
-and reuse notes. Five are complete recorded snapshots; partial/reconstructed shader and
+and reuse notes. Seven are complete recorded snapshots; partial/reconstructed shader and
 camera integrations are labelled. These archives are unqualified, and new archive checkouts
 were not rebuilt. Temporary stash cleanup does not remove the archived source objects.
 

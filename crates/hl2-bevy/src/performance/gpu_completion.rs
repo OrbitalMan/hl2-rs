@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 #[derive(Default, serde::Serialize)]
 pub(super) struct Stats {
     limit: usize,
-    camera_indirect_drawing_disabled: bool,
+    pub(super) camera_indirect_drawing_disabled: bool,
     submitted_frames: u64,
     completed_frames_observed: u64,
     max_pending_fences: u64,
@@ -22,8 +22,27 @@ pub(super) struct Stats {
     total_wait_ms: f64,
     max_wait_ms: f64,
     errors: u64,
+    raw_world: Reduction,
+    raw_weapon: Reduction,
+}
+#[derive(Default, serde::Serialize)]
+struct Reduction {
+    passes: u64,
+    processed_texels: u64,
+    full_texels: u64,
 }
 impl Stats {
+    pub(super) fn reduction(&mut self, world: bool, processed: u64, full: u64) {
+        let data = if world {
+            &mut self.raw_world
+        } else {
+            &mut self.raw_weapon
+        };
+        data.passes += 1;
+        data.processed_texels += processed;
+        data.full_texels += full;
+    }
+
     fn submit(&mut self) {
         self.submitted_frames += 1;
         self.max_pending_fences = self
@@ -45,14 +64,12 @@ struct Fences {
 }
 
 pub(super) fn prepare(app: &mut App) -> Performance {
-    let direct = super::camera_mode::configure(app);
     let performance = Performance::default();
     if !app.is_plugin_added::<bevy::winit::WinitPlugin>()
         && let Some(render) = app.get_sub_app_mut(RenderApp)
     {
         *performance.1.lock().expect("GPU profiling state") = Some(Stats {
             limit: 2,
-            camera_indirect_drawing_disabled: direct,
             ..Default::default()
         });
         render

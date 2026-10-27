@@ -3,6 +3,7 @@
 NO_BUILD=1 python3 scripts/checks/check_blur_performance.py
 Defaults reproduce the reported 3456x2168 regression. BLUR_WIDTH/BLUR_HEIGHT,
 BLUR_AA, BLUR_SCENES and BLUR_RUNS override the stress workload (three alternating pairs by default); not part of headless CI.
+BLUR_PRIME=1 records two declared priming runs separately before the measured pairs.
 Runs only an isolated muted package and records frame tails as well as means.
 """
 import json
@@ -36,6 +37,7 @@ def measure(scene, advanced, repeat):
         replay.CONFIG.unlink()
     replay.settings(video={"width": width, "height": height, "hdr": "none", "hdr_migrated": True,
                            "advanced": {"motion_blur": True, "motion_blur_viewmodel": advanced,
+                                        "motion_blur_world": advanced and os.environ.get("BLUR_TIER", "ultra") == "ultra",
                                         "antialiasing": aa, "vsync": False}})
     name = f"{scene}-{'advanced' if advanced else 'retail'}-{repeat}"
     path = replay.OUT / (scene + ".input.json")
@@ -61,14 +63,18 @@ def measure(scene, advanced, repeat):
     if not windows.get("dropped_windows"):
         replay.expect("profile window frame count", sum(w["frames"] for w in windows["windows"]), result["measured_frames"])
     monitor.metadata.update(adapter=run.report["render"].get("adapter"), backend=run.report["render"].get("backend"))
+    result["blur_tier"] = (os.environ.get("BLUR_TIER", "ultra") if advanced else "enabled")
     result["environment"] = monitor.finish(replay.OUT/(name+".environment.json"), result, (width, height))
     replay.expect("uncapped background profiling", run.report["render"]["presentation"].get("background_profile_interval_ms"), 0.0)
     completion = run.report["render"]["presentation"].get("gpu_completion", {})
     replay.holds("bounded GPU completion pacing", completion.get("limit") == 2 and
                  completion.get("max_pending_fences", 3) <= 2 and completion.get("errors") == 0, completion)
     replay.holds("GPU completions observed", completion.get("completed_frames_observed", 0) >= 100)
-    replay.expect("camera indirect drawing disabled", completion.get("camera_indirect_drawing_disabled"),
-                  os.environ.get("HL2RS_PROFILE_DIRECT_DRAW") == "1")
+    requested_mode = os.environ.get("HL2RS_PROFILE_DIRECT_DRAW", os.environ.get("HL2RS_DIRECT_DRAW"))
+    if requested_mode in ("0", "1"):
+        replay.expect("camera indirect drawing disabled", completion.get("camera_indirect_drawing_disabled"), requested_mode == "1")
+    else:
+        replay.holds("camera draw policy reported", isinstance(completion.get("camera_indirect_drawing_disabled"), bool))
     result["gpu_completion"] = completion
     result["adapter"] = run.report["render"].get("adapter")
     result["backend"] = run.report["render"].get("backend")
@@ -106,6 +112,10 @@ def main():
     }), encoding="utf-8")
     results, failures = {}, []
     scenes = requested_scenes(os.environ.get("BLUR_SCENES", "still turn swing"))
+    if os.environ.get("BLUR_PRIME") == "1":
+        # Declared before collection: preserve cold/priming runs separately, then measure.
+        priming = [measure(scenes[0], mode, "prime") for mode in (False, True)]
+        (replay.OUT / "priming.json").write_text(json.dumps(priming, indent=2), encoding="utf-8")
     for scene in scenes:
         modes = {False: [], True: []}
         for repeat in range(int(os.environ.get("BLUR_RUNS", "3"))):

@@ -317,7 +317,12 @@ impl AdvancedChoice {
             }
             Self::Filtering => listed_tokens::<Filtering>(),
             Self::ClassicEffects => CLASSIC_EFFECTS_TOKENS.to_vec(),
-            Self::MotionBlur => vec![FLAG_TOKENS[0], FLAG_TOKENS[1], "#GameUI_SettingAdvanced"],
+            Self::MotionBlur => vec![
+                FLAG_TOKENS[0],
+                FLAG_TOKENS[1],
+                "#GameUI_SettingAdvanced",
+                super::localize::placeholders::MOTION_BLUR_ULTRA,
+            ],
             _ => FLAG_TOKENS.to_vec(),
         }
     }
@@ -331,13 +336,7 @@ impl AdvancedChoice {
             Self::ShadowDetail => listed_index(a.shadow_detail),
             Self::Antialiasing => listed_index(a.antialiasing),
             Self::Filtering => listed_index(a.filtering),
-            Self::MotionBlur => {
-                if a.motion_blur {
-                    1 + usize::from(a.motion_blur_viewmodel)
-                } else {
-                    0
-                }
-            }
+            Self::MotionBlur => a.motion_blur_mode() as usize,
             flag => usize::from(flag.flag(a).unwrap_or(false)),
         }
     }
@@ -352,9 +351,10 @@ impl AdvancedChoice {
             Self::Antialiasing => listed_pick(index, &mut a.antialiasing),
             Self::Filtering => listed_pick(index, &mut a.filtering),
             Self::MotionBlur => {
-                if index < 3 {
+                if index < 4 {
                     a.motion_blur = index != 0;
-                    a.motion_blur_viewmodel = index == 2;
+                    a.motion_blur_viewmodel = index >= 2;
+                    a.motion_blur_world = index == 3;
                 }
             }
             flag => {

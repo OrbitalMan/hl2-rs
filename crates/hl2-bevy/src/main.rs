@@ -713,12 +713,7 @@ fn main() -> Result<()> {
     } else {
         default_plugins
     };
-    let mut app = App::new();
-    if options.background {
-        app.add_plugins(bevy::app::ScheduleRunnerPlugin::run_loop(
-            performance::background_interval(options.profile),
-        ));
-    }
+    let mut app = startup::make_app(options.background, options.profile);
     if let Some(path) = &options.audio_trace {
         app.insert_resource(audio::AudioTrace::create(path)?);
     }

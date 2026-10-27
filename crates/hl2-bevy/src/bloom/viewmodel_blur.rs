@@ -47,7 +47,7 @@ pub(super) fn update(
     let scene_time = game.as_ref().map_or(0., |g| g.scene.time);
     let enabled = ui.is_some_and(|ui| {
         let a = &ui.source.config.video.advanced;
-        a.motion_blur && a.motion_blur_viewmodel
+        a.motion_blur_mode().viewmodel()
     }) && sim.is_some_and(|sim| !sim.paused() && !sim.background_level)
         && game.as_ref().is_some_and(|g| !g.inventory.carrying())
         && draws
@@ -78,11 +78,10 @@ pub(super) fn update(
         let blur = WeaponBlur {
             max: if ready { 0.12 } else { 0. },
             world: false,
+            camera_moving: false,
         };
         if current != Some(&blur) {
-            commands
-                .entity(entity)
-                .insert((blur, MotionVectorPrepass, DepthPrepass));
+            commands.entity(entity).insert((blur, MotionVectorPrepass));
         }
     }
 }
@@ -109,6 +108,7 @@ mod tests {
                 WeaponBlur {
                     max: 0.12,
                     world: false,
+                    camera_moving: false,
                 },
                 MotionVectorPrepass,
                 DepthPrepass,

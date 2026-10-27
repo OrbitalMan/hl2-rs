@@ -1,5 +1,51 @@
 # Design
 
+## Restore weapon-only Advanced and opt into Ultra (2026-10-27)
+
+Owner decision during wrap-up: Disabled and Enabled retain retail behavior. Advanced adds
+only viewmodel animation reconstruction to retail camera blur, as the a8 design did. Ultra
+adds reconstructed camera/world and opaque/masked projectile motion. A default-false
+motion_blur_world field preserves old Advanced saves as weapon-only; a shared typed mode
+policy drives UI and host gates. Selecting Ultra enables both extensions; the retail master
+cvar resets to Enabled. Ultra is a localized HL2RS label: the installed GameUI_Ultra token
+actually displays Very High. A cyan status explains Ultra's experimental GPU tuning.
+Retain the saved fields, test all four modes/legacy JSON/cvar reset and owned labels, then
+verify GPU world/weapon pass activation and Advanced performance. Historical benchmark
+series labelled Advanced before this split measured what is now Ultra. No GPU model is
+required/blocked for Ultra; frame budgets and measured resolution/AA determine suitability.
+
+## Bound the weapon reduction to current raster coverage (2026-10-27)
+
+Both cooperative kernels preserve their results but fail to establish a Metal cost win;
+retain them and their GPU comparator on the cooperative archive branch. Return to the
+fragment reduction. For the weapon camera only, project the existing per-camera visible
+meshes' current AABBs after transform/visibility updates. Union conservative screen bounds;
+missing/nonfinite or near-plane-crossing bounds fail open to the full frame. Fully behind
+or offscreen boxes contribute nothing. Expand by two source pixels and round outward to
+4x4 reduction texels. Clear the entire existing reduced attachment, then scissor only the
+first reduction draw; later dilation/gathers remain full and preserve blur trails. No new
+image/pass, sample/tap/exposure/AA reduction or per-frame heap allocation. World reduction
+stays full. Test projection conservativeness and odd/edge/empty extents, then weapon coverage,
+silhouettes and three native pairs. Profile projected-region CPU cost and processed texels.
+
+Promote the independently useful direct-drawing policy only for the measured Apple M1 Pro
+Metal adapter, with an explicit startup override and the profiling override retained. Other
+GPUs keep their existing default. Choose/register before cameras spawn; record the selected
+mode, test hardware/override policy and verify normal packaged captures before committing.
+Move background app construction into a startup helper to keep main.rs within its existing
+size baseline. This is a narrow startup policy, not a new renderer or third-party patch.
+
+## Declare priming separately from sustained measurements (2026-10-27)
+
+Several first pairs have baseline-memory drift while subsequent pairs are stable. Keep
+those original results. For future sustained qualification, BLUR_PRIME=1 prospectively
+records one Enabled and one Advanced priming run before the three measured alternating
+pairs. Retain their full reports/counters in priming.json; do not mix them into sustained
+medians or delete cold/pressure evidence. Every measured pair retains the same resource
+matching and frame-time guards. Priming is explicit and defaults off. This distinguishes
+cold allocation/cache behavior from steady workload; it does not establish lower peak memory
+or excuse pressure caused by a feature. Record the command/policy before collecting data.
+
 ## Cooperative motion reduction with unchanged samples (2026-10-27)
 
 Direct drawing removes most render-phase write overhead and greatly improves 720p, but the

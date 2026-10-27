@@ -12,6 +12,8 @@ can affect their interpretation. They are not universal rankings of the approach
 | Branch | Preserved state | Potential reuse |
 | --- | --- | --- |
 | `codex/experiment/blur-quarter-native` | Complete recorded tracked/untracked source snapshot | Mixed-resolution camera filtering and independent object vectors |
+| `codex/experiment/blur-cooperative-reduce` | Complete source/history; GPU serial comparator passes, Metal cost rejected | Shared-memory deterministic motion reduction on other GPU workloads |
+| `codex/experiment/blur-viewmodel-reduction-region` | Complete wrap-up source; weapon-only Advanced and opt-in Ultra | Conservative bounds that skip empty reduction inputs; measured M1 direct drawing |
 | `codex/experiment/blur-direct-drawing` | Complete source snapshot; opt-in profiling mode, native budget fails | Avoiding indirect phase preparation for smaller visible workloads |
 | `codex/experiment/blur-main-depth` | Complete source snapshot; world/weapon probes pass, native cost pending | Sampling post-draw depth without a duplicated prepass export |
 | `codex/experiment/blur-direct-colour-sources` | Complete source snapshot; world probes pass, native budget fails | Reading resolved post-process inputs without foreground copies |

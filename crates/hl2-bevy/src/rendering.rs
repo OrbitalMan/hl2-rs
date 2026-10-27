@@ -17,10 +17,12 @@ use bevy::{
 use modkit_core::Surface;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(crate) mod drawing;
 mod lighting;
 pub(crate) mod lod;
 mod material;
 pub use lighting::present_lighting;
+pub use material::MaterialKey;
 mod model_cache;
 use material::{alpha_mode, cube_image_filtered, image_filtered, mip_image_filtered};
 pub(crate) use material::{black_cube, fallback_images, image, make_material, sampler_descriptor};
@@ -158,17 +160,6 @@ pub struct ModelLit {
     last: Option<(glam::Vec3, bool)>,
     /// Entity lights (muzzle elights) lit this draw last time: relight once they end.
     dynamic: bool,
-}
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct MaterialKey {
-    two_sided: bool,
-}
-impl From<&SourceMaterial> for MaterialKey {
-    fn from(material: &SourceMaterial) -> Self {
-        Self {
-            two_sided: material.two_sided,
-        }
-    }
 }
 
 #[derive(Default)]

@@ -1,5 +1,4 @@
 //! Optional bounded CPU stage measurements; disabled for ordinary play.
-mod camera_mode;
 mod gpu_completion;
 mod pacing;
 use bevy::prelude::*;
@@ -47,6 +46,16 @@ impl Drop for Scope<'_> {
     }
 }
 impl Performance {
+    pub(crate) fn record_reduction(&self, world: bool, processed: u64, full: u64) {
+        if let Some(stats) = self.1.lock().expect("GPU profiling state").as_mut() {
+            stats.reduction(world, processed, full);
+        }
+    }
+    pub(crate) fn set_camera_drawing(&self, direct: bool) {
+        if let Some(stats) = self.1.lock().expect("GPU profiling state").as_mut() {
+            stats.camera_indirect_drawing_disabled = direct;
+        }
+    }
     pub fn write_report(
         &self,
         output: &mut serde_json::Value,

@@ -69,7 +69,7 @@ pub fn update(
 ) {
     let enabled = ui.is_some_and(|ui| {
         let a = &ui.source.config.video.advanced;
-        a.motion_blur && !a.motion_blur_viewmodel
+        a.motion_blur_mode().retail_camera()
     });
     let Ok((camera, transform, projection, current)) = cameras.single_mut() else {
         return;

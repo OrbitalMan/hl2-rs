@@ -259,6 +259,18 @@ pub(crate) fn fallback_images(
     )
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct MaterialKey {
+    two_sided: bool,
+}
+impl From<&SourceMaterial> for MaterialKey {
+    fn from(material: &SourceMaterial) -> Self {
+        Self {
+            two_sided: material.two_sided,
+        }
+    }
+}
+
 impl bevy::pbr::Material for SourceMaterial {
     fn fragment_shader() -> bevy::shader::ShaderRef {
         "shaders/source.wgsl".into()
