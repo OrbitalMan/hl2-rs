@@ -169,10 +169,10 @@
  ],
  "files": {
   "crates/hl2-bevy/src/assets.rs": 1107,
-  "crates/hl2-bevy/src/audio.rs": 1250,
+  "crates/hl2-bevy/src/audio.rs": 1174,
   "crates/hl2-bevy/src/effects.rs": 1255,
   "crates/hl2-bevy/src/gameplay.rs": 1643,
-  "crates/hl2-bevy/src/main.rs": 1316,
+  "crates/hl2-bevy/src/main.rs": 1204,
   "crates/hl2-bevy/src/rendering.rs": 1764,
   "crates/hl2-bevy/src/video.rs": 1191,
   "crates/hl2-simulation/src/ai/default_schedules.rs": 1247,
@@ -203,7 +203,7 @@
    195
   ],
   "crates/hl2-bevy/src/audio.rs::queue": [
-   327
+   288
   ],
   "crates/hl2-bevy/src/bloom.rs::source_bloom": [
    114
@@ -242,10 +242,10 @@
    148
   ],
   "crates/hl2-bevy/src/main.rs::parse_from": [
-   329
+   203
   ],
   "crates/hl2-bevy/src/main.rs::setup": [
-   171
+   135
   ],
   "crates/hl2-bevy/src/performance.rs::install": [
    136
@@ -266,7 +266,7 @@
    106
   ],
   "crates/hl2-bevy/src/simulation.rs::console_effects": [
-   129
+   112
   ],
   "crates/hl2-bevy/src/simulation.rs::step": [
    167
@@ -434,7 +434,7 @@
    123
   ],
   "crates/hl2-ui/src/console.rs::draw": [
-   231
+   219
   ],
   "crates/hl2-ui/src/console.rs::load": [
    170

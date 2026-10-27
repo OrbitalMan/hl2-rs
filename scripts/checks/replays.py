@@ -576,6 +576,31 @@ def check_commentary():
     holds("node 1 hovered", c5["hovered"] == 1, c5["hovered"])
 
 
+def check_video():
+    """Modal full-screen video playback, skip handling, and fallback execution on missing video."""
+    if CONFIG.exists():
+        CONFIG.unlink()
+    run = game("video", "--map", "background01", "--main-menu", "--width", "1280", "--height", "720",
+               "--movement-script", "test-inputs/bevy-video.json", timeout=120)
+    s = run.samples()
+    v1 = s["video-active"]["console"].get("video")
+    holds("video active during playback", v1 and v1.get("active") is True, v1)
+    holds("video filename is valve", v1 and "valve" in v1.get("filename", ""), v1)
+    holds("video duration > 0", v1 and v1.get("duration", 0) > 0, v1)
+    holds("video exit command recorded", v1 and v1.get("exit_command") == "echo test_exit_command_fired", v1)
+
+    v2 = s["video-skipped"]["console"].get("video")
+    holds("video inactive after space skip", not v2 or not v2.get("active"), v2)
+    out2 = s["video-skipped"]["console"]["output"]
+    holds("exit command executed after skip", any("test_exit_command_fired" in line for line in out2), out2)
+
+    v3 = s["video-fallback"]["console"].get("video")
+    holds("video inactive after fallback", not v3 or not v3.get("active"), v3)
+    out3 = s["video-fallback"]["console"]["output"]
+    holds("fallback warning logged", any("Unable to play video: missing_test_vid" in line for line in out3), out3)
+    holds("fallback exit command executed", any("test_missing_exit_fired" in line for line in out3), out3)
+
+
 def check_bg_compare():
     """Each game's chapter 1 background at 1024x768, FOV 75 (compare with the retail images)."""
     for game_, map_ in (("hl2", "background01"), ("episodic", "ep1_background01"),
@@ -1093,7 +1118,7 @@ UI_FIXTURES = tuple(f"bevy-chapters-{game}{suffix}" for game in ("hl2", "episodi
                "bevy-flashlight-depth-actor", "bevy-flashlight-depth-fence",
                "bevy-options-motion-blur", "bevy-viewmodel-motion-blur", "bevy-flashlight-viewmodel-pistol", "bevy-flashlight-viewmodel-smg", "bevy-canals-lamp", "bevy-flashlight-availability",
                "bevy-options-status-mouse", "bevy-options-status-audio", "bevy-options-status-advanced",
-               "bevy-lostcoast-commentary")
+               "bevy-lostcoast-commentary", "bevy-video")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1647,6 +1672,7 @@ CHECKS = [
     Check("viewmodel_motion_blur", check_viewmodel_motion_blur, "shared"),
     Check("flashlight_viewmodel", check_flashlight_viewmodel, "shared"),
     Check("commentary", check_commentary, "shared"),
+    Check("video", check_video, "shared"),
     Check("window", check_window, "windowed"),
     Check("window_place", check_window_place, "macos"),
     Check("no_border", check_no_border, "windows"),

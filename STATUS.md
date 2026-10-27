@@ -1,5 +1,15 @@
 # STATUS
 
+## Movie playback (playvideo, playvideo_exitcommand) and startup video sequence verified (2026-10-27)
+
+- Verified movie playback commands `playvideo` and `playvideo_exitcommand` and startup video sequence across `source-assets`, `hl2-ui`, and `hl2-bevy`.
+- Container parser reads Bink 1 headers (`BIKi`, `BIKb`, `BIKf`, `BIKg`, `BIKh`), frame dimensions, frame rates, and durations.
+- Console commands support path normalization (`media/<filename>.bik`), modal blackout, letterbox/pillarbox aspect framing, elapsed time tracking, and skip key inputs (Escape, Space, Enter, Backquote/Tilde, and mouse click).
+- Retail fallback invariant verified: missing or unplayable videos immediately execute the exit command and log `Unable to play video: %s`.
+- Audio output is muted during active video playback and unmuted upon completion.
+- Startup video sequence loads `StartupVids.txt` (default `media/valve.bik`), skippable with `--novid` / `-novid` or during unattended runs.
+- Packaged replay check `video` (`test-inputs/bevy-video.json`) and owned installed video parsing passed; `validate.sh` and `check_windows.sh` passed.
+
 ## Developer commentary mode verified (2026-10-27)
 
 - Verified developer commentary mode across GameUI, simulation, HUD, and host runtime.

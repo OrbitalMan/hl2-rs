@@ -1,5 +1,24 @@
 # Design
 
+## Movie playback and startup video sequence (2026-10-27)
+
+Bounded design for full-screen movie playback (`playvideo` / `playvideo_exitcommand`) and the startup video sequence across `source-assets`, `hl2-ui`, and `hl2-bevy`:
+
+1. **Bink container parser (`source-assets::bink`)**:
+   - Parse Bink 1 container header (`BIKi`, `BIKb`, `BIKf`, `BIKg`, `BIKh`): file size, frame count, width, height, FPS (`fps_num / fps_den`), calculated duration in seconds, flags, and audio track parameters.
+   - Unit tests against synthetic header fixtures and owned installation videos (`media/valve.bik`, `media/ep1_recap.bik`, `media/ep2_teaser.bik`).
+2. **Console commands and modal `VideoPanel` (`hl2-ui::console`, `hl2-ui::gameui::video`)**:
+   - Register `playvideo <filename> [width height]` and `playvideo_exitcommand <filename> <exit command>` in `COMMANDS` (`cvars.golden`).
+   - Path resolution: look under `media/<filename>`, appending `.bik` if unadorned.
+   - Implement `VideoPanelState`: full-screen modal blackout, aspect-ratio letterboxing/pillarboxing (`flVideoRatio` vs `flFrameRatio`), skip key handling (`KEY_ESCAPE`, `KEY_SPACE`, `KEY_ENTER`, `KEY_BACKQUOTE` / `~`), elapsed playback clock, and exit command dispatch.
+   - Retail fallback invariant: if the video cannot be opened or played, log `Unable to play video: %s` and immediately dispatch the exit command (`engine->ClientCmd(pExitCommand)`) so campaign progression (e.g. `ep2/cfg/chapter1.cfg` -> `map ep2_outland_01`) never soft-locks.
+3. **Host wiring and startup sequence (`hl2-bevy`)**:
+   - Wire `Effect::PlayVideo` in `sim.console_effects`, muting active background/ambient audio while playback is active and unmuting on stop.
+   - Startup videos: on launch without `--novid` / `-novid`, without `--map`, and without `--no-setup`, check `media/StartupVids.txt` (default `media/valve.bik`), play before displaying the main menu, and transition to the menu upon completion or skip.
+   - Instrument presentation report with active `video` playback state (`filename`, `playing`, `elapsed`, `duration`, `exit_command`).
+
+Validation: unit tests in `source-assets` and `hl2-ui`; `validate.sh`, `check_windows.sh`, and packaged replay checks (`replays.py`).
+
 ## Developer commentary mode (2026-10-27)
 
 Bounded design for Developer Commentary across `source-ui`, `hl2-ui`, `hl2-simulation` and `hl2-bevy`:

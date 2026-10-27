@@ -3,6 +3,7 @@ use crate::source_direction;
 use anyhow::{Result, bail};
 use bevy::{app::RunFixedMainLoopSystems, prelude::*};
 pub(crate) mod commentary;
+pub(crate) mod movie;
 use hl2_simulation::physics::Physics;
 use modkit_core::{
     World,
@@ -457,36 +458,47 @@ impl Simulation {
                     Err(e) => ui.source.log(e),
                 },
                 Effect::Quit => ui.quit_requested = true,
-                Effect::ApplyConfig(cfg) => {
-                    self.fov = cfg.video.fov;
-                    self.vertical_fov = cfg.video.vertical_fov;
-                    self.viewmodel_fov = cfg.video.viewmodel_fov;
-                    // Only a resolution or display mode change touches the window, so applying
-                    // a mouse or audio setting never resizes, re-centres or re-modes it. The
-                    // comparison is against what the window was last given: the console has
-                    // already stored the new configuration when this effect arrives.
-                    let target = WindowSettings::of(&cfg.video);
-                    if self.applied_window != Some(target) {
-                        self.applied_window = Some(target);
-                        self.pending_video_config = Some(cfg.video.clone());
-                    }
-                    let detail = cfg.video.load_detail();
-                    let detail_changed = self.applied_detail.is_some_and(|prev| prev != detail);
-                    self.applied_detail = Some(detail);
-                    ui.source.config = *cfg;
-                    if detail_changed && !self.loading {
-                        let map = game.world.name.clone();
-                        if !map.is_empty() {
-                            ui.map_request = Some(map);
-                            ui.background_request = ui.source.background_level();
-                            self.loading = true;
-                        }
-                    }
-                }
+                Effect::ApplyConfig(cfg) => self.apply_config_effect(ui, game, &cfg),
                 Effect::PlaySound(sound) => {
                     game.sound_requests
                         .push(hl2_simulation::sounds::SoundRequest::ui(sound));
                 }
+                Effect::PlayVideo {
+                    filename,
+                    exit_command,
+                    width,
+                    height,
+                } => {
+                    movie::play_video(self, ui, game, filename, exit_command, width, height);
+                }
+            }
+        }
+    }
+
+    fn apply_config_effect(
+        &mut self,
+        ui: &mut crate::ui_host::Console,
+        game: &mut crate::gameplay::Gameplay,
+        cfg: &hl2_ui::config::Config,
+    ) {
+        self.fov = cfg.video.fov;
+        self.vertical_fov = cfg.video.vertical_fov;
+        self.viewmodel_fov = cfg.video.viewmodel_fov;
+        let target = WindowSettings::of(&cfg.video);
+        if self.applied_window != Some(target) {
+            self.applied_window = Some(target);
+            self.pending_video_config = Some(cfg.video.clone());
+        }
+        let detail = cfg.video.load_detail();
+        let detail_changed = self.applied_detail.is_some_and(|prev| prev != detail);
+        self.applied_detail = Some(detail);
+        ui.source.config = cfg.clone();
+        if detail_changed && !self.loading {
+            let map = game.world.name.clone();
+            if !map.is_empty() {
+                ui.map_request = Some(map);
+                ui.background_request = ui.source.background_level();
+                self.loading = true;
             }
         }
     }

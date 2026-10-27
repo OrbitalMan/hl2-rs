@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: movie playback (playvideo, playvideo_exitcommand), Bink parsing, and startup video sequence
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+
+**Changed:** Implemented movie playback support across `source-assets`, `hl2-ui`, and `hl2-bevy`:
+- In `source-assets`: added `bink` module parsing Bink 1 container headers (`BIKi`, `BIKb`, `BIKf`, `BIKg`, `BIKh`), frame dimensions, frame rates, frame counts, calculated durations, and audio tracks. Verified with synthetic unit tests and parsing all installed video files.
+- In `hl2-ui`: registered console commands `playvideo <filename> [width height]` and `playvideo_exitcommand <filename> <exit command>` in `COMMANDS`; implemented `VideoPanelState` handling modal blackout, letterboxing and pillarboxing viewport rects, elapsed time countdown, skip input handling (Escape, Space, Enter, Backquote/Tilde, and mouse click), and exit command dispatch on playback completion or skip; implemented retail fallback invariant executing the exit command immediately and logging `Unable to play video: %s` if the video is missing; extracted `upcoming_background` in `console.rs` and `skip_video` in `video_panel.rs` to satisfy architectural limits.
+- In `hl2-bevy`: wired `Effect::PlayVideo` in `console_effects`; muted game audio output while video playback is active; added `--novid` / `-novid` CLI flags and `StartupVids.txt` startup video playback sequence; extracted `update_player` and modularized `audio::wav` to tighten audio system line counts; added `video` playback instrumentation in `Console::report()`.
+- Added packaged replay fixture `test-inputs/bevy-video.json` and registered `check_video` in `scripts/checks/replays.py`.
+
+**Why:** Retail Half-Life 2 (and Episode 1/2) uses `playvideo` and `playvideo_exitcommand` to display cinematic videos (such as the introductory Valve logo, the Episode 1 recap, and the Episode 2 teaser) full-screen with audio muting, keyboard/mouse skip capability, and guaranteed command execution upon completion so that chapter transitions and scripts never soft-lock.
+
+**Tested how:** `scripts/checks/validate.sh` (architecture guardrails, 13 Python helper tests, all workspace tests including unit tests and owned installed video parsing, strict Clippy, `cargo fmt --check`), `scripts/checks/check_windows.sh`, and packaged replay checks (`ONLY="video commentary coverage" python3 scripts/checks/replays.py`) verifying active video playback state, space skip, exit command execution, and missing video fallback.
+
+**Result:** Video playback scope complete and verified: container header parsing, console commands, modal full-screen playback, letterboxing/pillarboxing, audio muting, skip input handling, exit command dispatch, and missing video fallback.
+
+**Still broken or not tested:** Full Bink video frame decoding (uses full-screen modal panel presentation with header-driven duration and dimensions); Windows/Linux native platform runtime execution not tested in this session.
+
+**Next:** Chapter browser commentary and movie scope complete; await owner instructions.
+
 ## 2026-10-27 Checkpoint: developer commentary nodes, balloon skins, HUD progress, and chapter browser integration
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

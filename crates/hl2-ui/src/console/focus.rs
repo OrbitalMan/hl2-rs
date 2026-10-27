@@ -257,6 +257,10 @@ impl Console {
     /// button shows pressed/armed until Escape is released and the dialog closes then.
     /// Everything else Escape does happens at once.
     pub fn escape_pressed(&mut self) {
+        if let Some(effects) = self.skip_video() {
+            self.deferred.extend(effects);
+            return;
+        }
         shell::escape_pressed(self);
     }
 
@@ -272,6 +276,10 @@ impl Console {
     /// Opens the console on top with the focus, or closes it (focused or not); it opens only
     /// while `con_enable` is on. Blocked when a modal dialog or blocking subdialog is open.
     pub fn toggle(&mut self) {
+        if let Some(effects) = self.skip_video() {
+            self.deferred.extend(effects);
+            return;
+        }
         shell::toggle(self);
     }
 
@@ -342,6 +350,19 @@ impl Host for Console {
     }
 
     fn modal_input(&mut self, input: &Input) -> Option<Vec<Effect>> {
+        if self.video_panel.is_some() {
+            let skip = input.pressed(Key::Space)
+                || input.pressed(Key::Enter)
+                || input.click
+                || input
+                    .binding_keys
+                    .iter()
+                    .any(|k| k == "Escape" || k == "Backquote" || k == "Space" || k == "Enter");
+            if skip {
+                return self.skip_video();
+            }
+            return Some(Vec::new());
+        }
         if self.is_background_loading() {
             self.occlude_background_controls(input);
             return Some(Vec::new());

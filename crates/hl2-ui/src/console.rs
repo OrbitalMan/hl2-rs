@@ -10,6 +10,7 @@ mod loading;
 mod menu_flow;
 mod options_dialog;
 mod panel;
+mod video_panel;
 
 use crate::gameui::{
     menu::{GameMenu, MenuLayout},
@@ -120,6 +121,8 @@ pub struct Console {
     /// [`Console::tick`] or [`Console::input`].
     deferred: Vec<Effect>,
     pub loading_dialog: Option<crate::gameui::loading::LoadingDialog>,
+    /// Full-screen movie playback panel (`playvideo` / `playvideo_exitcommand`).
+    pub video_panel: Option<crate::gameui::video::VideoPanelState>,
     /// The progress the map loader reports for [`Console::loading_dialog`].
     loading_progress: crate::gameui::loading::ProgressReport,
     pub background_transition: crate::gameui::loading::BackgroundTransitionState,
@@ -298,6 +301,7 @@ impl Default for Console {
             loading_progress: Default::default(),
             background_transition: crate::gameui::loading::BackgroundTransitionState::Idle,
             background_level: false,
+            video_panel: None,
             loaded_map: None,
             loading_background: None,
             theme: Theme::default(),
@@ -612,8 +616,15 @@ impl Console {
     /// Advances the UI clock to `now` (real seconds), once per frame whatever drives the input
     /// (scripted replays too): a keep-video confirmation counts down and reverts at its timeout.
     pub fn tick(&mut self, now: f64) -> Vec<Effect> {
+        let dt = if self.ui_clock > 0.0 {
+            (now - self.ui_clock).max(0.0) as f32
+        } else {
+            0.0
+        };
         self.ui_clock = now;
         self.shell.windows.set_time(now);
+        let video_effects = self.tick_video(dt);
+        self.deferred.extend(video_effects);
         if let Some((confirm, ConfirmKind::KeepVideo(keep))) = &mut self.confirm_box {
             if keep.expired(now) {
                 let previous = keep.previous;
@@ -729,7 +740,29 @@ impl Console {
         top + VIEWMODEL_DEBUG_HEIGHT
     }
 
+    fn upcoming_background<'a>(&'a self, menu_cat: &'a str) -> Option<(&'a str, &'a str)> {
+        let transition = &self.background_transition;
+        transition
+            .target_category()
+            .zip(transition.target_map())
+            .or_else(|| {
+                self.loaded_map
+                    .as_ref()
+                    .map(|m| (m.game.as_str(), m.map.as_str()))
+            })
+            .or_else(|| {
+                let game = self.gameui.category_game(menu_cat);
+                self.gameui
+                    .background_maps
+                    .get(game)
+                    .map(|map| (game, map.as_str()))
+            })
+    }
+
     pub fn draw(&self, time: f64) {
+        if self.draw_video() {
+            return;
+        }
         if self.draw_loading_screen() {
             return;
         }
@@ -745,22 +778,7 @@ impl Console {
             let is_widescreen = self.canvas.width() / self.canvas.height().max(1.0) >= 1.6;
             // The pre-blurred image of the upcoming background: the transition's target, else
             // the loaded map, else the menu category's own background.
-            let transition = &self.background_transition;
-            let upcoming = transition
-                .target_category()
-                .zip(transition.target_map())
-                .or_else(|| {
-                    self.loaded_map
-                        .as_ref()
-                        .map(|m| (m.game.as_str(), m.map.as_str()))
-                })
-                .or_else(|| {
-                    let game = self.gameui.category_game(menu_cat);
-                    self.gameui
-                        .background_maps
-                        .get(game)
-                        .map(|map| (game, map.as_str()))
-                });
+            let upcoming = self.upcoming_background(menu_cat);
             let bg_tex =
                 upcoming.and_then(|(game, map)| self.background_texture(game, map, is_widescreen));
             if let Some(loading) = &self.loading_dialog {

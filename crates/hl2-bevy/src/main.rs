@@ -111,6 +111,8 @@ struct Options {
     main_menu: bool,
     /// Override the startup main-menu background map.
     background_map: Option<String>,
+    /// Skip startup videos on launch (`-novid` / `--novid`).
+    novid: bool,
     /// Persisted user configuration.
     config: hl2_ui::config::Config,
 }
@@ -189,6 +191,7 @@ impl Options {
             fake_monitor: None,
             main_menu: false,
             background_map: None,
+            novid: false,
             config,
         };
         let mut explicit_mode = None;
@@ -288,137 +291,10 @@ impl Options {
                     );
                 }
                 "--main-menu" => options.main_menu = true,
+                "-novid" | "--novid" => options.novid = true,
                 "--background-map" => options.background_map = Some(next(&mut args)?),
                 "--help" | "-h" => {
-                    println!("Usage: hl2-bevy [OPTIONS]\n");
-                    println!("Options:");
-                    println!(
-                        "      --ai                            Enable NPC AI think loop (default: enabled)"
-                    );
-                    println!(
-                        "      --audio-trace <path.jsonl>      Record audio cue and soundscape events to a JSONL trace file"
-                    );
-                    println!(
-                        "      --background                    Run headlessly without opening an OS window (for background replay / test runs)"
-                    );
-                    println!(
-                        "      --background-map <name>         Override the 3D background map loaded behind the main menu (default: background01)"
-                    );
-                    println!(
-                        "      --borderless                    Start in borderless windowed mode (native full-screen Space on macOS)"
-                    );
-                    println!(
-                        "      --capture <path.png>            Save screenshot of the final rendered frame to a PNG file"
-                    );
-                    println!(
-                        "      --capture-burst <count>         Capture a sequence of N frames to PNG files (requires --map)"
-                    );
-                    println!(
-                        "      --capture-live                  Capture frames live during interactive execution (requires --map)"
-                    );
-                    println!(
-                        "      --capture-monitor <path.png>    Capture an in-game camera monitor texture to a PNG file (requires --map)"
-                    );
-                    println!(
-                        "      --capture-window                Capture the presented OS window buffer rather than the internal game viewport"
-                    );
-                    println!(
-                        "      --cpu-skinning                  Use CPU vertex skinning instead of GPU compute skinning"
-                    );
-                    println!(
-                        "      --fake-monitor <spec>           Simulate a monitor with specified modes (e.g. 1920x1080,1280x720)"
-                    );
-                    println!(
-                        "      --fly                           Start with flight/noclip mode enabled (requires --map)"
-                    );
-                    println!(
-                        "      --frag-swept-box                Use swept-box physics query for frag grenade collision"
-                    );
-                    println!(
-                        "      --frames <count>                Exit automatically after rendering N frames (30..=36000)"
-                    );
-                    println!(
-                        "      --fullscreen                    Start in exclusive fullscreen display mode"
-                    );
-                    println!(
-                        "      --game <path>                   Path to Half-Life 2 installation (overrides saved preference and HL2_ROOT)"
-                    );
-                    println!(
-                        "      --height <pixels>               Window height in pixels (240..=8192, default from video config)"
-                    );
-                    println!(
-                        "  -h, --help                          Show this help message and exit"
-                    );
-                    println!(
-                        "      --main-menu                     Open the main menu (overlaid on top of --map if specified)"
-                    );
-                    println!(
-                        "      --map <name>                    Map to load directly into gameplay (e.g. d1_trainstation_01)"
-                    );
-                    println!(
-                        "      --max-edicts <count>            Runtime entity limit (default: 2048, 0 for unlimited)"
-                    );
-                    println!(
-                        "      --movement-script <path.json>   Replay recorded player inputs from a movement script fixture (requires --map)"
-                    );
-                    println!(
-                        "      --mute                          Silence all audio output for this run (Audio settings unchanged)"
-                    );
-                    println!(
-                        "      --mute-ambient                  Mute looping ambient soundscapes and background environment audio"
-                    );
-                    println!("      --no-ai                         Disable NPC AI think loop");
-                    println!(
-                        "      --no-focus                      Launch window without requesting input focus (for unattended test runs)"
-                    );
-                    println!(
-                        "      --no-pvs                        Disable BSP potential visible set (PVS) occlusion culling"
-                    );
-                    println!(
-                        "      --no-setup                      Fail with an error instead of opening setup if installation is missing"
-                    );
-                    println!(
-                        "      --pitch <degrees>               Set initial camera pitch angle in degrees (requires --map)"
-                    );
-                    println!(
-                        "      --position <x> <y> <z>          Set initial camera spawn coordinates (requires --map)"
-                    );
-                    println!(
-                        "      --profile                       Record CPU stage execution timings in the run report"
-                    );
-                    println!(
-                        "      --report <path.json>            Path for simulation report output (default: artifacts/bevy-report.json)"
-                    );
-                    println!(
-                        "      --setup                         Open the setup dialog to choose/remember the Half-Life 2 folder"
-                    );
-                    println!(
-                        "      --setup-preview <path.png>      Capture a screenshot of the setup dialog and exit without loading a map"
-                    );
-                    println!(
-                        "      --tonemap-scale <scale>         Override HDR tonemapping exposure multiplier (positive float)"
-                    );
-                    println!(
-                        "      --uncapped                      Disable VSync to render and present frames unconstrained"
-                    );
-                    println!(
-                        "      --volume <0.0..1.0>             Set master audio volume level (default from audio config)"
-                    );
-                    println!(
-                        "      --width <pixels>                Window width in pixels (320..=8192, default from video config)"
-                    );
-                    println!(
-                        "      --window-at <x> <y>             Initial window position on desktop in pixels"
-                    );
-                    println!(
-                        "      --windowed                      Start in windowed display mode"
-                    );
-                    println!(
-                        "      --world-partition               Enable spatial world partition culling"
-                    );
-                    println!(
-                        "      --yaw <degrees>                 Set initial camera yaw angle in degrees (requires --map)"
-                    );
+                    startup::print_help();
                     std::process::exit(0);
                 }
                 _ => bail!("unknown option {arg}; use --help"),
@@ -995,46 +871,9 @@ fn setup(
             cursor.visible = false;
         }
     }
-    let max_samples = video::adapter_max_msaa_samples(adapter.as_deref());
-    if let Some(adapter) = adapter.as_deref() {
-        let device_type_str = format!("{:?}", adapter.0.device_type);
-        let device_type = match device_type_str.as_str() {
-            "DiscreteGpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Discrete,
-            "IntegratedGpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Integrated,
-            "Cpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Cpu,
-            "VirtualGpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Virtual,
-            _ => hl2_ui::gameui::recommendation::GpuDeviceType::Other,
-        };
-        let gpu = hl2_ui::gameui::recommendation::GpuSpecs {
-            name: adapter.0.name.clone(),
-            device_type,
-            vendor_id: Some(adapter.0.vendor),
-            device_id: Some(adapter.0.device),
-            backend: Some(format!("{:?}", adapter.0.backend)),
-            max_msaa_samples: Some(max_samples),
-        };
-        let cpu = hl2_ui::gameui::recommendation::CpuSpecs::new(
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4),
-        );
-        let rec = hl2_ui::gameui::recommendation::SystemRecommendation::from_specs(cpu, gpu);
-        console_ui.source.set_system_recommendation(rec);
-    }
-    if let Some(map) = options.map.as_ref().filter(|_| prepared.1) {
-        // A command-line map has no running game: it is not resolved against the game of the
-        // saved menu background that was loaded first.
-        let game = source_assets::install::game_for_map(&options.game, map, None)
-            .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned());
-        console_ui.map_request = Some(map.clone());
-        console_ui.map_request_game = Some(game.clone());
-        console_ui.background_request = options.main_menu;
-        if options.main_menu {
-            console_ui.source.start_background_loading(&game, map);
-        } else {
-            console_ui.source.start_loading(map);
-        }
-    }
+    set_system_recommendation(&mut console_ui, adapter.as_deref());
+    request_startup_map(&mut console_ui, &options, prepared.1);
+    simulation::movie::startup_video_sequence(&options, prepared.1, &mut console_ui);
     commands.insert_resource(console_ui);
     // Every game camera below renders into the game frame (see `video::present_frame`).
     video::install_frame(
@@ -1046,6 +885,7 @@ fn setup(
         options.flexible_aspect,
         options.display_mode.effective() == hl2_ui::config::DisplayMode::Windowed,
     );
+    let max_samples = video::adapter_max_msaa_samples(adapter.as_deref());
     let msaa = video::msaa_for_hardware(options.config.video.advanced.antialiasing, max_samples);
     commands.spawn((
         Camera2d,
@@ -1106,6 +946,54 @@ fn setup(
         tonemap::ToneMapped,
         bevy::camera::visibility::RenderLayers::layer(0).with(5),
     ));
+}
+
+fn set_system_recommendation(
+    console_ui: &mut ui_host::Console,
+    adapter: Option<&RenderAdapterInfo>,
+) {
+    let Some(adapter) = adapter else {
+        return;
+    };
+    let max_samples = video::adapter_max_msaa_samples(Some(adapter));
+    let device_type_str = format!("{:?}", adapter.0.device_type);
+    let device_type = match device_type_str.as_str() {
+        "DiscreteGpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Discrete,
+        "IntegratedGpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Integrated,
+        "Cpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Cpu,
+        "VirtualGpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Virtual,
+        _ => hl2_ui::gameui::recommendation::GpuDeviceType::Other,
+    };
+    let gpu = hl2_ui::gameui::recommendation::GpuSpecs {
+        name: adapter.0.name.clone(),
+        device_type,
+        vendor_id: Some(adapter.0.vendor),
+        device_id: Some(adapter.0.device),
+        backend: Some(format!("{:?}", adapter.0.backend)),
+        max_msaa_samples: Some(max_samples),
+    };
+    let cpu = hl2_ui::gameui::recommendation::CpuSpecs::new(
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4),
+    );
+    let rec = hl2_ui::gameui::recommendation::SystemRecommendation::from_specs(cpu, gpu);
+    console_ui.source.set_system_recommendation(rec);
+}
+
+fn request_startup_map(console_ui: &mut ui_host::Console, options: &Options, is_background: bool) {
+    if let Some(map) = options.map.as_ref().filter(|_| is_background) {
+        let game = source_assets::install::game_for_map(&options.game, map, None)
+            .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned());
+        console_ui.map_request = Some(map.clone());
+        console_ui.map_request_game = Some(game.clone());
+        console_ui.background_request = options.main_menu;
+        if options.main_menu {
+            console_ui.source.start_background_loading(&game, map);
+        } else {
+            console_ui.source.start_loading(map);
+        }
+    }
 }
 type EntityDrawQuery<'w, 's> = Query<
     'w,

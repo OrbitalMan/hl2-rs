@@ -13,4 +13,5 @@ pub mod options;
 pub mod recommendation;
 pub mod resources;
 pub mod settings;
+pub mod video;
 pub mod video_confirm;

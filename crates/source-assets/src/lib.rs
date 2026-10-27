@@ -1,4 +1,5 @@
 pub mod animation;
+pub mod bink;
 pub mod bsp;
 pub mod captions;
 pub mod install;
