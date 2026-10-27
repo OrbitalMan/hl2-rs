@@ -1,5 +1,39 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: dialog lifetime and background request coordination
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.
+
+**Changed:** Clear fading dialog payloads when replacing the window stack; compose the
+return/quit box at its actual stack position. Distinguish queued requests from active
+workers. Keep newer backgrounds queued, coalesce identical requests, discard superseded
+background results before installation, and protect foreground loading presentation.
+Chapter starts reset background transition state; stale background failures cannot clear
+the foreground dialog. Closing the browser leaves background work alive.
+
+**Why:** An orphaned return-confirmation rectangle permanently clipped new windows.
+A consumed pending flag misidentified an active background worker as gameplay loading,
+dropped the next background request, and left the UI waiting for that dropped target.
+
+**Tested how:** validate.sh passes: 1,141 Rust tests, 94 ignored, 13 Python helper tests,
+architecture, strict Clippy and fmt. Windows-target strict Clippy passes. Owned native-input
+system test responds to arrows and Escape press/release while simulation is loading,
+reopens and submits a chapter. Owned asynchronous Episode One/Lost Coast background
+scene-switch test passes. New focused tests cover return confirmation, foreground
+supersession, stale failure, queued background, active gameplay and duplicate requests.
+
+**Result:** Source checks and owned headless paths pass. Retail static loading notifications
+and separate loading presentation reviewed by binary hash/address; uninterrupted native
+input responsiveness is not established by those findings.
+
+**Still broken or not tested:** Packaged return-browser capture and post-change replays
+pending. Native Windows/Linux runtime comparison not tested. Input-test attempts initially
+used press instead of release and expected selection to survive reopening; corrected to
+the established release activation and reset-on-open behavior. Evidence retained.
+
+**Next:** Remove unused per-map GameUI preparation, measure loading and frame costs, rebuild
+and compare packaged captures/replays.
+
 ## 2026-10-27 Checkpoint: portability and declared prerequisites
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

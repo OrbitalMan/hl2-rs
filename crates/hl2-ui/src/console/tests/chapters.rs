@@ -268,3 +268,38 @@ fn chapter_window_remains_interactive_during_background_load() {
         "ep1_citadel_00"
     ))));
 }
+
+#[test]
+fn returning_to_menu_drops_confirmation_before_reopening_chapters() {
+    let mut console = installed_console();
+    console.level_loaded(false);
+    console.escape();
+    click_row(&mut console, 5);
+    assert!(console.confirm_box.is_some());
+    console.confirm_input(&Input {
+        keys: [Key::Enter].into(),
+        ..Default::default()
+    });
+    assert_eq!(console.mode(), Mode::MainMenu);
+    assert!(console.closing_confirm_box.is_none());
+    assert!(!console.shell.windows.is_open(Window::Confirmation));
+    console.open_chapters("hl2");
+    assert_eq!(console.mode(), Mode::NewGame);
+    console.tick(10.);
+    assert!(!console.modal_dialog_open());
+}
+
+#[test]
+fn starting_chapter_cancels_background_presentation_and_stale_failure() {
+    let mut console = installed_console();
+    console.start_background_loading("ep2", "ep2_background01");
+    console.start_loading("ep2_outland_01");
+    assert!(!console.is_background_loading());
+    assert!(console.modal_dialog_open());
+    console.background_load_failed_for_map("ep2", "ep2_background01", "stale worker failure");
+    assert!(console.modal_dialog_open());
+    console.level_loaded_for_map("ep2", "ep2_outland_01", false);
+    assert_eq!(console.mode(), Mode::Gameplay);
+    assert!(!console.is_loading());
+    assert!(!console.is_background_loading());
+}

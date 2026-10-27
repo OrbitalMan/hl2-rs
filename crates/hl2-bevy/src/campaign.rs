@@ -27,6 +27,8 @@ struct Request {
     /// Load as the main-menu background level (menu shown, HUD hidden).
     background: bool,
 }
+mod loading;
+
 type ResultSlot = Arc<Mutex<Option<Result<assets::LoadedMap, String>>>>;
 struct Job {
     request: Request,
@@ -83,14 +85,7 @@ pub fn poll(
     status: Res<Status>,
 ) {
     if let Some(job) = &campaign.job {
-        // Setting a background map must never interrupt an ongoing gameplay map load.
-        if !job.request.background && ui.background_request {
-            ui.source
-                .log("Gameplay map load in progress; background map request ignored");
-            ui.background_request = false;
-            ui.map_request = None;
-            ui.map_request_game = None;
-        }
+        loading::preserve_gameplay_request(&job.request, &mut ui);
     } else {
         let background = std::mem::take(&mut ui.background_request);
         let requested_game = ui.map_request_game.take();
@@ -176,6 +171,13 @@ pub fn poll(
         return;
     };
     let job = campaign.job.take().expect("completed map job");
+    if loading::superseded(&job.request, &mut ui) {
+        if let Err(error) = result {
+            ui.source.log(&error);
+            campaign.failures.push(error);
+        }
+        return;
+    }
     let mut loaded = match result {
         Ok(loaded) => loaded,
         Err(error) => {

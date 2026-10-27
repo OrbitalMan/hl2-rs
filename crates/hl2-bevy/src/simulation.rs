@@ -418,7 +418,7 @@ impl Simulation {
                 }
                 Effect::Map(map) => self.request_gameplay_map(ui, map, None),
                 Effect::MainMenuMap(background) => {
-                    if self.loading && !ui.background_request {
+                    if ui.map_request.is_some() && !ui.background_request {
                         ui.source
                             .log("Gameplay map load in progress; ignoring background map request");
                     } else {
@@ -1578,5 +1578,32 @@ mod tests {
                 .iter()
                 .any(|s| s.contains("Gameplay map load in progress"))
         );
+    }
+    #[test]
+    fn running_background_worker_does_not_drop_new_background_request() {
+        let mut sim = Simulation::new(
+            &World::default(),
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
+        sim.loading = true;
+        ui.source.start_background_loading("hl2", "background01");
+        // The campaign has consumed the first request while its worker remains active.
+        assert!(!ui.background_request);
+        sim.console_effects(
+            &mut ui,
+            &mut game,
+            vec![hl2_ui::console::Effect::MainMenuMap(
+                hl2_ui::console::GameMap::new("ep2", "ep2_background01"),
+            )],
+        );
+        assert_eq!(ui.map_request.as_deref(), Some("ep2_background01"));
+        assert_eq!(ui.map_request_game.as_deref(), Some("ep2"));
+        assert!(ui.background_request);
     }
 }

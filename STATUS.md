@@ -1,5 +1,18 @@
 # STATUS
 
+## Background-loading bugs: source checkpoint (2026-10-27)
+
+- Fixed orphaned return-confirmation occlusion and composed it through the window stack.
+- Fixed pending-vs-active background request confusion; newest request remains queued,
+  stale results are discarded, and chapter loading supersedes background presentation.
+- 1,141 Rust tests / 94 ignored, 13 Python checks, strict Clippy/fmt/architecture and
+  Windows-target Clippy pass. Owned native-input and asynchronous background tests pass.
+- Packaged capture/replay and loading-performance validation pending. Baseline capture
+  attempt with unselected keyboard rows retained as rejected evidence; replay now selects
+  the rows explicitly. Ordinary Windows/Linux play and native retail input comparison
+  remain not tested.
+
+
 ## Portability / dependency declaration checkpoint (2026-10-27)
 
 - Owner deferred movies/commentary before runtime source or Cargo dependencies were added.

@@ -6,6 +6,7 @@ impl Console {
     /// Displays the modal loading dialog for the given map.
     pub fn start_loading(&mut self, map: &str) {
         self.clear_menu_hover();
+        self.background_transition.reset();
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new(map));
         self.loading_progress.reset();
     }
@@ -40,9 +41,7 @@ impl Console {
 
     /// Ends the background transition if `game`'s `map` is the target, ignoring stale failures.
     pub fn background_load_failed_for_map(&mut self, game: &str, map: &str, reason: &str) {
-        if self.background_transition.is_active()
-            && !self.background_transition.fail_map(game, map, reason)
-        {
+        if !self.background_transition.fail_map(game, map, reason) {
             return;
         }
         self.loading_dialog = None;

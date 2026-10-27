@@ -51,6 +51,9 @@ impl Console {
             base => {
                 self.base = base;
                 self.shell.windows.clear();
+                self.closing_confirm_box = None;
+                self.options.closing_sub = None;
+                self.options.closing_confirm = None;
             }
         }
         self.sync_mode();

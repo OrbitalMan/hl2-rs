@@ -1131,3 +1131,21 @@ Windows CI job and add native Linux/macOS source validation without owned assets
 Local macOS validation and Windows-target checking do not establish a Linux pass;
 new hosted jobs remain pending until run. No runtime, Cargo dependency or asset
 changes are needed for this bounded documentation/CI checkpoint.
+
+## Background loading and dialog lifetime (2026-10-27)
+
+Reproduce the return-confirmation silhouette and requests made while a background
+worker is running. Remove orphaned closing dialog payloads when the window stack
+is replaced; compose confirmations only at their actual stack position. Keep
+chapter controls available during background work. Pending-request flags do not
+describe the active worker: campaign owns that distinction. Preserve foreground
+loads, queue the newest background request, and discard superseded background
+results before installing their world or changing the newer loading presentation.
+Foreground loading cancels the background transition presentation. Closing a
+browser does not cancel its background worker.
+
+Validate with UI lifetime/drawing and pending-worker regressions, owned asynchronous
+loads, packaged return-to-menu captures and chapter replays; run strict portable
+checks. Inspect pinned retail loading notifications/resources, distinguishing
+static presentation evidence from untested native responsiveness. Avoid rebuilding
+unused GameUI resources on each runtime map load; measure loading/frame costs.

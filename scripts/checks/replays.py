@@ -179,7 +179,10 @@ def check_return_menu():
                "--movement-script", "test-inputs/bevy-menu-return.json")
     expect("loaded", run.loaded(), ["hl2/background01", "ep2/ep2_background01",
                                     "hl2/d1_trainstation_02", "hl2/background01"])
-    expect("mode", run.console()["mode"], "MainMenu")
+    expect("mode", run.console()["mode"], "NewGame")
+    browser = run.sample("chapters-after-return")["console"]
+    expect("chapter game after return", browser["chapters"]["game"], "hl2")
+    expect("no stale confirmation", browser["confirm"], None)
     expect("saved menu background", saved()["gameplay"].get("background_map"), "background01")
 
 
