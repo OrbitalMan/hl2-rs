@@ -2,6 +2,33 @@
 use super::Request;
 use crate::ui_host;
 
+/// Resolve zero-time map-spawn I/O and the authored background view before revealing it.
+/// Gameplay maps retain their ordinary first-tick startup and command-line overrides.
+pub(super) fn install_view(
+    request: &Request,
+    options: &crate::Options,
+    loaded: &mut crate::assets::LoadedMap,
+    sim: &mut crate::simulation::Simulation,
+    eye: glam::Vec3,
+) {
+    sim.change_map(&loaded.world, eye, request.direct);
+    sim.background_level = request.background;
+    if request.direct {
+        if let Some(yaw) = options.yaw {
+            sim.yaw = yaw;
+        }
+        if options.pitch != 0. {
+            sim.pitch = options.pitch;
+        }
+        if options.fly {
+            sim.fly = true;
+        }
+    }
+    if request.background {
+        sim.prepare_background_view(&mut loaded.gameplay);
+    }
+}
+
 pub(super) fn start(request: &Request, ui: &mut ui_host::Console) {
     if request.background {
         ui.source

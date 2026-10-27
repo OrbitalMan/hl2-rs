@@ -245,18 +245,8 @@ pub fn poll(
     for entity in &old_draws {
         commands.entity(entity).despawn();
     }
-    sim.change_map(&loaded.world, eye, job.request.direct);
-    sim.background_level = job.request.background;
+    loading::install_view(&job.request, &options, &mut loaded, &mut sim, eye);
     if job.request.direct {
-        if let Some(yaw) = options.yaw {
-            sim.yaw = yaw;
-        }
-        if options.pitch != 0. {
-            sim.pitch = options.pitch;
-        }
-        if options.fly {
-            sim.fly = true;
-        }
         ui.source
             .level_loaded_for_map(&loaded.game, &loaded.world.name, job.request.background);
         if !job.request.background
@@ -291,6 +281,7 @@ pub fn poll(
         ui.source.config.video.advanced.filtering,
         options.mute,
     );
+    crate::capture::installed_frame(&mut commands, options.capture.as_ref());
 }
 
 /// Player-owned transient state survives changelevel, but fresh direct loads start anew.

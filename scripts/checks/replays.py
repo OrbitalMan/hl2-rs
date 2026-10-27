@@ -601,6 +601,21 @@ def check_video():
     holds("fallback exit command executed", any("test_missing_exit_fired" in line for line in out3), out3)
 
 
+def check_background_reveal():
+    """The install frame already uses the authored background camera, before tick one."""
+    if CONFIG.exists():
+        CONFIG.unlink()
+    settings(video={"hdr": "none", "hdr_migrated": True,
+                    "advanced": {"motion_blur": False, "antialiasing": "x4"}})
+    run = game("background_reveal", "--map", "background01", "--main-menu",
+               "--width", "1024", "--height", "768", "--frames", "30")
+    installed = run.capture.with_name("background_reveal-installed.png")
+    holds("actual install-frame capture exists", installed.exists())
+    changes = pixel_changes(installed, run.capture, threshold=35)
+    # Animated leaves/sky can change; a whole-camera jump changes most of the frame.
+    holds("no spawn-view flash before the menu camera", changes["changed"] < 1024 * 768 * 0.05, changes)
+
+
 def check_bg_compare():
     """Each game's chapter 1 background at 1024x768, FOV 75 (compare with the retail images)."""
     for game_, map_ in (("hl2", "background01"), ("episodic", "ep1_background01"),
@@ -1659,6 +1674,7 @@ CHECKS = [
     Check("placement", check_placement, "shared"),
     Check("captions", check_captions, "shared"),
     Check("bg_compare", check_bg_compare, "shared"),
+    Check("background_reveal", check_background_reveal, "shared"),
     Check("save_config", check_save_config, "shared"),
     Check("console", check_console, "shared"),
     Check("console_map", check_console_map, "shared"),

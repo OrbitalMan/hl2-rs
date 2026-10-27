@@ -76,6 +76,8 @@ portrait, odd dimensions, every HUD aspect frame and retained retail size refere
 
 ### Background vs Gameplay Loading UI/UX & Transition State Sequence
 
+- Before revealing a newly installed background, the host processes due zero-time map-spawn I/O and resolves its authored camera through the same view resolver as ordinary simulation ticks. This prevents exposing the player spawn view for one frame. Authored delays and fixed/script clocks are preserved; no timed loading delay is added. Diagnostic captures include a separate `-installed.png` image of this exact handoff frame.
+
 - Gameplay map loading uses the full modal centered `LoadingDialog` (380 x 112) with a segmented progress bar and localized stage reports (`#GameUI_LoadingFilename`, `#LoadingProgress_*`), blocking clicks to underlying menus.
 - Background map loading uses an explicit state sequence (`BackgroundTransitionState`: `Idle` -> `Starting` -> `Loading` -> `Finished` / `Failed`) and renders a bottom-right corner plaque (`LoadingKind::Background`, 130 x 36) displaying localized `#GameUI_Loading` ("LOADING...") over a translucent dark panel routed through the shared dialog frame (`FrameSpec` with rounded corners and no outer 3D border), without progress bars.
 - While a background loads, hide main/submenu titles/buttons and open dialogs; consume their pointer/keyboard/Escape input. Keep the authored loading background and localized corner plaque. Restore the existing windows/selection when loading finishes or fails; do not replay held activation into restored controls.

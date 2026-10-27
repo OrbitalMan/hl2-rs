@@ -1,5 +1,19 @@
 # Design
 
+## Loading and rendering regressions (2026-10-27)
+
+Address three owner reports as separate verified commits: (1) background-map handoff
+flicker, (2) firing/reloading weapon transparency and screen-edge artifacts, (3) bright
+cutout borders on fences/branches, apparently strongest on Metal. Reproduce each with
+isolated packaged captures, retain rejected evidence, identify the owning render stage,
+and add focused regression coverage. Loading presentation must reveal the authored camera from the first exposed frame,
+without an arbitrary sleep. The captured first-frame regression is a spawn-view flash: zero-time
+logic_auto events and shared scripted-camera resolution must finish before reveal. Weapon fixes must preserve strong reconstruction
+and surface ownership. Cutout fixes must preserve depth/sky ordering and configured AA.
+Run relevant owned probes and workspace/Windows-target checks before each commit, update
+MODLOG/STATUS and detailed validation evidence, and stop on unresolved verification failure.
+No feature is considered fixed from a single clean frame or source inspection alone.
+
 ## Integrate chapter UI and rendering work (2026-10-27)
 
 Merge orbitalman/hl2-ui-chapters into orbitalman/hl2-ui. Preserve the resource-driven

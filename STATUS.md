@@ -1,5 +1,17 @@
 # STATUS
 
+## Background camera handoff fix (2026-10-27)
+
+Reproduced the first-frame spawn-view flash with an install-time screenshot; ordinary
+post-tick burst captures missed it. Due zero-time map-spawn events and shared scripted
+view resolution now run before revealing an installed background, preserving delayed
+outputs and fixed/script clocks. Full validation passes (1,186 Rust, 100 ignored; 27 Python,
+strict host/Windows Clippy, architecture/fmt), as do two owned asynchronous submenu tests.
+Packaged submenus, return_menu, background_reveal and coverage pass. Install-to-settled
+changed pixels fall from 532,602 to 2,931 (animated details). Next: cutout halos, then
+Advanced SMG/shotgun shooting/reloading artifacts. Original rejected captures and logs are
+retained in artifacts/render-fixes; Windows runtime remains NOT TESTED.
+
 ## Integration checkpoint (2026-10-27)
 
 Merge orbitalman/hl2-ui-chapters into orbitalman/hl2-ui, retaining chapter selection,

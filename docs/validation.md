@@ -1,5 +1,27 @@
 # Local validation — 2026-10-05
 
+## Background camera handoff regression (2026-10-27)
+
+The old install frame exposed the player spawn view; the next fixed tick enabled the
+logic_auto-authored menu camera. A temporary install-time capture reproduced a 532,602-pixel
+change at threshold 35 versus the settled 1024x768 frame. Ordinary post-tick bursts missed
+this frame. The production diagnostic capture now saves -installed.png whenever --capture
+is requested, with no extra capture work in ordinary play.
+
+Due zero-time background map-spawn I/O and the shared scripted-view resolver now run before
+loading is dismissed. Unit tests prove immediate camera setup, unchanged clocks and preserved
+nonzero output delays. Packaged background_reveal measures 2,931 changed pixels (0.37%,
+animated details), below its conservative 5% guard; inspect both captures alongside assertions.
+The old captured output fails that guard (67.7%). Evidence: artifacts/render-fixes and
+artifacts/replays/background_reveal*.png.
+
+scripts/checks/validate.sh passes (1,186 Rust, 100 ignored; 27 Python; strict Clippy/fmt/
+architecture), as does scripts/checks/check_windows.sh. Both owned campaign submenu tests
+pass. NO_BUILD=1 ONLY='background_reveal submenus return_menu coverage' python3
+scripts/checks/replays.py passes all four groups. Release package rebuilt. Initial test
+compilation rejected mixed Bevy/portable vector assertions; corrected to coordinate arrays
+and all final checks pass. Windows runtime, native comparison and full campaign NOT TESTED.
+
 ## Chapter/rendering branch integration (2026-10-27)
 
 Merged chapter UI/loading, commentary/movie playback and HUD alignment with the four-tier

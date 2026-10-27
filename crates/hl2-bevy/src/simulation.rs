@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use bevy::{app::RunFixedMainLoopSystems, prelude::*};
 pub(crate) mod commentary;
 pub(crate) mod movie;
+mod view;
 use hl2_simulation::physics::Physics;
 use modkit_core::{
     World,

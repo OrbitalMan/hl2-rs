@@ -1,5 +1,39 @@
 # MODLOG
 
+## 2026-10-27 Fix: reveal the authored background camera on installation
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Process due zero-time background map-spawn I/O and refresh the shared scripted
+camera/zoom view before ending loading. Keep ordinary gameplay startup and command-line
+overrides intact. Extract the existing view resolver for reuse by startup and fixed ticks.
+Diagnostic captures also save the exact map-install frame as -installed.png; ordinary play
+requests no extra captures or passes. Add zero-time/delayed-event tests and a packaged
+background_reveal check. Tighten the campaign function's architecture baseline.
+
+**Why:** The first exposed frame used the player spawn view; logic_auto enabled the authored
+point_viewcontrol only on the following fixed tick. A direct install-frame capture reproduced
+the reported angle snap, with 532,602 changed pixels versus the settled frame. The earlier
+post-tick burst missed it. No GPU-readiness delay or arbitrary frame sleep is needed.
+
+**Tested how:** scripts/checks/validate.sh; scripts/checks/check_windows.sh; release package;
+owned campaign submenu tests; NO_BUILD=1 ONLY='background_reveal submenus return_menu coverage'
+python3 scripts/checks/replays.py. Captures/logs remain in artifacts/render-fixes and
+artifacts/replays. Initial test assertions mixed Bevy and portable vector types; corrected
+them to compare public coordinate arrays and reran successfully.
+
+**Result:** 1,186 Rust tests pass, 100 ignored; 27 Python tests, strict host/Windows-target
+Clippy, formatting and architecture pass. Both owned asynchronous submenu tests pass.
+Packaged submenus, return_menu, background_reveal and coverage all pass. The install-to-settled
+difference falls from 532,602 pixels (67.7%) to 2,931 (0.37%), with remaining changes in
+animated scene details. No new per-frame render work or runtime dependency; this
+change runs once per installed background. Steady-state FPS was not benchmarked.
+
+**Still broken or not tested:** Cutout halos and Advanced weapon artifacts are separate
+remaining tasks. Windows runtime/native comparison and a full campaign are NOT TESTED.
+
+**Next:** Investigate cutout edges, then Advanced viewmodel blur artifacts.
+
 ## 2026-10-27 Integration: merge chapter UI into the rendering branch
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

@@ -84,21 +84,7 @@ pub(super) fn after_gameplay_step(sim: &mut Simulation, game: &mut Gameplay) {
     let world = game.world.clone();
     game.scene
         .update_soundscape(&world, glam::Vec3::from_array(sim.eye.to_array()));
-    let states = &game.scene.states;
-    sim.view_control = game
-        .scene
-        .view_control
-        .view(
-            &world,
-            |id| states.get(id).filter(|s| !s.killed).map(|s| s.origin),
-            glam::Vec3::from_array(sim.eye.to_array()),
-        )
-        .or_else(|| game.scene.commentary.view_control_override());
-    sim.zoom_fov = game
-        .scene
-        .view_control
-        .zoom
-        .map(|zoom| zoom.fov_at(sim.fov, game.scene.time));
+    sim.refresh_scripted_view(game);
 }
 
 pub(crate) fn update_commentary_skins(
