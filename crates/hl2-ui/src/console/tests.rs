@@ -13,7 +13,7 @@ use source_ui::console::panel::{
 use source_ui::input::{Input, Key};
 use source_ui::placement::CursorHint;
 use source_ui::shell;
-use source_ui::widgets::ScrollMode;
+use source_ui::{widgets::ScrollMode, windows::Layer};
 #[test]
 fn cell_metrics_rejects_missing_font() {
     assert!(CellMetrics::from_bytes(b"missing font").is_none());

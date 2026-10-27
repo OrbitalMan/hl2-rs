@@ -1149,3 +1149,21 @@ loads, packaged return-to-menu captures and chapter replays; run strict portable
 checks. Inspect pinned retail loading notifications/resources, distinguishing
 static presentation evidence from untested native responsiveness. Avoid rebuilding
 unused GameUI resources on each runtime map load; measure loading/frame costs.
+
+## Wait for background loading (2026-10-27)
+
+Owner still observes chapter input lag under actual background decoding. Previous
+checks established event acceptance/completion, not low input latency. Owned retail
+loading-state dispatch reaches `InstantHideMainMenu` and menu/title alpha zero;
+replace the unsupported interactive-during-load policy with a wait presentation.
+Hide main/submenu titles/buttons and chapter content while background loading is
+active, retaining authored background imagery and localized corner plaque. Gate
+pointer, keyboard, Escape and direct menu activation consistently; consume held
+interaction so it cannot activate a control when loading ends. Keep existing windows
+and selection to restore after successful or failed loading. Preserve background
+request coordination and foreground loading behavior. This is HL2 GameUI policy.
+
+Add rendering/input/held-release/success/failure regressions, adapt owned asynchronous
+and native-input tests, rebuild and capture the wait state plus restored browser,
+run strict cross-platform checks and packaged menu/chapter replays. Compare steady
+browser frame time and record the limits of static retail evidence.

@@ -285,6 +285,7 @@ impl Console {
         serde_json::json!({
             "x": g.menu.x, "y": g.menu.y, "font_tall": g.font_tall, "item_tall": g.item_tall,
             "row_wide": g.row_wide, "canvas": [self.canvas.width(), self.canvas.height()],
+            "visible": !self.is_background_loading(),
         })
     }
 
@@ -491,6 +492,9 @@ impl Console {
     }
 
     pub fn activate_menu(&mut self, index: usize) -> Vec<Effect> {
+        if self.is_background_loading() {
+            return Vec::new();
+        }
         let gameui = self.gameui.clone();
         let loc = &gameui.localization;
         let outcome = match self.base {

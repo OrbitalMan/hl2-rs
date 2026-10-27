@@ -212,3 +212,38 @@ fn single_card_layout_centers_the_card_and_sizes_decorative_rules_to_the_frame()
         assert!(q.destination.y + q.destination.h <= bounds.y + bounds.h + 1.);
     }
 }
+
+#[test]
+fn occlusion_preserves_selection_and_cancels_hidden_key_activation() {
+    let mut dialog = fixture(5);
+    let canvas = vec2(960., 720.);
+    dialog.input(
+        &Input {
+            keys: [Key::Right].into(),
+            ..Default::default()
+        },
+        canvas,
+    );
+    assert_eq!(dialog.selected, 1);
+    dialog.input(
+        &Input {
+            keys: [Key::Enter].into(),
+            held_keys: [Key::Enter].into(),
+            ..Default::default()
+        },
+        canvas,
+    );
+    dialog.occlude(true);
+    assert_eq!(dialog.selected, 1);
+    assert_eq!(dialog.input(&Input::default(), canvas), Outcome::None);
+    assert_eq!(
+        dialog.input(
+            &Input {
+                keys: [Key::Enter].into(),
+                ..Default::default()
+            },
+            canvas
+        ),
+        Outcome::Accept(1)
+    );
+}

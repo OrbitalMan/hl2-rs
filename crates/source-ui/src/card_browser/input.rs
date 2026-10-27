@@ -7,6 +7,15 @@ use crate::{
 use glam::Vec2;
 
 impl CardBrowser {
+    /// Another layer owns input; preserve selection while cancelling hidden interactions.
+    pub fn occlude(&mut self, down: bool) {
+        self.tracker.occlude(down);
+        self.keys.reset();
+        self.hover = None;
+        self.escape_held = false;
+        self.placement.cancel();
+    }
+
     pub fn take_sounds(&mut self) -> Vec<String> {
         std::mem::take(&mut self.sounds)
     }

@@ -252,21 +252,38 @@ fn chapter_cancel_preserves_category_background_and_escape_waits_for_release() {
 }
 
 #[test]
-fn chapter_window_remains_interactive_during_background_load() {
-    let mut console = installed_console();
-    console.level_loaded(true);
-    console.activate_menu(1);
-    assert!(console.background_transition.is_active());
-    console.activate_menu(0);
-    assert_eq!(console.mode(), Mode::NewGame);
-    let effects = console.input(&Input {
-        keys: [Key::Enter].into(),
-        ..Default::default()
-    });
-    assert!(effects.contains(&Effect::ChapterMap(GameMap::new(
-        "episodic",
-        "ep1_citadel_00"
-    ))));
+fn chapter_menu_waits_for_background_success_or_failure() {
+    for failure in [false, true] {
+        let mut console = installed_console();
+        console.level_loaded(true);
+        console.activate_menu(1);
+        assert!(console.background_transition.is_active());
+        assert!(console.activate_menu(0).is_empty());
+        console.open_chapters("episodic");
+        assert_eq!(console.mode(), Mode::MainMenu);
+        for key in [Key::Down, Key::Enter] {
+            assert!(console
+                .input(&Input {
+                    keys: [key].into(),
+                    ..Default::default()
+                })
+                .is_empty());
+        }
+        console.escape();
+        assert_eq!(console.menu_category(), "episodic");
+        if failure {
+            console.background_load_failed_for_map(
+                "episodic",
+                "ep1_background01",
+                "decode failure",
+            );
+        } else {
+            console.level_loaded_for_map("episodic", "ep1_background01", true);
+        }
+        assert!(!console.is_background_loading());
+        console.activate_menu(0);
+        assert_eq!(console.mode(), Mode::NewGame);
+    }
 }
 
 #[test]
@@ -283,6 +300,7 @@ fn returning_to_menu_drops_confirmation_before_reopening_chapters() {
     assert_eq!(console.mode(), Mode::MainMenu);
     assert!(console.closing_confirm_box.is_none());
     assert!(!console.shell.windows.is_open(Window::Confirmation));
+    console.level_loaded(true);
     console.open_chapters("hl2");
     assert_eq!(console.mode(), Mode::NewGame);
     console.tick(10.);
@@ -305,13 +323,61 @@ fn starting_chapter_cancels_background_presentation_and_stale_failure() {
 }
 
 #[test]
-fn switching_back_to_installed_background_supersedes_worker_in_other_game() {
+fn background_wait_blocks_switch_back_until_completion() {
     let mut console = installed_console();
     console.level_loaded_for_map("hl2", "background01", true);
     console.activate_menu(1);
-    assert!(console.is_background_loading());
     console.escape();
-    let effects = console.activate_menu(0);
-    assert!(effects.contains(&Effect::MainMenuMap(GameMap::new("hl2", "background01"))));
-    assert_eq!(console.background_transition.target_category(), Some("hl2"));
+    assert!(console.activate_menu(0).is_empty());
+    assert_eq!(
+        console.background_transition.target_category(),
+        Some("episodic")
+    );
+    console.level_loaded_for_map("episodic", "ep1_background01", true);
+    console.escape();
+    assert!(console
+        .activate_menu(0)
+        .contains(&Effect::MainMenuMap(GameMap::new("hl2", "background01"))));
+}
+
+#[test]
+fn loading_draws_no_menu_titles_buttons_or_browser_and_preserves_selection() {
+    let mut console = installed_console();
+    console.level_loaded(true);
+    console.open_chapters("hl2");
+    console.input(&Input {
+        keys: [Key::Right].into(),
+        ..Default::default()
+    });
+    let selected = console.chapters_report().unwrap()["selected"].clone();
+    console.start_background_loading("episodic", "ep1_background01");
+    console.draw(0.);
+    let hidden = console.canvas.drain();
+    // Background composition plus loading plaque must be identical without any windows.
+    console.set_mode(Mode::MainMenu);
+    console.draw(0.);
+    let base = console.canvas.drain();
+    assert_eq!(hidden.len(), base.len());
+    for (a, b) in hidden.iter().zip(&base) {
+        assert_eq!(a.destination, b.destination);
+        assert_eq!(a.color, b.color);
+    }
+    console.set_mode(Mode::NewGame);
+    console.level_loaded_for_map("episodic", "ep1_background01", true);
+    assert_eq!(console.chapters_report().unwrap()["selected"], selected);
+    console.draw(1.);
+    let bounds = console
+        .chapter_dialog()
+        .unwrap()
+        .browser
+        .bounds(console.canvas_size());
+    let inside = |q: &&source_ui::canvas::Quad| {
+        q.destination.x >= bounds.x
+            && q.destination.y >= bounds.y
+            && q.destination.x + q.destination.w <= bounds.x + bounds.w
+            && q.destination.y + q.destination.h <= bounds.y + bounds.h
+    };
+    assert!(
+        console.canvas.drain().iter().filter(inside).count() > hidden.iter().filter(inside).count()
+    );
 }

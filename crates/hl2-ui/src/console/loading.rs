@@ -1,6 +1,7 @@
 //! Map loading: the gameplay loading dialog and the background-map transition.
 
 use super::Console;
+use source_ui::input::Input;
 
 impl Console {
     /// Displays the modal loading dialog for the given map.
@@ -14,9 +15,21 @@ impl Console {
     /// Starts the background transition to `game`'s `map` and shows the corner loading plaque.
     /// The transition's category is the game, whose subtitle shows once the map has loaded.
     pub fn start_background_loading(&mut self, game: &str, map: &str) {
+        self.clear_menu_hover();
+        self.occlude_background_controls(&Input::default());
         self.background_transition.start(map, game);
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new_background(map));
         self.loading_progress.reset();
+    }
+
+    /// Hidden controls consume physical input so its release cannot activate restored UI.
+    pub(super) fn occlude_background_controls(&mut self, input: &Input) {
+        self.menu_tracker.occlude(input.click || input.held);
+        self.shell.key_repeat.cancel();
+        self.options.occlude(input);
+        if let Some(dialog) = self.chapter_dialog_mut() {
+            dialog.browser.occlude(input.click || input.held);
+        }
     }
 
     /// Updates loading progress from the latest background loader report.

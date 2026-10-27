@@ -21,6 +21,9 @@ impl Console {
     }
 
     pub(super) fn open_chapters(&mut self, game: &str) {
+        if self.is_background_loading() {
+            return;
+        }
         let Some(dialog) = self.chapter_dialogs.get_mut(game) else {
             return;
         };

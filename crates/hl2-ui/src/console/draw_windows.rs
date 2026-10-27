@@ -5,6 +5,10 @@ use source_ui::{canvas::Rect, widgets::Painter, windows::Layer};
 
 impl Console {
     pub(super) fn draw_windows(&self, time: f64) {
+        if self.is_background_loading() {
+            self.draw_loading();
+            return;
+        }
         let confirm_box_to_draw = self
             .confirm_box
             .as_ref()
@@ -70,11 +74,16 @@ impl Console {
                 Window::SubDialog => {}
             }
         }
+        self.draw_loading();
+    }
+
+    fn draw_loading(&self) {
         if let Some(loading) = &self.loading_dialog {
             let scale = crate::proportional::dialog_scale(self.canvas_size());
             loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
         }
     }
+
     fn draw_confirmation(&self, time: f64, occluders: &[Rect]) {
         let Some((confirm, _)) = self
             .confirm_box

@@ -435,8 +435,8 @@ mod tests {
             assert!(sim.loading());
         }
 
-        // Exercise chapter selection after the worker consumes the pending-request flag.
-        loading::exercise_browser_during_worker(&mut app);
+        // Check the menu wait after the worker consumes the pending-request flag.
+        loading::exercise_menu_wait_during_worker(&mut app);
         let mut completed = false;
         for _ in 0..100 {
             app.update();

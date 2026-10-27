@@ -340,6 +340,10 @@ impl Host for Console {
     }
 
     fn modal_input(&mut self, input: &Input) -> Option<Vec<Effect>> {
+        if self.is_background_loading() {
+            self.occlude_background_controls(input);
+            return Some(Vec::new());
+        }
         if self.modal_dialog_open() {
             // The menus are occluded: keep their tracker on the physical button so the rest of
             // a click that closes the modal layer is not read as a new menu press.
@@ -444,9 +448,11 @@ impl Host for Console {
     }
 
     fn escape_blocked(&self) -> bool {
-        self.loading_dialog
-            .as_ref()
-            .is_some_and(|l| !l.is_background())
+        self.is_background_loading()
+            || self
+                .loading_dialog
+                .as_ref()
+                .is_some_and(|l| !l.is_background())
             || self.quit_placement.active()
     }
 
@@ -499,6 +505,9 @@ impl Host for Console {
     }
 
     fn escape_modal(&mut self) -> bool {
+        if self.is_background_loading() {
+            return true;
+        }
         if let Some(loading) = self.loading_dialog.as_ref().filter(|l| !l.is_background()) {
             if loading.is_failed() {
                 self.loading_dialog = None;
@@ -581,7 +590,10 @@ impl Host for Console {
     }
 
     fn console_blocked(&self) -> bool {
-        self.modal_dialog_open() || self.options.has_sub() || self.options.has_confirm()
+        self.is_background_loading()
+            || self.modal_dialog_open()
+            || self.options.has_sub()
+            || self.options.has_confirm()
     }
 
     fn console_enabled(&self) -> bool {

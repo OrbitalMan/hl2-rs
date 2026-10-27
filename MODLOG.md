@@ -1,5 +1,38 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: wait for background loading
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.
+
+**Changed:** Hide menu titles/buttons and dialogs during background loading, leaving the
+authored backdrop and localized plaque. Gate pointer, keyboard, Escape, console toggle
+and direct menu/chapter opening; consume hidden input. Restore windows and chapter
+selection after success/failure. Extract existing HL2 menu row rendering to reduce the
+oversized draw function; tighten its architecture baseline. Add generic CardBrowser
+occlusion in source-ui, retaining all background policy in hl2-ui.
+
+**Why:** Owner still observes loading-time input lag. Prior tests proved input acceptance
+and completion, not responsiveness under load. Further pinned native review traces the
+loading byte through state dispatch to InstantHideMainMenu and menu/title alpha zero,
+correcting the earlier unsupported interactive-menu policy. Details/addresses in gameui.md.
+
+**Tested how:** validate.sh passes: 1,145 Rust tests / 94 ignored, 13 Python tests,
+strict Clippy/fmt/architecture. Windows-target Clippy passes. Owned native-input wait
+test passes; actual asynchronous worker hides/gates menu opening and completes scene
+replacement (10.59 s). Toolkit occlusion regression and UI success/failure, Escape,
+direct activation, hidden-window rendering and selection restoration tests pass.
+
+**Result:** Source/owned headless checks pass. No new dependency, render pass, runtime
+resource reads or UI strings. Retail static loading hiding is supported; native latency
+or full retail runtime parity is not established.
+
+**Still broken or not tested:** Packaged wait capture, restored-browser replays and isolated
+frame comparison pending. Final installation can still hitch. Initial tests exposed an
+Escape route that still navigated the category, now gated. Rejected render-test assumptions
+about a one-card fixture and glyph-less menu remain in ignored logs.
+
+**Next:** Rebuild committed package, capture actual wait/restoration and finish timing/replays.
+
 ## 2026-10-27 Checkpoint: packaged dialog/loading fixes verified
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.

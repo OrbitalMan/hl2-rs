@@ -63,7 +63,7 @@ pub(super) fn completed(
 }
 
 #[cfg(test)]
-pub(super) fn exercise_browser_during_worker(app: &mut bevy::prelude::App) {
+pub(super) fn exercise_menu_wait_during_worker(app: &mut bevy::prelude::App) {
     app.update();
     assert!(app.world().resource::<super::Campaign>().job.is_some());
     assert!(
@@ -73,17 +73,18 @@ pub(super) fn exercise_browser_during_worker(app: &mut bevy::prelude::App) {
     );
     let mut ui = app.world_mut().resource_mut::<ui_host::Console>();
     assert!(!ui.background_request, "worker has consumed the queue flag");
-    ui.source.activate_menu(0);
-    assert_eq!(ui.source.mode(), hl2_ui::console::Mode::NewGame);
+    assert!(ui.source.activate_menu(0).is_empty());
+    assert!(!ui.source.menu_report()["visible"].as_bool().unwrap());
     ui.source.input(&source_ui::input::Input {
         keys: [source_ui::input::Key::Right].into(),
         ..Default::default()
     });
-    assert_eq!(ui.source.chapters_report().unwrap()["selected"], 1);
+    assert!(ui.source.chapters_report().is_none());
     ui.source.escape_pressed();
     ui.source.escape_released();
     assert_eq!(ui.source.mode(), hl2_ui::console::Mode::MainMenu);
     assert!(ui.source.is_background_loading());
+    assert_eq!(ui.source.menu_category(), "episodic");
 }
 
 #[cfg(test)]

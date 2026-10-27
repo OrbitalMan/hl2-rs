@@ -1197,7 +1197,7 @@ impl OptionsDialog {
     }
 
     /// A layer above the dialog page owns the pointer this frame.
-    fn occlude(&mut self, input: &Input) {
+    pub(crate) fn occlude(&mut self, input: &Input) {
         self.active_tooltip = None;
         self.armed = None;
         self.pressed = None;

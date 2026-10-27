@@ -61,8 +61,8 @@ such a change.
 ### Background vs Gameplay Loading UI/UX & Transition State Sequence
 
 - Gameplay map loading uses the full modal centered `LoadingDialog` (380 x 112) with a segmented progress bar and localized stage reports (`#GameUI_LoadingFilename`, `#LoadingProgress_*`), blocking clicks to underlying menus.
-- Background map loading uses an explicit state sequence (`BackgroundTransitionState`: `Idle` -> `Starting` -> `Loading` -> `Finished` / `Failed`) and renders a non-blocking bottom-right corner plaque (`LoadingKind::Background`, 130 x 36) displaying localized `#GameUI_Loading` ("LOADING...") over a translucent dark panel routed through the shared dialog frame (`FrameSpec` with rounded corners and no outer 3D border), without progress bars.
-- Menu navigation buttons remain interactive, armed on hover, and clickable while a background map is loading.
+- Background map loading uses an explicit state sequence (`BackgroundTransitionState`: `Idle` -> `Starting` -> `Loading` -> `Finished` / `Failed`) and renders a bottom-right corner plaque (`LoadingKind::Background`, 130 x 36) displaying localized `#GameUI_Loading` ("LOADING...") over a translucent dark panel routed through the shared dialog frame (`FrameSpec` with rounded corners and no outer 3D border), without progress bars.
+- While a background loads, hide main/submenu titles/buttons and open dialogs; consume their pointer/keyboard/Escape input. Keep the authored loading background and localized corner plaque. Restore the existing windows/selection when loading finishes or fails; do not replay held activation into restored controls.
 - During background transitions, GameUI binds the target campaign's authored pre-blurred 2D background texture (`materials/console/%s.vtf` / `_widescreen.vtf` from owned game resources), draws it full-screen behind menu buttons and titles, and tints it with the authentic `MainMenu.Backdrop` (`rgba(0, 0, 0, 156)` per `sourcescheme.res`) alongside the non-blocking corner plaque. The blur texture is keyed by the upcoming background's `(game, map)` (the transition's target category and map), ensuring the pre-blurred image always matches the upcoming background (e.g. `ep2`/`ep2_background01` -> `ep2_background01.vtf`, `lostcoast`/`background01` -> Lost Coast cliff `background01.vtf`). When loading non-base expansion assets (`lostcoast`, `episodic`, `ep2`), the expansion package archive (`lostcoast/lostcoast_pak_dir.vpk`) is searched first to prevent assets sharing base names from being shadowed by `hl2_complete`.
 - When background map loading finishes or fails, the transition cleanly transitions to `Finished` or `Failed`, and the corner plaque, pre-blurred background texture, and backdrop overlay disappear immediately.
 - Displayed menu subtitles are derived strictly from `BackgroundTransitionState`: while in `Starting` or `Loading`, the previously displayed subtitle remains visible; when reaching `Finished` or `Failed`, the target subtitle is applied (so a failed load never leaves the subtitle stuck). Rapid consecutive switches update the target map and category, and stale load events for older maps are safely ignored.
@@ -92,8 +92,29 @@ These distinguish loading state notifications, background-specific dialog presen
 and authored loading textures. Virtual-call names beyond recovered strings are
 inferred. Static exports, the published SDK and resource layouts do not establish
 uninterrupted input responsiveness while retail loads its engine world; native runtime
-comparison remains not tested. The rewrite keeps per-frame UI input live while its
-map worker freezes fixed simulation; final world/physics/GPU installation can still hitch.
+comparison remains not tested. The earlier interactive-during-background-load policy
+was unsupported and is superseded by the wait behavior below. Final world/physics/GPU
+installation can still hitch.
+
+### Retail menu hiding during loading (2026-10-27)
+
+Further on-demand review of the same owned GameUI hash corrects the earlier
+interactive-menu assumption. `0x100af900` sets the loading byte at offset `0x274`;
+`0x100b4130` reads that byte (also represented as the low byte of field `0x9d`)
+and dispatches loading state 1 through `0x100b2dc0`. That state contains the
+recovered `InstantHideMainMenu` / `LoadMap` strings and calls `0x100b2fa0` with
+alpha zero. The helper applies that alpha to panels and title labels through
+`0x100e40c0`, whose simple float-field assignment matches published Source SDK
+`src/vgui2/vgui_controls/Panel.cpp`'s `Panel::SetAlpha`. Ready states restore or
+fade the menu; `0x100af7d0` clears the loading byte on completion. These are static
+control-flow findings, not a new retail runtime capture or proof of every inherited
+panel identity. Native input latency remains not tested.
+
+HL2 GameUI now uses a wait presentation while its background worker is active.
+The plaque keeps its installed localization and layout. Hidden controls receive
+no activation; shared card-browser occlusion cancels key/pointer capture while
+preserving selection. The toolkit knows nothing about loading or HL2. Existing
+request supersession/failure recovery remain intact for host/console requests.
 
 ### KeyValues Syntax Quirks & Parser Tolerance
 
