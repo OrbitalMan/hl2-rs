@@ -1,5 +1,14 @@
 # STATUS
 
+## Background FOV handoff follow-up (2026-10-27)
+
+Initialize the new background inventory's default FOV before reveal, matching the configured
+simulation FOV instead of waiting for the first fixed tick. The old path fails the new
+lifecycle test (75 vs 87.3083); final full validation, Windows-target checks and nondefault-FOV
+packaged reveal/coverage pass. The image guard missed the old transient zoom; do not claim
+an image-proven fix from that comparison. Owner interactive confirmation/Windows runtime
+NOT TESTED. Evidence: artifacts/background-fov. No FOV policy change or new frame work.
+
 ## Advanced weapon edge coverage correction (2026-10-27)
 
 Reproduced with the cutout fix active: offscreen gather taps were skipped but still counted

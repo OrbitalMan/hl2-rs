@@ -1,5 +1,14 @@
 # Design
 
+## Preserve configured FOV on background reveal (2026-10-27)
+
+The authored camera is now initialized before reveal, but inventory FOV still starts at
+75 until the first fixed tick adopts the configured default. Initialize that same inventory
+FOV during background view preparation before resolving zoom. Extend the existing camera
+unit test and install-frame replay with a nondefault FOV, reproduce the old failure, then
+run full validation, Windows-target checks and the focused packaged replay. Keep this a
+single small checkpoint; no new render work, FOV policy or speculative investigation.
+
 ## Preserve weapon coverage at clipped blur footprints (2026-10-27)
 
 Reproduce SMG/shotgun firing and reloading with the cutout-alpha fix retained. The weapon

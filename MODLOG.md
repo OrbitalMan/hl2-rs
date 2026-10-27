@@ -1,5 +1,22 @@
 # MODLOG
 
+## 2026-10-27 Fix: initialize saved background FOV before reveal
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.
+**Changed:** Initialize inventory default FOV from the simulation's configured value during
+background view preparation, matching the ordinary fixed tick. Add a lifecycle regression
+for 75/87.3083/90 degrees; exercise the existing packaged reveal replay at nondefault FOV 90.
+**Why:** The first authored view still used inventory's default 75 degrees, then the next
+fixed tick adopted the saved FOV, producing a small zoom-out. No FOV policy is retuned.
+**Tested how:** validate.sh (1,187 Rust passed, 100 ignored; 27 Python, strict Clippy/fmt/
+architecture); check_windows.sh; release build; background_reveal/coverage packaged replays.
+Removing only the initialization makes the new unit test fail: 75 instead of 87.3083.
+**Result:** Final checks pass. Old and new image guards both pass; the capture did not reliably
+expose this short zoom, so the unit lifecycle negative control is decisive evidence. Logs
+are retained in artifacts/background-fov. No per-frame work or render pass is added.
+**Still broken or not tested:** Owner interactive confirmation and Windows runtime NOT TESTED.
+**Next:** Owner confirmation; reserve the remaining quota rather than broaden investigation.
+
 ## 2026-10-27 Fix: preserve Advanced weapon blur coverage at screen edges
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

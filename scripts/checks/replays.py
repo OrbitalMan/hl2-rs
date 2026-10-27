@@ -605,7 +605,7 @@ def check_background_reveal():
     """The install frame already uses the authored background camera, before tick one."""
     if CONFIG.exists():
         CONFIG.unlink()
-    settings(video={"hdr": "none", "hdr_migrated": True,
+    settings(video={"fov": 90.0, "hdr": "none", "hdr_migrated": True,
                     "advanced": {"motion_blur": False, "antialiasing": "x4"}})
     run = game("background_reveal", "--map", "background01", "--main-menu",
                "--width", "1024", "--height", "768", "--frames", "30")

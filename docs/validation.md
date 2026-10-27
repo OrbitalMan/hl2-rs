@@ -1,5 +1,17 @@
 # Local validation — 2026-10-05
 
+## Nondefault background FOV at reveal (2026-10-27)
+
+Background preparation now copies configured FOV into inventory before the initial camera
+presentation. A 75/87.3083/90-degree lifecycle test asserts the initial and ordinary fixed-tick
+values agree without advancing clocks. Removing the assignment rejects the old 75-degree
+initialization at configured 87.3083. Both old/new screenshot guards pass, so they are not
+decisive evidence for this short transition; logs are retained in artifacts/background-fov.
+validate.sh passes (1,187 Rust, 100 ignored; 27 Python; strict Clippy/fmt/architecture), as does
+check_windows.sh and release packaging. NO_BUILD=1 ONLY='background_reveal coverage' python3
+scripts/checks/replays.py passes at FOV 90. Interactive owner confirmation and Windows runtime
+NOT TESTED. No frame-cost claim; the assignment runs only during background installation.
+
 ## Advanced weapon blur at viewport edges (2026-10-27)
 
 All captures retain the cutout-alpha correction. Normal SMG/shotgun fire/reload captures
