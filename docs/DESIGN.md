@@ -1,5 +1,28 @@
 # Design
 
+## Hardware-aware blur qualification (2026-10-27)
+
+Pair each native-resolution blur run with bounded, timestamp-aligned frame and host-resource
+windows. Frame windows collect only under --profile after warm-up, without per-frame
+allocation or file access. Keep 128 windows in a ring, whole-run frame percentiles, and
+report retained/dropped counts. Sample host telemetry about once per second outside the
+game; record sampler overhead and missing fields. On Apple Silicon, read aggregate CPU
+load counters, driver-reported renderer/tiler/device utilisation, VM page counts/pressure
+and benchmark-process CPU time/RSS. Unified memory is one pool; dedicated VRAM availability
+is unavailable, not total RAM minus GPU allocations. Unsupported platforms retain explicit
+unavailable metrics; do not invent compute availability from core count or free memory.
+
+Align resource samples with frame windows, report same-workload associations and paired
+Advanced/Enabled cost ratios. Pixel throughput and frames per consumed game CPU-second
+are defined ratios; system GPU busy-time throughput is a labelled utilisation proxy, not
+FLOPS or an isolated GPU duration. Resource use includes the workload itself, so correlation
+is not causation. Record competing games/builds and pressure changes, flag mismatched
+paired environments, and never relax the existing frame-time thresholds to explain a
+regression away. Collect all cases even when one performance guard fails. Validate counter
+parsers, alignment, unified-memory semantics, missing metrics and correlations with fake
+samples, then run isolated owned packages. Keep render experiments separate from this
+instrumentation checkpoint; primary checkout/user settings remain untouched.
+
 ## Advanced high-resolution/MSAA regression (2026-10-27)
 
 Owner measures a8a050b at about 50 FPS with no shake penalty, versus f7369cd at about

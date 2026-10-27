@@ -1,5 +1,37 @@
 # Local validation — 2026-10-05
 
+## Hardware-aware benchmark evidence (2026-10-27)
+
+The native blur guard writes per-run `.environment.json`, `resource-report.md`, package hashes
+and source identity. `BLUR_LABEL` selects a simple directory label under the ignored evidence
+root; `BLUR_TELEMETRY_INTERVAL` defaults to one second. Frame windows are epoch-aligned after
+warm-up, retain 128 completed windows plus the partial tail, and report dropped windows.
+The helper asserts aligned frame counts when no windows were dropped. Resource/output ratios
+use that same retained window. No per-frame allocation or file access is added to the game.
+
+Live host sampling is currently macOS-only: aggregate CPU ticks, process CPU time/RSS,
+IOAccelerator utilisation and GPU-managed system-memory counters, VM pages and pressure.
+CPU idle and driver GPU headroom are occupancy proxies, not available FLOPS. RAM availability
+is free+inactive+speculative pages; purgeable pages are not added again. Apple Silicon uses
+one unified pool, so dedicated VRAM availability is null. GPU counters are system-wide;
+multiple ambiguous accelerators and unsupported platforms leave metrics unavailable.
+Thermal limits are recorded where the OS supplies them; missing clocks/limits are unknown.
+
+Qualification retains the existing mean/p95 thresholds. It also flags builds/other games,
+pressure/pageout/swapout changes, unavailable samples, hardware mismatches, material baseline
+memory differences and baseline CPU/GPU changes over 10 percentage points. These criteria
+are declared before measuring; resource pressure caused by Advanced remains a regression
+cost, not a reason to excuse the rendering. All cases are collected even when one fails.
+Within-run Pearson correlations require six aligned windows; constant/insufficient inputs
+produce null. No significance test, causal claim or cross-GPU compute-efficiency claim is
+made. Sampler CPU accounting includes its child commands; a sample containing a game exit
+is excluded from that accounting. Actual isolated FPS overhead is not tested.
+
+The first six-run native batch and the sampler-accounting run complete without render errors,
+but all scene pairs fail qualification. Evidence is in artifacts/blur-performance-regression/
+environment-loaded and environment-observer. The latter detects competing builds instead of
+silently treating a later retail slowdown as renderer cost. See docs/performance.md.
+
 ## Native-resolution blur performance guard (2026-10-27)
 
 `NO_BUILD=1 python3 scripts/checks/check_blur_performance.py` uses a copied muted package,

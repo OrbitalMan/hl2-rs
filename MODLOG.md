@@ -1,5 +1,46 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: hardware-aware blur measurements
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** --profile keeps 128 completed timestamp-aligned frame windows plus the partial
+window, without per-frame allocation or file access. The native blur guard samples host
+CPU occupancy, game CPU time/RSS, driver GPU device/renderer/tiler utilisation and VM
+pressure/page counters, and writes raw samples, aligned windows, descriptive correlations,
+input/output ratios and a readable resource table. Hardware/backend and package identity
+are recorded. Ambient load/hardware differences, competing games/builds and pressure flag
+qualification; the frame-time thresholds remain unchanged. All scenes run even if one fails.
+
+**Why:** The owner requested resource-aware GPU benchmarks rather than comparing FPS while
+assuming the machine has the same available resources. CPU-seconds per frame and pixel
+throughput are defined ratios; GPU busy-time throughput is explicitly a system-wide proxy.
+Apple Silicon's unified memory is not treated as separate RAM and VRAM capacities.
+
+**Tested how:** Deterministic frame-window and Python tests cover alignment/bounded retention,
+counter rollover, missing metrics, unified memory, process accounting, hardware/load
+mismatches, correlations and report formatting. Local validation and Windows-target Clippy.
+A native-resolution six-run owned batch plus a sampler-accounting run finish without render
+errors; reports assert actual viewport, complete scripts and aligned frame counts.
+
+**Result:** The first idle pair records retail/experimental Advanced at 18.22/22.96 ms,
+CPU busy 30.9/42.2%, GPU busy 68.5/96.9%, and minimum estimated available memory 4.51/2.03 GiB.
+Advanced also reaches memory-pressure warnings and pageouts; all three scene pairs are
+rejected for qualification. A later retail run with competing builds reaches 21.29 ms / p95
+49 ms, versus 18.22 ms / p95 22 ms earlier. This is observational evidence, not causation.
+Sampler accounting records 1.366 CPU-seconds over 16.758 seconds, 17 active samples; isolated
+FPS overhead is not measured. Evidence: artifacts/blur-performance-regression/environment-loaded
+and environment-observer. Resource measurements identify additional investigation targets;
+no rendering speedup is qualified or committed by this checkpoint.
+
+**Still broken or not tested:** Live host counters are macOS-only; other platforms explicitly
+report unavailable fields. Native Windows/Linux runtime, causal hardware scaling, GPU clock
+rates/FLOPS, precise GPU durations and isolated observer FPS cost are not tested. Unified
+memory availability is a page-based estimate and driver GPU memory is system-wide.
+
+**Next:** Investigate redundant MSAA post-processing writes and memory footprint, retaining
+native scene/weapon AA and the strong weapon reconstruction. Qualify rendering separately.
+
 ## 2026-10-27 Checkpoint: profiled frame-time tails and native blur guard
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

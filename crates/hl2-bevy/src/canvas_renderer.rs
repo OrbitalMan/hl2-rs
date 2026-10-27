@@ -1,5 +1,6 @@
 //! Bevy presentation and WGPU 2D batch rendering for the shared Source UI Canvas.
 mod frame_distribution;
+mod frame_windows;
 mod game_hud;
 
 use bevy::{
@@ -107,6 +108,7 @@ struct FrameTiming {
     frames_seen: u64,
     warmup_end: Option<f64>,
     distribution: frame_distribution::Distribution,
+    windows: frame_windows::Windows,
 }
 impl FrameTiming {
     fn observe(&mut self, now: f64, profile: bool) {
@@ -119,6 +121,7 @@ impl FrameTiming {
         }
         if profile && self.frames_seen > 120 {
             self.distribution.observe(self.frame_ms);
+            self.windows.observe(now, self.frame_ms);
         }
         self.frames.push_back(now);
         while self.frames.len() > 600 || self.frames.front().is_some_and(|t| now - t > 1.) {
@@ -131,7 +134,7 @@ impl FrameTiming {
             .warmup_end
             .zip(self.frames.back())
             .map_or(0., |(start, end)| end - start);
-        serde_json::json!({"p95_frame_ms_upper_bound":self.distribution.percentile(95),"p99_frame_ms_upper_bound":self.distribution.percentile(99),"max_frame_ms":self.distribution.maximum(),"warmup_frames":120,"measured_frames":frames,"elapsed_seconds":elapsed,"mean_fps":if elapsed>0. {frames as f64/elapsed} else {0.},"mean_frame_ms":if frames>0 {elapsed*1000./frames as f64} else {0.}})
+        serde_json::json!({"frame_windows":self.windows.report(),"p95_frame_ms_upper_bound":self.distribution.percentile(95),"p99_frame_ms_upper_bound":self.distribution.percentile(99),"max_frame_ms":self.distribution.maximum(),"warmup_frames":120,"measured_frames":frames,"elapsed_seconds":elapsed,"mean_fps":if elapsed>0. {frames as f64/elapsed} else {0.},"mean_frame_ms":if frames>0 {elapsed*1000./frames as f64} else {0.}})
     }
     fn fps(&self) -> f64 {
         let span = self
@@ -548,6 +551,12 @@ mod tests {
         }
         let result = timing.benchmark();
         assert_eq!(result["measured_frames"], 5);
+        assert!(
+            result["frame_windows"]["windows"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert!(result["max_frame_ms"].is_null());
         assert!(result["p95_frame_ms_upper_bound"].is_null());
         assert!(result["p99_frame_ms_upper_bound"].is_null());

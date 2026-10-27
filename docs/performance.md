@@ -1,5 +1,33 @@
 # Performance measurements - 2026-10-05
 
+## Resource/output correlation batch (2026-10-27; not qualified)
+
+Apple M1 Pro / Metal, 10 logical CPUs, 16 GiB unified memory, 3456x2168 / 4x MSAA. Driver
+GPU utilisation is system-wide occupancy, not an isolated shader timer or available FLOPS.
+All numbers below are observational. All pairs are rejected for optimisation qualification.
+
+| Scene | Retail / experimental Advanced frame ms | Advanced / retail cost | Retail / Advanced GPU busy | Retail / Advanced min available memory |
+| --- | ---: | ---: | ---: | ---: |
+| Idle | 18.22 / 22.96 | 1.260 | 68.5 / 96.9% | 4.51 / 2.03 GiB |
+| Turns | 18.25 / 27.97 | 1.533 | 81.9 / 94.9% | 4.50 / 1.96 GiB |
+| Swing | 19.61 / 27.58 | 1.407 | 69.9 / 96.1% | 3.42 / 1.72 GiB |
+
+Advanced runs show VM pressure/pageouts, and the swing pair includes competing build work.
+In the idle pair, driver-reported in-use system memory averages about 1.69/4.45 GiB; these
+are aggregate driver counters, not per-game VRAM or the renderer's exact allocation size.
+Idle Advanced's available-memory/frame-time association has r=-0.85 over 15 windows. This
+small autocorrelated sample does not establish cause: the renderer also changes resource
+use itself. A later retail run records 21.29 ms / p95 49 ms with CPU busy 65.0% and competing
+builds, compared with 18.22 ms / p95 22 ms / CPU busy 30.9% in the first run.
+
+Sampler accounting observes 1.366 CPU-seconds across 17 active samples over a 16.758-second
+retail window. This includes child commands and is not an isolated FPS-overhead measurement.
+Raw samples, aligned windows, correlations and input/output ratios are retained in ignored
+artifacts/blur-performance-regression/environment-loaded and environment-observer. Ratios
+include pixels per second, frames per consumed game CPU-second and explicitly labelled
+system GPU busy-time throughput proxies. Dedicated VRAM and precise GPU durations remain
+unavailable; no causal normalisation is used to loosen the performance guard.
+
 ## Native-resolution Advanced regression: investigation open (2026-10-27)
 
 The owner's 3456x2168 / 4x MSAA case supersedes the earlier 1024x768/no-AA qualification

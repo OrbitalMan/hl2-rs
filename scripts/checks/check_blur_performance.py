@@ -9,7 +9,11 @@ import json
 import math
 import os
 import statistics
+import shutil
+import subprocess
 import replays as replay
+from bench_environment import Monitor, pair_environment
+from blur_environment_report import write as write_resource_report
 
 
 def fixture(scene):
@@ -36,40 +40,70 @@ def measure(scene, advanced, repeat):
     name = f"{scene}-{'advanced' if advanced else 'retail'}-{repeat}"
     path = replay.OUT / (scene + ".input.json")
     path.write_text(json.dumps(fixture(scene)), encoding="utf-8")
-    run = replay.game(name, "--map", "d1_trainstation_02", "--width", str(width), "--height", str(height),
-                      "--movement-script", str(path), "--frames", "2400", "--profile", capture=False)
+    with Monitor(replay.EXE, float(os.environ.get("BLUR_TELEMETRY_INTERVAL", "1"))) as monitor:
+        run = replay.game(name, "--map", "d1_trainstation_02", "--width", str(width), "--height", str(height),
+                          "--movement-script", str(path), "--frames", "2400", "--profile", capture=False)
     replay.holds("no render errors", "ERROR" not in run.log and "Caught rendering error" not in run.log)
     hud = run.report["render"]["presentation"]["hud"]
     replay.expect("actual internal frame size", hud["viewport"], [float(width), float(height)])
     result = hud["developer_overlay"]["benchmark"]
-    replay.holds("measured beyond warm-up", result["measured_frames"] >= 100, result)
-    replay.holds("profiled frame tails", result.get("p95_frame_ms_upper_bound") is not None, result)
-    print(name, json.dumps(result), flush=True)
+    metrics = {k: v for k, v in result.items() if k != "frame_windows"}
+    replay.holds("measured beyond warm-up", result["measured_frames"] >= 100, metrics)
+    replay.holds("profiled frame tails", result.get("p95_frame_ms_upper_bound") is not None, metrics)
+    windows = result.get("frame_windows", {})
+    replay.holds("aligned frame windows present", bool(windows.get("windows")))
+    if not windows.get("dropped_windows"):
+        replay.expect("profile window frame count", sum(w["frames"] for w in windows["windows"]), result["measured_frames"])
+    monitor.metadata.update(adapter=run.report["render"].get("adapter"), backend=run.report["render"].get("backend"))
+    result["environment"] = monitor.finish(replay.OUT/(name+".environment.json"), result, (width, height))
+    result["adapter"] = run.report["render"].get("adapter")
+    result["backend"] = run.report["render"].get("backend")
+    summary = {k: v for k, v in result.items() if k not in ("environment", "frame_windows")}
+    summary["resources"] = result["environment"]["active_mean"]
+    summary["quality_flags"] = result["environment"]["quality_flags"]
+    print(name, json.dumps(summary), flush=True)
     return result
 
 
 def main():
-    replay.OUT = replay.REPO / "artifacts/blur-performance-regression/guard"
+    label = os.environ.get("BLUR_LABEL", "guard")
+    if not label or label in (".", "..") or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in label):
+        raise ValueError("BLUR_LABEL must be a simple directory label")
+    replay.OUT = replay.REPO / "artifacts/blur-performance-regression" / label
     replay.GAME = replay.OUT / "game"
     replay.EXE = replay.GAME / replay.EXE_NAME
     replay.CONFIG = replay.GAME / "hl2-config.json"
     replay.OUT.mkdir(parents=True, exist_ok=True)
     replay.build()
     replay.stage()
-    results = {}
+    metadata = replay.REPO / "bin/build-bevy-info.json"
+    if metadata.exists():
+        shutil.copy2(metadata, replay.OUT / "build-info.json")
+    (replay.OUT / "source-state.json").write_text(json.dumps({
+        "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=replay.REPO, text=True).strip(),
+        "uncommitted_tracked_changes": bool(subprocess.check_output(["git", "diff", "HEAD", "--name-only"], cwd=replay.REPO)),
+    }), encoding="utf-8")
+    results, failures = {}, []
     for scene in ("still", "turn", "swing"):
         modes = {False: [], True: []}
         for repeat in range(int(os.environ.get("BLUR_RUNS", "1"))):
             for advanced in ((False, True) if repeat % 2 == 0 else (True, False)):
                 modes[advanced].append(measure(scene, advanced, repeat))
         median = lambda mode, key: statistics.median(r[key] for r in modes[mode])
-        results[scene] = {"retail": modes[False], "advanced": modes[True]}
+        pairs = [pair_environment(a["environment"], b["environment"])
+                 for a, b in zip(modes[False], modes[True])]
+        guards = {"mean": median(True, "mean_frame_ms") <= median(False, "mean_frame_ms")*1.2+0.25,
+                  "p95": median(True, "p95_frame_ms_upper_bound") <= median(False, "p95_frame_ms_upper_bound")*1.25+1}
+        results[scene] = {"retail": modes[False], "advanced": modes[True], "environment_pairs": pairs,
+                          "frame_time_ratio_advanced_to_retail": median(True, "mean_frame_ms")/median(False, "mean_frame_ms"),
+                          "performance_guards": guards}
+        if not all(guards.values()) or not all(p["comparable"] for p in pairs):
+            failures.append(scene)
         (replay.OUT / "summary.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-        replay.holds(scene + " mean stays within 20% + 0.25 ms of retail",
-                     median(True, "mean_frame_ms") <= median(False, "mean_frame_ms")*1.2+0.25, results[scene])
-        replay.holds(scene + " p95 stays within 25% + 1 ms of retail",
-                     median(True, "p95_frame_ms_upper_bound") <= median(False, "p95_frame_ms_upper_bound")*1.25+1,
-                     results[scene])
+        write_resource_report(replay.OUT / "resource-report.md", results)
+        print(scene, "guards", guards, "environment", pairs, flush=True)
+    if failures:
+        raise replay.Failure("native-resolution blur not qualified: " + ", ".join(failures))
     print("native-resolution blur performance guard passed")
 
 

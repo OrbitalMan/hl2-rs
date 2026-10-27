@@ -6,6 +6,23 @@ guard are the first reviewable checkpoint. Advanced rendering optimisations are 
 and unqualified; the known high-resolution regression remains open. The primary checkout
 is reserved for the owner's manual testing. Sections below are newest first.
 
+## Hardware-aware benchmark checkpoint (2026-10-27)
+
+- c53b369 commits profiled frame-time tails and the native blur guard. Resource instrumentation
+  adds bounded epoch-aligned frame windows, macOS host CPU/GPU/VM/process counters, descriptive
+  correlations and defined resource/output ratios. Other platforms report counters unavailable.
+- The six-run native batch completes without render errors but all scene pairs fail qualification:
+  Advanced hits GPU saturation and VM pressure/pageouts; competing builds also affect some runs.
+  The first idle pair is 18.22/22.96 ms (retail/experimental Advanced), GPU busy 68.5/96.9%, and
+  minimum available-memory estimates 4.51/2.03 GiB. These are not accepted optimisation timings.
+- Resource use includes the benchmark itself: correlation is not causation, and memory pressure
+  caused by a feature is part of its cost, not an excuse for failing the guard. Precise GPU times
+  remain unavailable. Sampler CPU usage is recorded separately; isolated FPS overhead is untested.
+- Source, package hashes, raw counters and per-window associations are retained in ignored
+  artifacts/blur-performance-regression/environment-loaded and environment-observer. Rendering
+  experiments remain uncommitted. Next: single-sample resolved post-processing, preserving AA.
+
+
 ## In progress: native-resolution Advanced regression (2026-10-27)
 
 - Owner confirms a8a050b is about 50 FPS idle/shaking, about 3-4 FPS lower during swings;
