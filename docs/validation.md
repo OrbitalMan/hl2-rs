@@ -1,5 +1,31 @@
 # Local validation — 2026-10-05
 
+## Native-resolution blur performance guard (2026-10-27)
+
+`NO_BUILD=1 python3 scripts/checks/check_blur_performance.py` uses a copied muted package,
+owned d1_trainstation_02 content, 3456x2168 / 4x MSAA / HDR None / VSync off. It never edits
+the user's package settings. Idle, continuous yaw turns and repeated crowbar swings are
+paired between retail Enabled and Advanced. Each report must show the requested internal
+viewport and at least 100 post-warm-up measured frames. Defaults can be changed with
+BLUR_WIDTH, BLUR_HEIGHT, BLUR_AA and BLUR_RUNS; altered workloads do not qualify the owner's
+native-resolution case. Do not overlap GPU runs with other games, builds or image analysis.
+
+Acceptance thresholds remain mean <= retail * 1.20 + 0.25 ms and p95 <= retail * 1.25 +
+1 ms. These are regression guards, not FPS guarantees; the current renderer fails them.
+A failing crate does not prevent these opt-in owned checks from being run separately.
+
+The --profile frame histogram starts after 120 warm-up frames. Percentiles are conservative
+1 ms bin upper bounds; the overflow bin returns the exact maximum, retaining hitches above
+255 ms. Maximum is exact. Ordinary-play percentile/max fields are null and collection is
+skipped. Unit tests cover these boundaries and the ordinary-play/warm-up gates.
+
+Encoder-boundary GPU timestamp experiments on Metal return zero durations for every blur
+span. Those values are unavailable measurements, not evidence of zero GPU cost. The
+experiment was removed; existing CPU command-encoding spans must not be called GPU timings.
+The separate single-sample camera and resolved-motion cache experiments also failed the
+native idle budget and were removed. Full investigation evidence remains in ignored
+artifacts/blur-performance-regression and STATUS.md.
+
 ## Advanced world/projectile reconstruction (2026-10-27)
 
 Baseline a8a050b uses camera-only retail world blur even in Advanced; a still camera gives

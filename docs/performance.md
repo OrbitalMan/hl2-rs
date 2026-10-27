@@ -1,5 +1,24 @@
 # Performance measurements - 2026-10-05
 
+## Native-resolution Advanced regression: investigation open (2026-10-27)
+
+The owner's 3456x2168 / 4x MSAA case supersedes the earlier 1024x768/no-AA qualification
+below. Copied f7369cd packages reproduce 40.45 ms idle / 110.94 ms turning. Direct a8a050b
+crowbar fixtures give 19.23 ms idle / 19.05 ms turning / 21.01 ms swinging. These earlier
+fixtures are investigation evidence; they are not accepted timings for a final fix.
+
+The native owned guard now records mean, p95/p99 upper bounds and maximum after 120 warm-up
+frames, and includes the crowbar. Its thresholds are unchanged while investigating. A
+quarter camera filter plus native object gather improves some scenes but still fails the
+swing budget; no rendering optimisation is qualified or committed yet. Extra full-size
+resolved-motion caches and an auxiliary single-sample camera fail the idle budget.
+
+GPU durations returned by the encoder-boundary Metal timestamp probe are all zero, so
+individual pass GPU times remain unavailable. Report CPU encoding and end-to-end frame
+timing separately. Profile-only histogram collection adds one bounded update per measured
+frame with no allocation; isolated overhead is not tested and no ordinary-play speedup is
+claimed. See docs/validation.md for the opt-in guard and artifact evidence.
+
 ## Advanced world/projectile reconstruction (2026-10-27)
 
 Packaged Metal / Apple M1 Pro, hl2/d1_trainstation_02, 1024x768, HDR None, MSAA off,

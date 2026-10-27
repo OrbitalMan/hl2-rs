@@ -1,5 +1,37 @@
 # Design
 
+## Advanced high-resolution/MSAA regression (2026-10-27)
+
+Owner measures a8a050b at about 50 FPS with no shake penalty, versus f7369cd at about
+40 FPS idle and 10 FPS shaking, at 3456x2168 with 4x MSAA. The earlier 1024x768/no-AA
+measurements do not qualify this path. Preserve the a8 weapon filter and retail modes.
+First isolate full-resolution reconstruction, MSAA reads and world-prepass costs with copied
+packages at the owner's settings. Bound expensive world gathers to a reduced-resolution
+intermediate, composite to native resolution only where motion contributes, and avoid
+repeated MSAA/depth/reprojection work in gathers. Retain projectile silhouette tests and
+bright-lamp quality checks; do not accept a smooth-but-aliased or scenery-smearing fallback.
+Measure still/violent turns at actual resolution/AA against both commits, report peaks as
+well as averages, run local/Windows-target checks and packaged regressions, then commit.
+Isolation shows the prepass alone is not dominant. Source/effect prepasses export an
+explicit host-owned object-only motion channel; only our Advanced filters consume it.
+Static positions return zero before projection. Disable the world background-vector pass,
+since this renderer reconstructs sky/camera motion itself. Camera reprojection runs separately in the
+bounded image filter; moving silhouettes stay native resolution in motion-bounded tiles.
+Record --profile frame p95/p99 upper bounds and exact maximum without per-frame allocation;
+ordinary play does not collect the distribution. Preserve the same alpha masks in effect
+depth/color paths. This channel is not compatible with a future generic temporal consumer
+without an adapter; no such consumer is currently installed on these views.
+
+The extra full-resolution resolved-motion cache failed both dense and sparse variants;
+a separate single-sample prepass camera also failed the idle budget. Reject both instead
+of retaining their framebuffer/geometry overhead. An occupancy-mask lookup using the
+existing conservative 4x4 reduction also failed its initial guard; contributor compilation
+overlapped part of that batch, so it does not establish isolated GPU cost. Remove the
+experiment and obtain individual GPU pass timings before further structural changes.
+Potential next designs: motion-bounded work lists, short multiscale camera gathers and
+shared-memory tile caching. Preserve thin projectiles, occlusion, the a8 weapon path,
+configured visible MSAA and the native-resolution performance thresholds.
+
 ## Advanced world and projectile blur (2026-10-27)
 
 Reuse the Advanced reconstruction backend for the world camera, with its own lifecycle.

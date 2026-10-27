@@ -1,5 +1,66 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: profiled frame-time tails and native blur guard
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** --profile reports p95/p99 frame-time upper bounds and the exact maximum after
+120 warm-up frames. A fixed 256-bin histogram preserves hitches longer than 255 ms without
+per-frame allocation. Ordinary play does not collect it. The owned opt-in blur performance
+guard runs isolated muted idle/continuous-turn/crowbar-swing fixtures at 3456x2168 and 4x MSAA,
+asserts the actual internal resolution, and checks mean and p95 against retail Enabled.
+
+**Why:** Mean FPS hid the owner's severe high-resolution regression. Performance acceptance
+needs the real render resolution, weapon animation and tail latency, not lower-resolution
+averages. The guard is expected to fail until the rendering fix is qualified.
+
+**Tested how:** Frame tests cover warm-up, ordinary-play collection exclusion, percentile
+bounds and a 350.5 ms hitch. Local workspace validation and Windows-target strict Clippy;
+prior isolated packaged runs verify report fields and demonstrate guard failures. Full
+native GPU reruns wait for the owner's manual test session to finish.
+
+**Result:** Frame reporting is independently reviewable; it changes no shader or render
+pass. No blur speedup is claimed. Rendering experiments remain uncommitted and unqualified.
+
+**Still broken or not tested:** The high-resolution Advanced regression remains open;
+new native Windows/Linux runtime execution and isolated histogram overhead are not tested.
+
+**Next:** Continue the bounded render investigation and commit only candidates that pass
+native-resolution performance and projectile/weapon visual checks.
+
+## 2026-10-27 Investigation: native-resolution Advanced performance (unfinished)
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Experimental quarter-resolution camera filtering, native object reconstruction,
+object-only world motion producers, static-camera gating and allocation-free profiled frame
+histograms. Preserve the existing viewmodel motion channel. Add an opt-in native-resolution
+performance guard. Rendering experiments remain unqualified; frame reporting is a separate checkpoint.
+
+**Why:** The owner reports about 50 FPS on a8a050b versus 40 idle / 10 during shaking on
+f7369cd at 3456x2168 and 4x MSAA. Earlier lower-resolution evidence did not cover this case.
+
+**Tested how:** Isolated copied packages at the reported resolution/AA; idle, continuous
+turn and crowbar swing fixtures; mean frame time and profiled tail bounds. Current Rust
+check, formatting and architecture guard pass. Earlier GPU quality probes passed before
+subsequent experiments; they do not qualify the final investigation state.
+
+**Result:** f7369cd reproduced at 40.45 ms idle / 110.94 ms turning. Intermediate camera
+filter changes reached about 20.3 ms idle / 21.6 ms turning but failed the swing budget at
+27.4 ms versus a8's 21.0 ms. Extra resolved-motion caches (dense/sparse) and a separate
+single-sample motion camera failed the idle budget and were removed. An occupancy lookup
+also failed its first guard; overlapping contributor compilation means that batch does not
+isolate GPU cost. Removed it, preserving the bounded camera/native object paths. Evidence:
+artifacts/blur-performance-regression; exact failed attempts remain in STATUS.md.
+
+**Still broken or not tested:** Native-resolution performance is not qualified. No new fix
+committed. Final GPU quality regression suite, native Windows/Linux execution and complete
+workspace validation after these experiments are not tested.
+
+**Next:** Measure individual GPU pass durations before further structural changes. Consider
+motion-bounded work lists, multiscale camera gathers and shared-memory tile caching; retain
+weapon quality, occlusion and native-resolution performance thresholds.
+
 ## 2026-10-27 Checkpoint: Advanced world and projectile motion blur
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

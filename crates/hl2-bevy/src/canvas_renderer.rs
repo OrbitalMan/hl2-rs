@@ -1,4 +1,5 @@
 //! Bevy presentation and WGPU 2D batch rendering for the shared Source UI Canvas.
+mod frame_distribution;
 mod game_hud;
 
 use bevy::{
@@ -105,15 +106,19 @@ struct FrameTiming {
     frame_ms: f64,
     frames_seen: u64,
     warmup_end: Option<f64>,
+    distribution: frame_distribution::Distribution,
 }
 impl FrameTiming {
-    fn observe(&mut self, now: f64) {
+    fn observe(&mut self, now: f64, profile: bool) {
         self.frames_seen += 1;
         if self.frames_seen == 120 {
             self.warmup_end = Some(now);
         }
         if let Some(last) = self.frames.back() {
             self.frame_ms = (now - last).max(0.) * 1000.;
+        }
+        if profile && self.frames_seen > 120 {
+            self.distribution.observe(self.frame_ms);
         }
         self.frames.push_back(now);
         while self.frames.len() > 600 || self.frames.front().is_some_and(|t| now - t > 1.) {
@@ -126,7 +131,7 @@ impl FrameTiming {
             .warmup_end
             .zip(self.frames.back())
             .map_or(0., |(start, end)| end - start);
-        serde_json::json!({"warmup_frames":120,"measured_frames":frames,"elapsed_seconds":elapsed,"mean_fps":if elapsed>0. {frames as f64/elapsed} else {0.},"mean_frame_ms":if frames>0 {elapsed*1000./frames as f64} else {0.}})
+        serde_json::json!({"p95_frame_ms_upper_bound":self.distribution.percentile(95),"p99_frame_ms_upper_bound":self.distribution.percentile(99),"max_frame_ms":self.distribution.maximum(),"warmup_frames":120,"measured_frames":frames,"elapsed_seconds":elapsed,"mean_fps":if elapsed>0. {frames as f64/elapsed} else {0.},"mean_frame_ms":if frames>0 {elapsed*1000./frames as f64} else {0.}})
     }
     fn fps(&self) -> f64 {
         let span = self
@@ -161,6 +166,9 @@ pub struct Hud {
     pub spawn_rows: usize,
 }
 impl Hud {
+    fn observe_frame(&mut self, now: f64, profile: bool) {
+        self.timing.observe(now, profile);
+    }
     pub fn report(&self) -> serde_json::Value {
         let captions = &self.source.captions;
         let state = captions.state.borrow();
@@ -348,7 +356,7 @@ pub fn present(
     if !ui.source.background_level() {
         game_hud::draw(&hud, &game, &ui);
     }
-    hud.timing.observe(clock.elapsed_secs_f64());
+    hud.observe_frame(clock.elapsed_secs_f64(), performance.is_some());
     hud.debug_lines.clear();
     if sim.dev_overlay {
         let stats = status.0.lock().expect("developer statistics");
@@ -516,6 +524,35 @@ fn quad_mesh(quad: &Quad, viewport: Vec2) -> Mesh {
 mod tests {
     use super::*;
     use source_ui::canvas::{Color, Rect};
+    #[test]
+    fn frame_profile_excludes_warmup_and_keeps_tail_bounds() {
+        let mut timing = FrameTiming::default();
+        for frame in 0..120 {
+            timing.observe(f64::from(frame), true);
+        }
+        assert!(timing.benchmark()["max_frame_ms"].is_null());
+        timing.observe(119.125, true);
+        let result = timing.benchmark();
+        assert_eq!(result["measured_frames"], 1);
+        assert_eq!(result["max_frame_ms"], 125.);
+        assert_eq!(result["p95_frame_ms_upper_bound"], 126.);
+        assert_eq!(result["p99_frame_ms_upper_bound"], 126.);
+        assert_eq!(result["mean_frame_ms"], 125.);
+    }
+
+    #[test]
+    fn ordinary_frames_do_not_collect_profile_histograms() {
+        let mut timing = FrameTiming::default();
+        for frame in 0..125 {
+            timing.observe(f64::from(frame) * 0.125, false);
+        }
+        let result = timing.benchmark();
+        assert_eq!(result["measured_frames"], 5);
+        assert!(result["max_frame_ms"].is_null());
+        assert!(result["p95_frame_ms_upper_bound"].is_null());
+        assert!(result["p99_frame_ms_upper_bound"].is_null());
+    }
+
     #[test]
     fn atlas_crop_remains_pixel_aligned_in_camera_coordinates() {
         let quad = Quad {

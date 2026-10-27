@@ -1,6 +1,47 @@
 # STATUS
 
-Checkpoint: 2026-10-27 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui in the original checkout. Advanced world/projectile reconstruction is implemented alongside the existing weapon reconstruction. Local checks pass; packaged motion/occlusion approximations and performance evidence are recorded below. Native Windows/Linux runtime and native parity remain unverified. Sections below are newest first.
+Checkpoint: 2026-10-27 (Codex desktop, GPT-6 family; exact model identifier not exposed),
+codex/blur-performance based on f7369cd. Profiled frame tails and an owned native-resolution
+guard are the first reviewable checkpoint. Advanced rendering optimisations are experimental
+and unqualified; the known high-resolution regression remains open. The primary checkout
+is reserved for the owner's manual testing. Sections below are newest first.
+
+## In progress: native-resolution Advanced regression (2026-10-27)
+
+- Owner confirms a8a050b is about 50 FPS idle/shaking, about 3-4 FPS lower during swings;
+  f7369cd is about 40 FPS idle and about 10 shaking at 3456x2168 / 4x MSAA. Earlier
+  1024x768/no-AA qualification is insufficient and superseded by this reproduction.
+- Copied native-resolution packages reproduce f7369cd at 40.45 ms idle / 110.94 ms shaking.
+  Bypassing reconstruction returns about 20 ms with the prepass retained. A quarter camera
+  filter alone still costs 28.43 ms idle. Object-only producer vectors remove repeated
+  camera/depth work, but the first crowbar-visible guard still fails at 24.06 ms idle.
+  Combining native composites and skipping static camera filtering improves idle to
+  20.29 ms; its crowbar-visible shaking guard still fails at 23.99 ms versus retail 17.89 ms.
+- Do not qualify these partial attempts. Direct a8 tests with the crowbar give 19.23 ms
+  idle, 19.05 ms shaking, 21.01 ms swinging. Preserve its exact viewmodel motion channel;
+  object-only motion belongs to world materials. Continue focused native tests before
+  committing. The first resolved-scene startup failed GPU validation because its ninth
+  binding was omitted; fixed the binding before timing. Evidence:
+  artifacts/blur-performance-regression; no Windows runtime test.
+
+- Further rejected attempts: resolved-motion cache costs 23.27 ms dense / 25.49 ms sparse
+  idle; separate single-sample motion camera costs 26.62 ms versus retail 18.24 ms. Removed
+  the auxiliary camera and the cache. Both add too much framebuffer/geometry overhead.
+  The occupancy-mask experiment also failed the guard (33.88 ms idle, p95 108 ms) and
+  was removed. Other contributor compilation overlapped part of that batch, so these
+  numbers do not isolate its GPU cost. No candidate is qualified or committed. Return to
+  the bounded camera filter and original native object gather for the next investigation;
+  retain guard thresholds and weapon reconstruction. Investigate GPU pass timings before
+  adding further full-screen passes.
+
+- Investigation moved to the dedicated codex/blur-performance worktree at the owner's
+  request. The primary checkout remains on orbitalman/hl2-ui at f7369cd for manual testing;
+  task changes were copied and hash-verified before restoring its tracked source. Unrelated
+  scratch files were preserved. GPU tests must not overlap the owner's manual testing.
+- Encoder-boundary timestamp probes finish without render errors, but all reported blur GPU
+  durations are zero on this Metal adapter. These are unavailable timings, not zero-cost
+  filters. Do not publish them as GPU cost; use controlled ablation or another profiler.
+
 
 ## Advanced world and projectile blur (2026-10-27)
 
