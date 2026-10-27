@@ -5,6 +5,18 @@ order reversed in the middle pair. Report every iteration, paired cost ratios an
 minimum/maximum frame means and p95/p99 values. Medians smooth ordinary noise; known
 interference remains flagged rather than averaged away. The raw evidence is never hidden.
 
+## Repeated direct-colour candidate (2026-10-27)
+
+NO_BUILD=1 BLUR_LABEL=direct-sources-repeated BLUR_RUNS=3 python3
+scripts/checks/check_blur_performance.py completes eighteen runs. All have valid GPU
+completion bounds and zero rendering/wait errors; the overall performance guard fails.
+Three swing pairs are resource-comparable and consistently fail both budgets; idle/turn
+pairs retain their interference flags. All iterations remain in the named ignored evidence
+directory, with source/package identities and resource-report.md. The direct-colour world
+GPU probe passes; no interactive or Windows runtime qualification is claimed. Source is
+preserved on codex/experiment/blur-direct-colour-sources. The main-depth follow-up is a
+separate archived candidate, not implicitly qualified by these earlier captures.
+
 ## Headless GPU completion and settled baselines (2026-10-27)
 
 Headless --profile runs use a two-marker ring in the host render graph. Completion markers

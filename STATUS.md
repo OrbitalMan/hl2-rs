@@ -6,11 +6,27 @@ guard are the first reviewable checkpoint. Advanced rendering optimisations are 
 and unqualified; the known high-resolution regression remains open. The primary checkout
 is reserved for the owner's manual testing. Sections below are newest first.
 
+## Repeated direct-source experiment (2026-10-27)
+
+- Eighteen native packaged runs complete: three alternating pairs per scene, middle order
+  reversed. All render without errors and observe bounded GPU completion with zero wait
+  errors. The candidate remains unqualified; no rendering source is committed to this branch.
+- Idle/turn pairs are flagged for pressure, competing builds or baseline shifts. Retain all
+  results rather than deriving a speedup from their noisy medians. Three swing pairs are
+  resource-comparable: Enabled 18.26 ms median, Advanced 23.60 ms (range 23.53-23.79), p95
+  22/33 ms. Both budgets fail. GPU busy rises from about 74% to 99%, while host CPU busy is
+  similar and no measured memory-pressure/pageout flags occur in the swing runs.
+- Source is retained on codex/experiment/blur-direct-colour-sources; detailed resources and
+  output ratios are in docs/performance.md. Raw evidence remains in ignored
+  artifacts/blur-performance-regression/direct-sources-repeated. World/projectile GPU probes pass. Exact GPU-pass cost and interactive performance remain
+  untested. The next candidate samples main depth without a copied prepass export; eleven
+  bloom tests and architecture pass, packaged qualification is pending.
+
 ## Experiment preservation (2026-10-27)
 
-Eight local codex/experiment branches preserve meaningful blur approaches. The source-only
+Ten local codex/experiment branches preserve meaningful blur approaches. The source-only
 index is docs/blur-experiments.md; every branch has docs/blur-experiment.md with provenance
-and reuse notes. Two are complete recorded snapshots; partial/reconstructed shader and
+and reuse notes. Four are complete recorded snapshots; partial/reconstructed shader and
 camera integrations are labelled. These archives are unqualified, and new archive checkouts
 were not rebuilt. Temporary stash cleanup does not remove the archived source objects.
 
@@ -29,9 +45,11 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
   inputs under the original resource-matching criteria rather than requiring total idleness.
   An experimental quiet-only rejection is removed; those earlier files are not rewritten.
 - Pre-pacing headless frame rates remain exploratory submission-cadence evidence. Rendering
-  candidates still fail some native guards and remain uncommitted. New empty-ray skipping
-  reuses conservative raw motion tiles without adding images/passes; GPU quality and final
-  performance qualification are pending. Concurrent build activity is retained and flagged.
+  candidates still fail some native guards and remain uncommitted. Empty-ray skipping did
+  not establish a gain and is archived separately. The current candidate removes foreground
+  copies by reading resolved colour inputs directly; ten bloom tests and architecture pass,
+  but GPU quality and repeated performance qualification are pending. Concurrent build
+  activity is retained and flagged.
 
 
 ## Hardware-aware benchmark checkpoint (2026-10-27)

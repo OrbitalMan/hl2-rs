@@ -1,5 +1,29 @@
 # Design
 
+## Sample main depth without a copied prepass image (2026-10-27)
+
+The repeated direct-colour candidate fails the comparable swing budget. Its source remains
+archived. Bevy's DepthPrepass exports depth by copying the main multisampled depth texture;
+our reconstruction runs after drawing and can sample that main depth directly. Keep motion
+prepasses, replace only the exported depth binding, and request TEXTURE_BINDING while a blur
+camera is active. Record and remove only usage bits added by this feature on disable; retain
+other camera settings. Do not change filter taps, exposure, geometry AA or off-mode passes.
+Verify activation/disable usage restoration, bloom tests, packaged depth/occlusion/MSAA and
+weapon probes, then repeated resource-aware native pairs before accepting this candidate.
+
+## Direct resolved colour sources (2026-10-27)
+
+After switching compositions to single-sample post_process_write, the per-view foreground
+colour copy is redundant. Bind both of Bevy's resolved main texture views ahead of time and
+select the current source by identity during rendering. Treat the pair as unordered in the
+cache key so normal ping-pong flips do not create bind groups each frame. Keep only the
+weapon's pre-draw world-background snapshot. Remove the two owned native foreground images
+and their copies; keep all filter math/geometry AA and the existing quarter world targets.
+Verify source-pair cache invariance, resize/AA changes, GPU surface/occlusion/crowbar probes,
+normal captures and three alternating native timing pairs per scene. Empty-ray skipping did
+not establish a gain in its contextual batch and is preserved on its archive branch rather
+than retained in the preferred path. No shader sample quality reduction is part of this step.
+
 Repeated native qualification defaults to three Enabled/Advanced pairs per scene, with
 order reversed in the middle pair. Report every iteration, paired cost ratios and median/
 minimum/maximum frame means and p95/p99 values. Medians smooth ordinary noise; known

@@ -12,6 +12,8 @@ can affect their interpretation. They are not universal rankings of the approach
 | Branch | Preserved state | Potential reuse |
 | --- | --- | --- |
 | `codex/experiment/blur-quarter-native` | Complete recorded tracked/untracked source snapshot | Mixed-resolution camera filtering and independent object vectors |
+| `codex/experiment/blur-main-depth` | Complete source snapshot; packaged qualification pending | Sampling post-draw depth without a duplicated prepass export |
+| `codex/experiment/blur-direct-colour-sources` | Complete source snapshot; world probes pass, native budget fails | Reading resolved post-process inputs without foreground copies |
 | `codex/experiment/blur-tile-skip` | Complete recorded tracked/untracked source snapshot | Conservative empty-space traversal for sparse motion |
 | `codex/experiment/blur-quarter-gather` | Exact shader snapshot; CPU integration incomplete | Lower-resolution filtering and alternate quality/bandwidth tradeoffs |
 | `codex/experiment/blur-motion-occupancy` | Exact shader snapshot; CPU integration incomplete | Conservative motion masks and sparse sample consumers |

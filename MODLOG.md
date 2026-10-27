@@ -1,5 +1,36 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: repeated native blur results and retained candidates
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Retained direct-colour and main-depth candidates on separate source-only archive
+branches, bringing the catalogue to ten. Recorded all eighteen direct-colour native runs,
+resource/output ratios, comparable-pair failures and GPU probe results. The current main-depth
+candidate samples existing depth after drawing instead of requesting its duplicated export;
+its bounded plan is in docs/DESIGN.md. Rendering source remains experimental and uncommitted
+on the active branch; archive commits are explicitly unqualified.
+
+**Why:** Repetition must expose randomness and interference, and a candidate that misses its
+budget must remain available for reuse without being presented as an accepted fix.
+
+**Tested how:** NO_BUILD=1 BLUR_LABEL=direct-sources-repeated BLUR_RUNS=3 python3
+scripts/checks/check_blur_performance.py: all eighteen runs complete, zero rendering/wait
+errors, overall guard fails. Direct-colour check_world_blur.py passes. Main-depth eleven
+bloom tests, full validate.sh and Windows-target strict Clippy pass; its packaged GPU checks
+are still in progress. Verified source archive references; no installed assets are included.
+
+**Result:** Three comparable swing pairs consistently fail: 18.26/23.60 ms median
+Enabled/Advanced, p95 22/33 ms. GPU busy is about 74/99%, while CPU busy remains similar and
+no swing pressure flags occur. Idle/turn interference is retained, not averaged into a
+speedup claim. Details and limits are in docs/performance.md.
+
+**Still broken or not tested:** Native Advanced performance is not qualified. Exact GPU-pass
+cost, interactive FPS and Windows runtime remain untested. Archive checkouts are not rebuilt.
+
+**Next:** Finish main-depth image probes and repeated native benchmarks; retain unsuccessful
+variants and commit rendering only after its behavior and cost qualify.
+
 ## 2026-10-27 Checkpoint: preserve meaningful blur experiments
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

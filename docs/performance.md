@@ -1,5 +1,36 @@
 # Performance measurements - 2026-10-05
 
+## Repeated direct-source experiment (2026-10-27; rejected for qualification)
+
+Completed 18 packaged runs: three alternating Enabled/Advanced pairs for idle, continuous
+turns and crowbar swings, reversing the middle pair. Apple M1 Pro / Metal, 16 GiB unified
+memory, 3456x2168, 4x MSAA, HDR None, VSync off, completion-paced headless --profile.
+The candidate reads resolved colour inputs directly and removes two native foreground
+images/copies; weapon filtering math is retained. It is archived separately and unqualified.
+
+| Scene | Enabled median mean (range), ms | Advanced median mean (range), ms | Median p95 Enabled / Advanced, ms | Resource comparability |
+| --- | ---: | ---: | ---: | --- |
+| Idle | 19.46 (18.27-23.61) | 30.76 (20.56-44.72) | 24 / 106 | All pairs flagged; builds and memory pressure |
+| Turns | 18.01 (18.01-18.82) | 22.24 (22.06-22.37) | 23 / 27 | All pairs flagged; pressure/pageouts or baseline mismatch |
+| Swing | 18.26 (18.23-18.30) | 23.60 (23.53-23.79) | 22 / 33 | Three comparable pairs; no quality flags |
+
+The comparable swing pairs consistently fail the unchanged mean and p95 budgets. Their
+Advanced/Enabled mean-frame ratios are 1.294, 1.303 and 1.286. Average host CPU busy is
+43.2-45.7% Advanced versus 44.4-46.1% Enabled; GPU busy is 98.7-99.0% versus 73.8-74.5%.
+Minimum available-memory estimates are 3.48-3.62 GiB versus 3.92-4.04 GiB, without measured
+pressure/pageouts. This supports a GPU throughput bottleneck in this workload; precise
+per-pass cost and causality remain unmeasured. It does not excuse the failed budget.
+
+Swing output is 315-318 versus 409-411 Mpixel/s, or 22.0-22.1 versus 28.3-28.7 frames per
+consumed game CPU-second. The system GPU-busy-time proxy is 319-322 versus 551-555 Mpixel/s
+of GPU-busy time; it is not isolated GPU efficiency or available FLOPS. Dedicated VRAM and
+GPU clocks remain unavailable. The loaded idle runs show positive CPU/frame-time associations
+(r=0.60-0.75) and lower GPU occupancy during stalls; these small adjacent-window samples are
+descriptive, not causal. All raw iterations, resource windows, correlations and ratios are
+retained in artifacts/blur-performance-regression/direct-sources-repeated. No runs were
+removed from the medians. No comparison here establishes interactive FPS or a copy-removal
+speedup against the previous candidate. Visual qualification is recorded separately.
+
 ## Completion pacing changes measurement interpretation (2026-10-27)
 
 Offscreen tests now keep at most two pending GPU completion markers during --profile.
