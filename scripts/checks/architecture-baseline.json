@@ -189,7 +189,7 @@
   "crates/hl2-ui/src/gameui/options.rs": 2680,
   "crates/hl2-ui/src/hud.rs": 1827,
   "crates/source-assets/src/models.rs": 1426,
-  "crates/source-ui/src/console/panel.rs": 1105,
+  "crates/source-ui/src/console/panel.rs": 1097,
   "crates/source-ui/src/widgets.rs": 2381
  },
  "functions": {
@@ -506,7 +506,7 @@
    112
   ],
   "crates/source-ui/src/console/panel.rs::draw": [
-   144
+   135
   ],
   "crates/source-ui/src/console/panel.rs::input": [
    121

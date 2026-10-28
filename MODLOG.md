@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-28 Fix: align developer console input font and caret positioning
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** Render developer console input text using the monospace console font (`ConsoleFont`)
+shared with completion and log history rather than the proportional UI scheme font. Measure character
+advance and entry text bounds with `self.text_width` using console font metrics (with nominal monospace
+fallback when headless). Position the blinking caret directly from measured console font text advance.
+Add unit tests verifying console text measurement and exact caret quad positioning. Tighten panel and draw
+baselines.
+**Why:** The console entry field previously drew and measured with `painter.text_in` / `painter.text_width`,
+which used the taller, proportional `FONT_TALL` scheme font. This caused a font mismatch against log/completion
+text and placed the caret far to the right due to larger proportional advance measurements.
+**Tested how:** validate.sh (1,193 Rust pass, 100 ignored; 27 Python, strict Clippy/fmt/architecture);
+check_windows.sh passes. Unit tests verify advance calculation and caret positioning at exact text width.
+**Result:** Developer console input matches log and completion font 1:1, and the blinking caret aligns
+precisely with typed characters.
+**Still broken or not tested:** Unfocused dialog button click-to-focus and hover highlight behavior.
+**Next:** Unfocused dialog click-to-focus handling.
+
+
 ## 2026-10-28 Fix: suppress occlusion clipping during subdialog and window fade-out
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

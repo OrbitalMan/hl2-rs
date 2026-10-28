@@ -13,9 +13,8 @@ use crate::font::FontFace;
 use crate::input::{Input, Key};
 use crate::placement::{self, Placement};
 use crate::widgets::{
-    close_button_rect, Align, ButtonState, ButtonTracker, Fonts, FrameSpec, Painter,
-    ScrollAccumulator, ScrollBarLayout, ScrollBarState, ScrollMode, TextInputModel, Theme,
-    SCROLLBAR_WIDTH,
+    close_button_rect, ButtonState, ButtonTracker, Fonts, FrameSpec, Painter, ScrollAccumulator,
+    ScrollBarLayout, ScrollBarState, ScrollMode, TextInputModel, Theme, SCROLLBAR_WIDTH,
 };
 use glam::{vec2, Vec2};
 use serde::Serialize;
@@ -844,17 +843,8 @@ impl ConsolePanel {
         let entry_focused = !self.placement.active();
         let model = TextInputModel::new(look.focused, entry_focused);
         if model.should_draw_focus_edge() {
-            let edge = painter.theme.entry_focus_edge;
-            painter.border(
-                Rect::new(
-                    layout.entry.x + 1.,
-                    layout.entry.y + 1.,
-                    layout.entry.w - 2.,
-                    layout.entry.h - 2.,
-                ),
-                edge,
-                edge,
-            );
+            let (e, t) = (layout.entry, painter.theme.entry_focus_edge);
+            painter.border(Rect::new(e.x + 1., e.y + 1., e.w - 2., e.h - 2.), t, t);
         }
         let (line, cursor) = match self.editor.search() {
             Some((query, found)) => {
@@ -868,40 +858,40 @@ impl ConsolePanel {
             }
             None => (self.editor.text().to_owned(), self.editor.cursor()),
         };
-        let inner = Rect::new(
-            layout.entry.x + 3.,
-            layout.entry.y,
-            layout.entry.w - 6.,
-            layout.entry.h,
-        );
-        // Scroll the line so the cursor stays inside the entry.
+        let entry = layout.canvas(layout.entry);
+        let inner_x = entry.x + (3. * scale).round();
+        let inner_w = entry.w - (6. * scale).round();
         let chars: Vec<char> = line.chars().collect();
         let width = |from: usize, to: usize| {
-            painter.text_width(&chars[from..to].iter().collect::<String>(), false)
+            self.text_width(&chars[from..to].iter().collect::<String>(), scale)
         };
         let mut start = 0;
-        while start < cursor && width(start, cursor) > inner.w - 2. {
+        while start < cursor && width(start, cursor) > inner_w - 2. * scale {
             start += 1;
         }
         let mut end = cursor;
-        while end < chars.len() && width(start, end + 1) <= inner.w {
+        while end < chars.len() && width(start, end + 1) <= inner_w {
             end += 1;
         }
         let shown: String = chars[start..end].iter().collect();
-        painter.text_in(&shown, inner, Align::Left, painter.theme.text, false);
+        let row_top = entry.y + ((entry.h - CONSOLE_ROW * scale) * 0.5).round();
+        text(
+            &shown,
+            inner_x,
+            row_top + (CONSOLE_ROW - CONSOLE_DESCENT) * scale,
+            painter.theme.text,
+        );
         if model.should_draw_caret(time) {
-            let x = inner.x + width(start, cursor) + 1.;
-            painter.fill(
-                Rect::new(x, inner.y + 4., 1., inner.h - 8.),
-                painter.theme.text,
-            );
+            let caret_x = inner_x + width(start, cursor) + 1.;
+            let caret_top = entry.y + (4. * scale).round();
+            let caret_h = (entry.h - (8. * scale).round()).max(1.);
+            canvas.rectangle(caret_x, caret_top, 1., caret_h, painter.theme.text);
         }
         painter.button(
             layout.submit,
             look.submit,
             self.button_state(ConsoleButton::Submit, look.closing),
         );
-        let entry = layout.canvas(layout.entry);
         self.draw_completion(
             canvas,
             look,
@@ -1097,9 +1087,11 @@ impl ConsolePanel {
     }
 
     fn text_width(&self, content: &str, scale: f32) -> f32 {
-        self.font.as_ref().map_or(0., |font| {
-            font.width_em(content, (CONSOLE_TEXT * scale) as u16 as f32)
-        })
+        let em = (CONSOLE_TEXT * scale) as u16 as f32;
+        self.font.as_ref().map_or_else(
+            || content.chars().map(|c| self.advance(c, em)).sum(),
+            |font| font.width_em(content, em),
+        )
     }
 }
 
@@ -1290,5 +1282,58 @@ mod tests {
         panel.input(&canvas, &copy, &Nothing);
         assert_eq!(panel.take_copied().as_deref(), Some("two\nthree"));
         assert_eq!(panel.take_copied(), None);
+    }
+
+    #[test]
+    fn text_width_measures_using_console_font_metrics_and_fallback() {
+        let panel = ConsolePanel::new(SCALING);
+        let em = (CONSOLE_TEXT * 1.0) as u16 as f32;
+        let expected_fallback = 4. * (em * NOMINAL_ADVANCE);
+        assert!((panel.text_width("test", 1.0) - expected_fallback).abs() < 1e-4);
+    }
+
+    #[test]
+    fn console_input_entry_caret_positions_from_text_width() {
+        let canvas = Canvas::default();
+        let mut panel = ConsolePanel::new(SCALING);
+        struct App;
+        impl Context for App {
+            type Effect = ();
+            type Names = ();
+        }
+        impl Completer for App {
+            fn complete(&self, _: &str) -> Completion {
+                Completion::default()
+            }
+        }
+        let app = App;
+        panel.input(&canvas, &typed("hello"), &app);
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let look = Look {
+            fonts: &fonts,
+            theme: &theme,
+            popup_theme: &theme,
+            title: "Console",
+            submit: "Submit",
+            reverse_search: "bck-i-search",
+            focused: true,
+            closing: false,
+            commands: &[],
+            context: &app,
+        };
+        panel.draw(&canvas, &look, 0.0, &[]);
+        let quads = canvas.drain();
+        let layout = panel.dialog_layout(&canvas);
+        let entry = layout.canvas(layout.entry);
+        let inner_x = entry.x + (3. * layout.scale).round();
+        let expected_caret_x = inner_x + panel.text_width("hello", layout.scale) + 1.;
+        let caret_quad = quads
+            .iter()
+            .find(|q| (q.destination.x - expected_caret_x).abs() < 1e-3 && q.destination.w == 1.0);
+        assert!(
+            caret_quad.is_some(),
+            "caret quad at {expected_caret_x} should exist in quads"
+        );
     }
 }

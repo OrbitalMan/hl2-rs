@@ -1,5 +1,14 @@
 # STATUS
 
+## Developer console input font and caret positioning aligned (2026-10-28)
+
+The developer console input entry field now renders with the shared monospace `ConsoleFont`
+matching the log history and completion popup. Text metrics and cursor advances are computed
+directly from the console font face, eliminating horizontal caret displacement and font visual
+mismatches. Full validation (1,193 Rust / 100 ignored, 27 Python), Windows-target checks and
+architecture pass with panel baseline tightening.
+
+
 ## Subdialog and window fade-out occlusion snapping resolved (2026-10-28)
 
 Canvas occluders are only registered for overlay windows, subdialogs, and confirmation boxes
