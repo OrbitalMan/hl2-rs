@@ -557,6 +557,9 @@ struct Route {
     feet: Vec<Vec3>,
     /// Door blocking the segment that ends at `feet[i]`, if any.
     doors: Vec<Option<usize>>,
+    /// `doors[i]` was probed (segments are probed when the actor reaches them; missing
+    /// entries count as probed).
+    door_known: Vec<bool>,
 }
 pub struct Controller {
     graph: Option<Graph>,
@@ -566,8 +569,33 @@ pub struct Controller {
     pending: Vec<MoveUpdate>,
     /// Door entities NPC routes may pass through by opening them.
     doors: BTreeSet<usize>,
+    stats: PathStats,
+    /// Movement time (unpaused ticks), the clock of the stale-link expiries.
+    clock: f64,
+    /// Graph links an NPC failed to move along (bits_LINK_STALE_SUGGESTED) and when
+    /// they may be rechecked (m_timeStaleExpires).
+    stale: BTreeMap<usize, f64>,
+}
+/// CAI_Navigator::MarkCurWaypointFailedLink: a failed link stays unusable this long.
+const STALE_LINK_TIME: f64 = 4.;
+/// IsLinkStillStale: a recheck that still fails keeps the link stale this long.
+const STALE_RECHECK_TIME: f64 = 1.;
+/// Route planning cost counters (reported per sample; performance diagnostics).
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub struct PathStats {
+    pub plans: u64,
+    pub failures: u64,
+    pub link_probes: u64,
+    pub micros: u64,
 }
 impl Controller {
+    pub fn path_stats(&self) -> PathStats {
+        self.stats
+    }
+    /// The loaded node graph, when the map has one.
+    pub fn graph(&self) -> Option<&Graph> {
+        self.graph.as_ref()
+    }
     /// Doors that block a graph link do not invalidate it; NPCs open them on contact.
     pub fn set_doors(&mut self, world: &World) {
         self.doors = world
@@ -595,6 +623,9 @@ impl Controller {
             goals: BTreeMap::new(),
             pending: Vec::new(),
             doors: BTreeSet::new(),
+            stats: PathStats::default(),
+            clock: 0.,
+            stale: BTreeMap::new(),
         }
     }
     /// register_actor for an actor that only AI goals (GoalKey::scene == AI_SCENE) move.
@@ -928,7 +959,9 @@ impl Controller {
             if pose.feet.distance(goal.request.target_feet) <= goal.tolerance {
                 goal.state = GoalState::Arrived;
             } else {
-                goal.route = plan(
+                let started = std::time::Instant::now();
+                let mut probes = 0;
+                let route = plan(
                     world,
                     self.graph.as_ref(),
                     &self.restrictions,
@@ -940,7 +973,18 @@ impl Controller {
                         tolerance: goal.tolerance,
                     },
                     key.actor,
-                )?;
+                    Stale {
+                        links: &mut self.stale,
+                        now: self.clock,
+                    },
+                    &mut probes,
+                );
+                self.stats.plans += 1;
+                self.stats.failures += u64::from(route.is_err());
+                self.stats.link_probes += probes;
+                self.stats.micros += started.elapsed().as_micros() as u64;
+                goal.route = route?;
+                probe_doors(world, actor, key.actor, &mut goal, &self.doors);
             }
             Ok(())
         })();
@@ -979,6 +1023,9 @@ impl Controller {
     ) -> Vec<MoveUpdate> {
         if ui_paused {
             return Vec::new();
+        }
+        if dt.is_finite() && dt > 0. {
+            self.clock += f64::from(dt);
         }
         let mut updates = std::mem::take(&mut self.pending);
         for (key, goal) in &mut self.goals {
@@ -1026,7 +1073,9 @@ impl Controller {
                         return Ok(());
                     }
                     goal.retry_time = 0.;
-                    goal.route = plan(
+                    let started = std::time::Instant::now();
+                    let mut probes = 0;
+                    let route = plan(
                         world,
                         self.graph.as_ref(),
                         &self.restrictions,
@@ -1038,13 +1087,42 @@ impl Controller {
                             tolerance: goal.tolerance,
                         },
                         key.actor,
-                    )?;
+                        Stale {
+                            links: &mut self.stale,
+                            now: self.clock,
+                        },
+                        &mut probes,
+                    );
+                    self.stats.plans += 1;
+                    self.stats.failures += u64::from(route.is_err());
+                    self.stats.link_probes += probes;
+                    self.stats.micros += started.elapsed().as_micros() as u64;
+                    goal.route = route?;
                     goal.next = 0;
                     goal.state = GoalState::Moving;
                 }
-                advance(world, actor, *key, goal, track, transients, dt)
+                let moved = advance(world, actor, *key, goal, track, transients, dt);
+                probe_doors(world, actor, key.actor, goal, &self.doors);
+                moved
             })();
             if let Err(reason) = outcome {
+                // MarkCurWaypointFailedLink: a move blocked on a graph link (not by a
+                // door, an NPC or the player, which hold and retry) marks the link stale.
+                if let GoalBlockReason::Collision { blocker, .. } = &reason {
+                    let actor_block = blocker.is_some_and(|b| {
+                        self.doors.contains(&b) || transients.iter().any(|t| t.entity == Some(b))
+                    });
+                    let first_block = !matches!(goal.state, GoalState::Blocked(_));
+                    if !actor_block && first_block {
+                        if let Some(link) = self
+                            .graph
+                            .as_ref()
+                            .and_then(|g| route_link(g, &goal.route, goal.next))
+                        {
+                            self.stale.insert(link, self.clock + STALE_LINK_TIME);
+                        }
+                    }
+                }
                 goal.state = GoalState::Blocked(reason);
             }
             let name = self
@@ -1347,6 +1425,8 @@ fn plan<W: NpcCollisionWorld>(
     start: Vec3,
     destination: Destination,
     entity: usize,
+    stale: Stale<'_>,
+    probes: &mut u64,
 ) -> Result<Route, GoalBlockReason> {
     let Destination {
         feet: end,
@@ -1363,6 +1443,7 @@ fn plan<W: NpcCollisionWorld>(
             nodes: Vec::new(),
             feet: vec![end],
             doors: vec![None],
+            door_known: vec![true],
         });
     }
     let graph = graph.ok_or(GoalBlockReason::MissingGraph)?;
@@ -1399,30 +1480,95 @@ fn plan<W: NpcCollisionWorld>(
             )
         })
         .ok_or(GoalBlockReason::NoRoute)?;
-    let nodes = search(graph, restrictions, start_node, end_node, |_, from, to| {
-        if connector(world, actor, from, to, 0.1, query) {
-            Some(from.distance(to))
-        } else {
-            // Prefer open routes; a door link costs extra for the open/wait.
-            door_link(world, actor, from, to, query, doors).then(|| from.distance(to) + 128.)
-        }
-    })?;
+    // CAI_Pathfinder::IsLinkUsable: graph data only (flags, accepted move types and
+    // unusable nodes, in `search`); a stale-suggested link is unusable until it expires,
+    // then IsLinkStillStale rechecks it once per plan (CheckStaleRoute: the local move).
+    let Stale { links, now } = stale;
+    let mut rechecked = false;
+    let nodes = search(
+        graph,
+        restrictions,
+        start_node,
+        end_node,
+        |link, from, to| {
+            let Some(&expires) = links.get(&link) else {
+                return Some(from.distance(to));
+            };
+            if now < expires || rechecked {
+                return None;
+            }
+            rechecked = true;
+            *probes += 1;
+            if connector(world, actor, from, to, 0.1, query)
+                || door_link(world, actor, from, to, query, doors)
+            {
+                links.remove(&link);
+                Some(from.distance(to))
+            } else {
+                links.insert(link, now + STALE_RECHECK_TIME);
+                None
+            }
+        },
+    )?;
     let mut feet: Vec<_> = nodes
         .iter()
         .map(|n| node_feet(graph, *n, restrictions).unwrap())
         .collect();
     feet.push(end);
-    let door_set = doors;
-    let mut doors = vec![None];
-    for pair in feet.windows(2) {
-        let moved = npc_probe::ground_move(world, pair[0], pair[1], actor.ground, query);
-        doors.push(
-            moved
-                .blocker
-                .filter(|b| !moved.completed && door_set.contains(b)),
-        );
+    // Doors along the route are probed as the actor reaches each segment (probe_doors).
+    let mut door_known = vec![false; feet.len()];
+    door_known[0] = true;
+    Ok(Route {
+        nodes,
+        doors: vec![None; feet.len()],
+        feet,
+        door_known,
+    })
+}
+/// The stale-suggested links and the movement clock, for one plan.
+struct Stale<'a> {
+    links: &'a mut BTreeMap<usize, f64>,
+    now: f64,
+}
+/// The graph link of the route segment that ends at `feet[next]` (node to node).
+fn route_link(graph: &Graph, route: &Route, next: usize) -> Option<usize> {
+    let (&a, &b) = (
+        route.nodes.get(next.checked_sub(1)?)?,
+        route.nodes.get(next)?,
+    );
+    graph.links.iter().position(|l| {
+        (l.source == a && l.destination == b) || (l.source == b && l.destination == a)
+    })
+}
+/// The doors of the current and next route segments (the navigator opens a route door
+/// ahead of contact): one local move per segment, when the actor reaches it.
+fn probe_doors<W: NpcCollisionWorld>(
+    world: &W,
+    actor: &Actor,
+    entity: usize,
+    goal: &mut Goal,
+    door_set: &BTreeSet<usize>,
+) {
+    if door_set.is_empty() {
+        return;
     }
-    Ok(Route { nodes, feet, doors })
+    let excluded = [entity];
+    let query = Query {
+        contents_mask: npc_probe::NPC_BRUSH_ONLY_MASK,
+        excluded_entities: &excluded,
+        ..Default::default()
+    };
+    for index in [goal.next, goal.next + 1] {
+        if index == 0 || goal.route.door_known.get(index) != Some(&false) {
+            continue;
+        }
+        goal.route.door_known[index] = true;
+        let (from, to) = (goal.route.feet[index - 1], goal.route.feet[index]);
+        let moved = npc_probe::ground_move(world, from, to, actor.ground, query);
+        goal.route.doors[index] = moved
+            .blocker
+            .filter(|b| !moved.completed && door_set.contains(b));
+    }
 }
 fn search(
     graph: &Graph,
@@ -1646,6 +1792,7 @@ mod tests {
                 Vec3::new(150., 400., 0.),
             ],
             doors: vec![None; 3],
+            ..Default::default()
         };
         let mut goal = Goal {
             request: request(Vec3::new(150., 400., 0.)),
@@ -1964,6 +2111,42 @@ mod tests {
         assert!(NavRestrictions::from_world(&map, &invalid)
             .unusable_nodes
             .contains(&1));
+    }
+    #[test]
+    fn a_blocked_graph_link_turns_stale_and_the_retry_routes_around_it() {
+        // The graph claims a direct link 0-3 through the wall: the search trusts link data
+        // (CAI_Pathfinder::IsLinkUsable), the walk blocks, MarkCurWaypointFailedLink marks
+        // the link stale and the retry goes around.
+        let physical_world = world(vec![cube(
+            Vec3::new(35., -45., 0.),
+            Vec3::new(65., 45., 120.),
+        )]);
+        let physics = Physics::new(&physical_world);
+        let points = [
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 80., 0.),
+            Vec3::new(100., 80., 0.),
+            Vec3::new(100., 0., 0.),
+        ];
+        let edges = [(0, 1), (1, 2), (2, 3), (0, 3)];
+        let mut controller = make_controller(Some(graph(&points, &edges)));
+        let mut feet = Vec3::ZERO;
+        let mut wanted = request(points[3]);
+        wanted.force_short = true;
+        controller.request(key(1), wanted, pose(feet), &physics, &[]);
+        assert_eq!(controller.snapshots()[0].route_nodes, vec![0, 3]);
+        assert_eq!(controller.path_stats().link_probes, 0);
+        let mut stale_seen = false;
+        for _ in 0..800 {
+            tick(&mut controller, &physics, &mut feet, 0.02, false);
+            stale_seen |= controller.stale.contains_key(&3);
+            if controller.status(key(1)).unwrap().is_arrived() {
+                break;
+            }
+        }
+        assert!(stale_seen);
+        assert!(controller.status(key(1)).unwrap().is_arrived());
+        assert_eq!(controller.snapshots()[0].route_nodes, vec![0, 1, 2, 3]);
     }
     #[test]
     fn astar_equal_cost_uses_lower_id_and_reopens_previously_selected_nodes() {

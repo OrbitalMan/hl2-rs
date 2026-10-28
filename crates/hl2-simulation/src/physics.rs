@@ -91,12 +91,49 @@ const INTERACTIVE_DEBRIS_GROUPS: InteractionGroups = InteractionGroups::new(
         .difference(INTERACTIVE_DEBRIS_GROUP)
         .difference(SHADOW_GROUP),
 );
+/// Client-side ragdolls (C_BaseAnimating::BecomeRagdollOnClient): the world and props
+/// block them but props are not pushed (dominance), and the player, NPCs, debris and
+/// every server trace ignore them. Self collisions follow the model's collision rules
+/// (contact pair filter).
+const RAGDOLL_GROUP: Group = Group::GROUP_8;
+/// Rest thresholds for client ragdoll solids (see spawn_ragdoll): angular speed (rad/s)
+/// and seconds every solid must stay under them (linear: Rapier's 0.4 m/s, ~16 units/s).
+/// Tuned so landed hall corpses rest within about a second; IVP's own deactivation
+/// constants are not read (retail vphysics.dll).
+const RAGDOLL_SLEEP_ANGULAR: f32 = 2.;
+const RAGDOLL_SLEEP_TIME: f32 = 0.5;
+const RAGDOLL_GROUPS: InteractionGroups = InteractionGroups::new(
+    RAGDOLL_GROUP,
+    Group::ALL
+        .difference(SHADOW_GROUP)
+        .difference(HULL_GROUP)
+        .difference(NPC_GROUP)
+        .difference(PROJECTILE_GROUP)
+        .difference(DEBRIS_GROUP)
+        .difference(INTERACTIVE_DEBRIS_GROUP),
+);
+/// Dropped weapons (CBaseCombatWeapon::FallInit, COLLISION_GROUP_WEAPON):
+/// CGameRules::ShouldCollide keeps the player (movement and shadow), NPCs (models and
+/// hulls) and debris off them, so the player walks over them; the world, props, thrown
+/// frags and other weapons still collide, and bullets, +USE and the gravity gun still hit
+/// them (COLLISION_GROUP_NONE traces).
+const WEAPON_GROUP: Group = Group::GROUP_9;
+const WEAPON_GROUPS: InteractionGroups = InteractionGroups::new(
+    WEAPON_GROUP,
+    Group::ALL
+        .difference(NPC_GROUP)
+        .difference(HULL_GROUP)
+        .difference(SHADOW_GROUP)
+        .difference(DEBRIS_GROUP)
+        .difference(RAGDOLL_GROUP),
+);
 const QUERY_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL,
     Group::ALL
         .difference(PROJECTILE_GROUP)
         .difference(SHADOW_GROUP)
-        .difference(HULL_GROUP),
+        .difference(HULL_GROUP)
+        .difference(RAGDOLL_GROUP),
 );
 /// Player movement: everything solid to the player, NPC hull boxes included (not
 /// debris props).
@@ -106,7 +143,9 @@ const PLAYER_GROUPS: InteractionGroups = InteractionGroups::new(
         .difference(PROJECTILE_GROUP)
         .difference(SHADOW_GROUP)
         .difference(DEBRIS_GROUP)
-        .difference(INTERACTIVE_DEBRIS_GROUP),
+        .difference(INTERACTIVE_DEBRIS_GROUP)
+        .difference(RAGDOLL_GROUP)
+        .difference(WEAPON_GROUP),
 );
 /// The SDK hull (mins, maxs) of npc_* classes (SetHullType), for those done so far.
 pub fn npc_hull(class: &str) -> Option<(Vec3, Vec3)> {
@@ -139,7 +178,10 @@ pub fn npc_hull(class: &str) -> Option<(Vec3, Vec3)> {
 /// punt): they also hit COLLISION_GROUP_WEAPON bodies such as a thrown frag.
 const PICK_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL,
-    Group::ALL.difference(SHADOW_GROUP).difference(HULL_GROUP),
+    Group::ALL
+        .difference(SHADOW_GROUP)
+        .difference(HULL_GROUP)
+        .difference(RAGDOLL_GROUP),
 );
 /// Entity ids of VPhysics projectile bodies (thrown frags), above every map entity
 /// index, so the entity-keyed +USE and gravity gun holds can take them.
@@ -476,6 +518,10 @@ pub struct WorldSideMaterials {
     /// (PhysDisableEntityCollisions on g_PhysWorldObject), which also owns the static
     /// props, so these bodies ignore every static collider without an entity.
     pub world_disabled_bodies: std::collections::HashSet<RigidBodyHandle>,
+    /// Ragdoll bodies (ragdoll serial) and the body pairs of one ragdoll that collide
+    /// (CRagdollCollisionRules), both orders.
+    pub ragdoll_bodies: HashMap<RigidBodyHandle, u64>,
+    pub ragdoll_pairs: std::collections::HashSet<(RigidBodyHandle, RigidBodyHandle)>,
 }
 impl WorldSideMaterials {
     /// The side whose outward normal best matches `outward` (from the brush toward
@@ -496,6 +542,14 @@ impl PhysicsHooks for WorldSideMaterials {
         if self.hitboxes.contains(&context.collider1) || self.hitboxes.contains(&context.collider2)
         {
             return None;
+        }
+        if let (Some(a), Some(b)) = (context.rigid_body1, context.rigid_body2) {
+            if let (Some(ra), Some(rb)) = (self.ragdoll_bodies.get(&a), self.ragdoll_bodies.get(&b))
+            {
+                if ra == rb && !self.ragdoll_pairs.contains(&(a, b)) {
+                    return None;
+                }
+            }
         }
         if self.clip_brushes.contains(&context.collider1)
             || self.clip_brushes.contains(&context.collider2)
@@ -1006,8 +1060,9 @@ impl Physics {
             }
             let joint: GenericJoint = match class {
                 "phys_hinge" => {
-                    // kg in^2/s^2 -> N m.
-                    let friction = number("hingefriction") * 1000. * SCALE * SCALE;
+                    // SetAxisFriction(hingefriction x 1000), x DEG2RAD into IVP (retail
+                    // vphysics InitHinge FUN_1000b110).
+                    let friction = (number("hingefriction") * 1000.).to_radians();
                     let mut joint = GenericJointBuilder::new(JointAxesMask::LOCKED_REVOLUTE_AXES)
                         .local_frame1(local(a))
                         .local_frame2(local(b))
@@ -1950,6 +2005,342 @@ impl Physics {
         // (physics-research-20261013b/drag-axes) remains open.
         body
     }
+    /// RagdollCreate: one body per ragdoll solid at its bone's world pose (`poses`, one
+    /// per body: RagdollAddSolid's SetPositionMatrix(pCurrentBones)), the authored mass,
+    /// damping and IVP inertia, joined by ragdoll constraints (child limits about the
+    /// child bone's axes relative to the reference pose, Studio_CalcBoneToBoneTransform
+    /// frames; joined pairs never collide). Every body starts with `velocity`.
+    pub fn spawn_ragdoll(
+        &mut self,
+        world: &World,
+        model: &modkit_core::RagdollModel,
+        poses: &[(Vec3, Quat)],
+        velocity: Vec3,
+        serial: u64,
+    ) -> Vec<RigidBodyHandle> {
+        let mut handles = Vec::with_capacity(model.bodies.len());
+        for (body, &(position, rotation)) in model.bodies.iter().zip(poses) {
+            let shapes: Vec<SharedShape> = body
+                .pieces
+                .iter()
+                .filter_map(|piece| {
+                    SharedShape::convex_hull(
+                        &piece
+                            .vertices
+                            .iter()
+                            .map(|p| Point::from(vector(*p)))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect();
+            let mass = body.mass.max(0.001);
+            let masses = match body.compact_inertia {
+                Some((center, inertia)) if inertia.is_finite() && inertia.min_element() > 0. => {
+                    let inertia = inertia * mass * body.inertia;
+                    MassProperties::new(
+                        Point::from(vector(center)),
+                        mass,
+                        vector![inertia.x, inertia.y, inertia.z],
+                    )
+                }
+                _ => authored_mass_properties(&shapes, mass, body.inertia),
+            };
+            let handle = self.bodies.insert(
+                RigidBodyBuilder::dynamic()
+                    .additional_mass_properties(masses)
+                    .position(pose(position, rotation))
+                    .linvel(vector(velocity))
+                    .linear_damping(body.damping)
+                    .angular_damping(body.rotdamping)
+                    // Client ragdolls never push server props.
+                    .dominance_group(-1),
+            );
+            // IVP deactivates a resting ragdoll moments after it lands (FX_AffectRagdolls
+            // then counts it as asleep); Rapier's defaults (0.5 rad/s on every solid for
+            // 2 s) never let a landed ragdoll sleep: its light limbs keep jittering at up to
+            // ~1 rad/s while the root moves ~1 unit/s (session 35 hall corpses).
+            let activation = self.bodies[handle].activation_mut();
+            activation.angular_threshold = RAGDOLL_SLEEP_ANGULAR;
+            activation.time_until_sleep = RAGDOLL_SLEEP_TIME;
+            let material = surface_material(world, &body.surfaceprop);
+            for shape in shapes {
+                let builder = ColliderBuilder::new(shape)
+                    .density(0.)
+                    .collision_groups(RAGDOLL_GROUPS)
+                    .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
+                    .active_hooks(
+                        ActiveHooks::FILTER_CONTACT_PAIRS | ActiveHooks::MODIFY_SOLVER_CONTACTS,
+                    );
+                let builder = match material {
+                    Some(m) => builder
+                        .friction(m.friction)
+                        .restitution(restitution(m))
+                        .friction_combine_rule(CoefficientCombineRule::Multiply)
+                        .restitution_combine_rule(CoefficientCombineRule::Multiply),
+                    None => builder,
+                };
+                let collider = self
+                    .colliders
+                    .insert_with_parent(builder, handle, &mut self.bodies);
+                self.collider_materials
+                    .insert(collider, body.surfaceprop.clone());
+            }
+            if let Some(b) = self.bodies.get_mut(handle) {
+                b.recompute_mass_properties_from_colliders(&self.colliders);
+            }
+            self.world_sides.ragdoll_bodies.insert(handle, serial);
+            handles.push(handle);
+        }
+        if handles.len() != model.bodies.len() {
+            return handles;
+        }
+        // CRagdollCollisionRules: every pair, or only the listed pairs without self
+        // collisions; joined pairs are excluded by their joints.
+        for i in 0..handles.len() {
+            for j in i + 1..handles.len() {
+                let listed = model
+                    .collision_pairs
+                    .iter()
+                    .any(|&(a, b)| (a, b) == (i, j) || (a, b) == (j, i));
+                if model.self_collisions || listed {
+                    self.world_sides
+                        .ragdoll_pairs
+                        .insert((handles[i], handles[j]));
+                    self.world_sides
+                        .ragdoll_pairs
+                        .insert((handles[j], handles[i]));
+                }
+            }
+        }
+        for joint in &model.joints {
+            let (translation, rotation) = joint.child_in_parent;
+            let limit = |axis: usize| {
+                let (min, max) = joint.limits[axis];
+                [min.to_radians(), max.to_radians()]
+            };
+            let mut builder = GenericJointBuilder::new(JointAxesMask::LOCKED_SPHERICAL_AXES)
+                .local_frame1(pose(translation, rotation))
+                .local_frame2(Isometry::identity())
+                .contacts_enabled(false)
+                .limits(JointAxis::AngX, limit(0))
+                .limits(JointAxis::AngY, limit(1))
+                .limits(JointAxis::AngZ, limit(2));
+            // constraint_axislimit_t torque: joint friction, x DEG2RAD into IVP (retail
+            // vphysics converts every constraint torque so: InitHinge FUN_1000b110,
+            // SetAngularMotor FUN_1000c820; the ragdoll init itself is not read).
+            for (axis, friction) in [JointAxis::AngX, JointAxis::AngY, JointAxis::AngZ]
+                .into_iter()
+                .zip(joint.friction)
+            {
+                let friction = friction.to_radians();
+                if friction > 0. {
+                    builder = builder
+                        .motor_velocity(axis, 0., 1e3)
+                        .motor_max_force(axis, friction);
+                }
+            }
+            self.impulses.insert(
+                handles[joint.parent],
+                handles[joint.child],
+                builder.build(),
+                true,
+            );
+        }
+        handles
+    }
+    /// RagdollCreate's nudge: the full force at the force body's center, a mass share of
+    /// it at that body's position on every other body (impulses, kg in/s).
+    pub fn ragdoll_nudge(&mut self, handles: &[RigidBodyHandle], force_body: usize, force: Vec3) {
+        let total: f32 = handles
+            .iter()
+            .filter_map(|h| self.bodies.get(*h))
+            .map(|b| b.mass())
+            .sum::<f32>()
+            .max(1.);
+        let Some(at) = handles
+            .get(force_body)
+            .and_then(|h| self.bodies.get(*h))
+            .map(|b| *b.center_of_mass())
+        else {
+            return;
+        };
+        for (i, handle) in handles.iter().enumerate() {
+            let Some(body) = self.bodies.get_mut(*handle) else {
+                continue;
+            };
+            let share = if i == force_body {
+                1.
+            } else {
+                body.mass() / total
+            };
+            // kg in/s -> kg m/s.
+            let f = force * share / 39.37;
+            body.apply_impulse_at_point(vector![f.x, f.y, f.z], at, true);
+        }
+    }
+    /// The first ragdoll solid along `start` -> `end` (the client's ClipRayToEntity
+    /// against ragdolls; their solids stand in for the ragdoll-driven hitboxes): the
+    /// body, the hit point and the fraction of the segment. Each ragdoll solid is tested
+    /// directly (at most 8 ragdolls): a ragdoll built this tick is not in the query tree
+    /// until the next step, and the client's effects already see it.
+    pub fn ragdoll_ray(&self, start: Vec3, end: Vec3) -> Option<(RigidBodyHandle, Vec3, f32)> {
+        let delta = end - start;
+        let length = delta.length();
+        if length < 1e-3 {
+            return None;
+        }
+        let direction = delta / length;
+        let ray = Ray::new(
+            Point::from(vector(start)),
+            vector![direction.x, direction.y, direction.z],
+        );
+        let (body, toi) = self
+            .world_sides
+            .ragdoll_bodies
+            .keys()
+            .filter_map(|handle| self.bodies.get(*handle).map(|b| (*handle, b)))
+            .flat_map(|(handle, body)| body.colliders().iter().map(move |c| (handle, *c)))
+            .filter_map(|(handle, collider)| {
+                let collider = self.colliders.get(collider)?;
+                collider
+                    .shape()
+                    .cast_ray(collider.position(), &ray, length * SCALE, true)
+                    .map(|toi| (handle, toi))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))?;
+        let distance = toi / SCALE;
+        Some((body, start + direction * distance, distance / length))
+    }
+    /// IPhysicsObject::ApplyForceOffset (kg in/s at a world point, Source units).
+    pub fn ragdoll_impulse_at(&mut self, handle: RigidBodyHandle, impulse: Vec3, point: Vec3) {
+        if let Some(body) = self.bodies.get_mut(handle) {
+            let f = impulse / 39.37;
+            body.apply_impulse_at_point(vector![f.x, f.y, f.z], Point::from(vector(point)), true);
+        }
+    }
+    /// IPhysicsConstraint::SetAngularMotor(0, friction) on every joint between two of these
+    /// ragdoll bodies (crossbow pins excluded): retail vphysics FUN_1000c820 hands a
+    /// ragdoll constraint friction x DEG2RAD (N m) to all its axes (FUN_10031810).
+    pub fn ragdoll_joint_friction(&mut self, handles: &[RigidBodyHandle], friction: f32) {
+        let torque = friction.abs().to_radians();
+        let joints: Vec<ImpulseJointHandle> = handles
+            .iter()
+            .flat_map(|&body| {
+                self.impulses
+                    .attached_joints(body)
+                    .filter(move |(_, child, _, _)| *child == body)
+                    .filter(|(parent, ..)| handles.contains(parent))
+                    .map(|(_, _, joint, _)| joint)
+            })
+            .collect();
+        for handle in joints {
+            if let Some(joint) = self.impulses.get_mut(handle, true) {
+                for axis in [JointAxis::AngX, JointAxis::AngY, JointAxis::AngZ] {
+                    joint.data.set_motor_velocity(axis, 0., 1e3);
+                    joint.data.set_motor_max_force(axis, torque);
+                }
+            }
+        }
+    }
+    /// Diagnostics: each awake ragdoll solid's index, speed (units/s), angular speed (rad/s)
+    /// and Rapier time_since_can_sleep, fastest first.
+    pub fn ragdoll_activity(&self, handles: &[RigidBodyHandle]) -> Vec<(usize, f32, f32, f32)> {
+        let mut out: Vec<_> = handles
+            .iter()
+            .enumerate()
+            .filter_map(|(i, h)| {
+                let b = self.bodies.get(*h)?;
+                (!b.is_sleeping()).then(|| {
+                    let a = b.activation();
+                    (
+                        i,
+                        b.linvel().norm() / SCALE,
+                        b.angvel().norm(),
+                        a.time_since_can_sleep,
+                    )
+                })
+            })
+            .collect();
+        out.sort_by(|a, b| b.1.total_cmp(&a.1));
+        out
+    }
+    /// CRagdoll::PhysForceRagdollToSleep: PhysForceClearVelocity and Sleep on every solid.
+    pub fn ragdoll_sleep(&mut self, handles: &[RigidBodyHandle]) {
+        for handle in handles {
+            if let Some(body) = self.bodies.get_mut(*handle) {
+                body.sleep();
+            }
+        }
+    }
+    /// IPhysicsObject::AddVelocity: linear (Source units/s) and world angular (rad/s).
+    pub fn ragdoll_add_velocity(&mut self, handle: RigidBodyHandle, linear: Vec3, angular: Vec3) {
+        if let Some(body) = self.bodies.get_mut(handle) {
+            let v = *body.linvel() + vector(linear);
+            let w = *body.angvel() + vector![angular.x, angular.y, angular.z];
+            body.set_linvel(v, true);
+            body.set_angvel(w, true);
+        }
+    }
+    /// A ragdoll body's center of mass (Source units) and whether it is simulating.
+    pub fn ragdoll_body_center(&self, handle: RigidBodyHandle) -> Option<(Vec3, bool)> {
+        self.bodies.get(handle).map(|b| {
+            let c = b.center_of_mass();
+            (Vec3::new(c.x, c.y, c.z) / SCALE, !b.is_sleeping())
+        })
+    }
+    /// CRagdollBoltEnumerator (StickRagdollNow): the struck ragdoll solid doubles its
+    /// mass and gets a ball-socket constraint to the world, the world anchor at
+    /// `wall` and the body anchor at `point` (where the ray met the solid). Returns the
+    /// world anchor body (removed with the ragdoll).
+    pub fn pin_ragdoll(
+        &mut self,
+        handle: RigidBodyHandle,
+        wall: Vec3,
+        point: Vec3,
+    ) -> Option<RigidBodyHandle> {
+        let body = self.bodies.get_mut(handle)?;
+        let local = body
+            .position()
+            .inverse_transform_point(&Point::from(vector(point)));
+        let props = body.mass_properties().local_mprops;
+        let doubled = MassProperties::with_principal_inertia_frame(
+            props.local_com,
+            props.mass() * 2.,
+            props.principal_inertia() * 2.,
+            props.principal_inertia_local_frame,
+        );
+        body.set_additional_mass_properties(doubled, true);
+        // The colliders carry no density: their mass is the authored additional mass.
+        body.recompute_mass_properties_from_colliders(&self.colliders);
+        let anchor = self
+            .bodies
+            .insert(RigidBodyBuilder::fixed().translation(vector(wall)));
+        self.impulses.insert(
+            anchor,
+            handle,
+            SphericalJointBuilder::new()
+                .local_anchor1(Point::origin())
+                .local_anchor2(local),
+            true,
+        );
+        Some(anchor)
+    }
+    /// The ragdoll bodies' world poses (Source units).
+    pub fn ragdoll_poses(&self, handles: &[RigidBodyHandle]) -> Option<Vec<(Vec3, Quat)>> {
+        handles
+            .iter()
+            .map(|h| self.body_state(*h).map(|s| (s.position, s.rotation)))
+            .collect()
+    }
+    pub fn remove_ragdoll(&mut self, handles: &[RigidBodyHandle]) {
+        for handle in handles {
+            self.world_sides.ragdoll_bodies.remove(handle);
+            self.world_sides
+                .ragdoll_pairs
+                .retain(|(a, b)| a != handle && b != handle);
+            self.remove_body(*handle);
+        }
+    }
     /// IPhysicsObject::GetContactPoint != 0: the entity's body touches something.
     pub fn entity_in_contact(&self, id: usize) -> bool {
         let Some(body) = self.dynamic.get(&id).and_then(|h| self.bodies.get(*h)) else {
@@ -2134,6 +2525,17 @@ impl Physics {
                         c.set_collision_groups(DEBRIS_GROUPS);
                     }
                 }
+            }
+        }
+    }
+    /// COLLISION_GROUP_WEAPON for a dropped weapon's body (`WEAPON_GROUPS`).
+    pub fn set_weapon_group(&mut self, id: usize) {
+        let Some(body) = self.dynamic.get(&id).and_then(|h| self.bodies.get(*h)) else {
+            return;
+        };
+        for collider in body.colliders().to_vec() {
+            if let Some(c) = self.colliders.get_mut(collider) {
+                c.set_collision_groups(WEAPON_GROUPS);
             }
         }
     }
@@ -2396,7 +2798,8 @@ impl Physics {
                     Group::ALL
                         .difference(PROJECTILE_GROUP)
                         .difference(NPC_GROUP)
-                        .difference(SHADOW_GROUP),
+                        .difference(SHADOW_GROUP)
+                        .difference(RAGDOLL_GROUP),
                 ))
                 .exclude_sensors()
                 .predicate(&skip);
@@ -2512,6 +2915,22 @@ impl Physics {
     /// World center of mass (units); the body's linear velocity is the velocity there.
     pub fn center_of_mass(&self, handle: RigidBodyHandle) -> Option<Vec3> {
         let c = self.bodies.get(handle)?.center_of_mass();
+        Some(Vec3::new(c.x, c.y, c.z) / SCALE)
+    }
+    /// CCollisionProperty::WorldSpaceCenter of a VPhysics body: the center of its
+    /// collision bounds in body space (the OBB), placed at the body's pose.
+    pub fn bounds_center(&self, handle: RigidBodyHandle) -> Option<Vec3> {
+        let body = self.bodies.get(handle)?;
+        let local = body
+            .colliders()
+            .iter()
+            .filter_map(|c| self.colliders.get(*c))
+            .filter_map(|c| {
+                let pose = c.position_wrt_parent().copied()?;
+                Some(c.shape().compute_aabb(&pose))
+            })
+            .reduce(|a, b| a.merged(&b))?;
+        let c = body.position() * local.center();
         Some(Vec3::new(c.x, c.y, c.z) / SCALE)
     }
     /// Mass (kg) of an entity's dynamic VPhysics body.
@@ -2749,6 +3168,17 @@ impl Physics {
         end: Vec3,
         keep: &dyn Fn(usize) -> bool,
     ) -> Option<RayHit> {
+        self.masked_ray(start, end, 0x0200_400b, keep)
+    }
+    /// `filtered_ray` with a contents mask for world brushes (MASK_BLOCKLOS is 0x4041:
+    /// world windows and grates do not block it).
+    pub fn masked_ray(
+        &self,
+        start: Vec3,
+        end: Vec3,
+        mask: u32,
+        keep: &dyn Fn(usize) -> bool,
+    ) -> Option<RayHit> {
         let delta = end - start;
         let length = delta.length();
         if !length.is_finite() || length <= 1e-5 {
@@ -2762,7 +3192,7 @@ impl Physics {
                 && self
                     .world_brush_contents
                     .get(&handle)
-                    .is_none_or(|contents| contents & 0x0200_400b != 0)
+                    .is_none_or(|contents| contents & mask != 0)
         };
         let (handle, hit) = self.query.cast_ray_and_get_normal(
             &self.bodies,
@@ -2888,7 +3318,7 @@ impl NpcCollisionWorld for Physics {
                 && !collider.is_sensor()
                 && !matches!(
                     collider.collision_groups().memberships,
-                    PROJECTILE_GROUP | SHADOW_GROUP | HULL_GROUP
+                    PROJECTILE_GROUP | SHADOW_GROUP | HULL_GROUP | WEAPON_GROUP
                 )
                 && entity.is_none_or(|id| !query.excluded_entities.contains(&id))
                 // Explicit actor bounds supersede an NPC's render-mesh collider.
@@ -3135,7 +3565,12 @@ impl CollisionWorld for Physics {
                     && !collider.is_sensor()
                     && !matches!(
                         collider.collision_groups().memberships,
-                        PROJECTILE_GROUP | SHADOW_GROUP | DEBRIS_GROUP | INTERACTIVE_DEBRIS_GROUP
+                        PROJECTILE_GROUP
+                            | SHADOW_GROUP
+                            | DEBRIS_GROUP
+                            | INTERACTIVE_DEBRIS_GROUP
+                            | RAGDOLL_GROUP
+                            | WEAPON_GROUP
                     )
                     && !self.world_brush_contents.contains_key(handle)
                     && !self.npc_hitboxes.contains(handle)
@@ -3799,6 +4234,39 @@ mod tests {
         }
     }
     #[test]
+    fn dropped_weapons_let_players_and_npcs_through_but_not_traces() {
+        let mut world = native_prop_world();
+        world.model_instances[0].kind = "prop_physics".into();
+        world.model_instances[0].entity = Some(0);
+        world.entities.push(modkit_core::Entity {
+            properties: vec![("classname".into(), "weapon_stunstick".into())],
+        });
+        let mut physics = Physics::new(&world);
+        physics.set_weapon_group(0);
+        physics.refresh_queries();
+        let (mins, maxs) = (Vec3::new(-16., -16., 0.), Vec3::new(16., 16., 72.));
+        let sweep = physics.trace_hull(
+            Vec3::new(0., 200., 10.),
+            Vec3::new(200., 200., 10.),
+            mins,
+            maxs,
+        );
+        assert_eq!(sweep.fraction, 1., "the player hull hit the weapon");
+        let body = &physics.bodies[physics.dynamic[&0]];
+        let groups = physics.colliders[body.colliders()[0]].collision_groups();
+        for blocked in [PLAYER_GROUPS, DEBRIS_GROUPS] {
+            assert!(!groups.test(blocked));
+        }
+        assert!(!groups.test(InteractionGroups::new(HULL_GROUP, Group::ALL)));
+        assert!(!groups.test(InteractionGroups::new(SHADOW_GROUP, Group::ALL)));
+        assert!(groups.test(InteractionGroups::new(Group::GROUP_1, Group::ALL)));
+        // Bullets and the gravity gun still find it.
+        let shot = physics.ray(Vec3::new(0., 200., 40.), Vec3::X, 200.);
+        assert!(shot.is_some());
+        let pick = physics.pick_ray(Vec3::new(0., 200., 40.), Vec3::X, 200.);
+        assert_eq!(pick.map(|h| h.entity), Some(0));
+    }
+    #[test]
     fn picked_up_debris_hits_npcs_until_it_sleeps() {
         let mut world = native_prop_world();
         world.model_instances[0].kind = "prop_physics".into();
@@ -3814,7 +4282,8 @@ mod tests {
             HULL_GROUP,
             Group::ALL
                 .difference(PROJECTILE_GROUP)
-                .difference(SHADOW_GROUP),
+                .difference(SHADOW_GROUP)
+                .difference(RAGDOLL_GROUP),
         );
         let groups = |physics: &Physics| {
             let body = &physics.bodies[physics.dynamic[&0]];
@@ -4506,6 +4975,183 @@ mod tests {
             step_height: 18.,
             step_down_multiplier: 1.,
         }
+    }
+    /// Two 8-unit cubes: the child bone 16 units above its parent in the reference pose,
+    /// joined by a ragdoll constraint (+-30 degrees about every axis).
+    fn two_cube_ragdoll() -> modkit_core::RagdollModel {
+        let cube = |half: f32| modkit_core::ConvexPiece {
+            vertices: (0..8)
+                .map(|i| {
+                    Vec3::new(
+                        if i & 1 == 0 { -half } else { half },
+                        if i & 2 == 0 { -half } else { half },
+                        if i & 4 == 0 { -half } else { half },
+                    )
+                })
+                .collect(),
+            indices: Vec::new(),
+        };
+        let body = |bone| modkit_core::RagdollBody {
+            bone,
+            pieces: vec![cube(4.)],
+            mass: 5.,
+            inertia: 1.,
+            damping: 0.,
+            rotdamping: 0.,
+            surfaceprop: "default".into(),
+            compact_inertia: None,
+        };
+        modkit_core::RagdollModel {
+            bodies: vec![body(0), body(1)],
+            joints: vec![modkit_core::RagdollJoint {
+                parent: 0,
+                child: 1,
+                limits: [(-30., 30.); 3],
+                friction: [0.; 3],
+                child_in_parent: (Vec3::Z * 16., Quat::IDENTITY),
+            }],
+            self_collisions: false,
+            collision_pairs: Vec::new(),
+            animated_friction: None,
+        }
+    }
+    #[test]
+    fn ragdoll_rays_impulses_and_wall_pins() {
+        let world = npc_floor_world();
+        let mut physics = Physics::new(&world);
+        let model = two_cube_ragdoll();
+        let poses = [
+            (Vec3::new(0., 0., 4.), Quat::IDENTITY),
+            (Vec3::new(0., 0., 20.), Quat::IDENTITY),
+        ];
+        let handles = physics.spawn_ragdoll(&world, &model, &poses, Vec3::ZERO, 1);
+        // A crossbow pin on the ragdoll's spawn tick finds it before any physics step.
+        assert!(physics
+            .ragdoll_ray(Vec3::new(-100., 0., 20.), Vec3::new(100., 0., 20.))
+            .is_some_and(|(body, ..)| body == handles[1]));
+        physics.tick(0.015);
+        // The client's ray against ragdolls finds the child cube's face.
+        let (body, point, fraction) = physics
+            .ragdoll_ray(Vec3::new(-100., 0., 20.), Vec3::new(100., 0., 20.))
+            .unwrap();
+        assert_eq!(body, handles[1]);
+        assert!((point.x + 4.).abs() < 0.5, "{point}");
+        assert!((fraction - 0.48).abs() < 0.01, "{fraction}");
+        assert!(physics
+            .ragdoll_ray(Vec3::new(-100., 0., 60.), Vec3::new(100., 0., 60.))
+            .is_none());
+        // A shot's 4000 kg in/s on the root moves the 10 kg ragdoll along +X.
+        let before = physics.ragdoll_poses(&handles).unwrap()[0].0;
+        physics.ragdoll_impulse_at(handles[0], Vec3::X * 4000., before);
+        for _ in 0..10 {
+            physics.tick(0.015);
+        }
+        let after = physics.ragdoll_poses(&handles).unwrap()[0].0;
+        assert!(after.x - before.x > 5., "{before} -> {after}");
+        // A bolt pin 40 units away pulls the struck point to the wall and holds it.
+        let (center, _) = physics.ragdoll_body_center(handles[1]).unwrap();
+        let wall = center + Vec3::new(0., 40., 20.);
+        let anchor = physics.pin_ragdoll(handles[1], wall, center).unwrap();
+        for _ in 0..300 {
+            physics.tick(0.015);
+        }
+        let (pinned, _) = physics.ragdoll_body_center(handles[1]).unwrap();
+        assert!(pinned.distance(wall) < 4., "{pinned} vs wall {wall}");
+        physics.remove_ragdoll(&handles);
+        physics.remove_body(anchor);
+    }
+    #[test]
+    fn a_landed_ragdoll_rests_and_wakes_on_an_impact() {
+        // A landed ragdoll rests; PhysForceRagdollToSleep on a moving one: every solid sleeps and stays asleep
+        // (FX_AffectRagdolls' simulating count drops); an ImpactTrace push wakes it.
+        let model = two_cube_ragdoll();
+        let world = npc_floor_world();
+        let mut physics = Physics::new(&world);
+        let poses = [
+            (Vec3::new(0., 0., 60.), Quat::IDENTITY),
+            (Vec3::new(0., 0., 76.), Quat::IDENTITY),
+        ];
+        let handles = physics.spawn_ragdoll(&world, &model, &poses, Vec3::ZERO, 1);
+        let awake = |physics: &Physics| {
+            handles
+                .iter()
+                .filter(|h| physics.ragdoll_body_center(**h).is_some_and(|(_, a)| a))
+                .count()
+        };
+        // Landed, it rests on its own within a few seconds (RAGDOLL_SLEEP_*).
+        let rested = (0..300).find(|_| {
+            physics.tick(0.015);
+            awake(&physics) == 0
+        });
+        assert!(rested.is_some_and(|tick| tick > 20), "{rested:?}");
+        let (center, _) = physics.ragdoll_body_center(handles[0]).unwrap();
+        physics.ragdoll_impulse_at(handles[0], Vec3::X * 4000., center);
+        physics.tick(0.015);
+        assert_eq!(awake(&physics), 2);
+        for _ in 0..100 {
+            physics.tick(0.015);
+        }
+        physics.ragdoll_sleep(&handles);
+        for _ in 0..20 {
+            physics.tick(0.015);
+            assert_eq!(awake(&physics), 0);
+        }
+        let (center, _) = physics.ragdoll_body_center(handles[0]).unwrap();
+        physics.ragdoll_impulse_at(handles[0], Vec3::X * 4000., center);
+        physics.tick(0.015);
+        assert_eq!(awake(&physics), 2);
+        assert!(physics.ragdoll_body_center(handles[0]).unwrap().0.x > center.x);
+    }
+    #[test]
+    fn a_two_body_ragdoll_falls_jointed_and_stays_out_of_traces() {
+        let model = two_cube_ragdoll();
+        let world = npc_floor_world();
+        let mut physics = Physics::new(&world);
+        let poses = [
+            (Vec3::new(0., 0., 60.), Quat::IDENTITY),
+            (Vec3::new(0., 0., 76.), Quat::IDENTITY),
+        ];
+        let handles = physics.spawn_ragdoll(&world, &model, &poses, Vec3::ZERO, 1);
+        assert_eq!(handles.len(), 2);
+        // Server traces ignore client ragdolls.
+        physics.tick(0.015);
+        let (_, hit) = physics
+            .ray(Vec3::new(0., 0., 120.), -Vec3::Z, 200.)
+            .unwrap();
+        assert!(hit.z.abs() < 1., "the ray stopped at {hit}, not the floor");
+        // Push the top body sideways: it swings on the joint and both land on the floor.
+        physics.ragdoll_nudge(&handles, 1, Vec3::X * 2000.);
+        for _ in 0..400 {
+            physics.tick(0.015);
+        }
+        let poses = physics.ragdoll_poses(&handles).unwrap();
+        for (position, _) in &poses {
+            assert!(position.z > 2. && position.z < 20., "{position}");
+        }
+        // The joint keeps the child bone 16 units from the parent's origin.
+        let (p, r) = poses[0];
+        let anchor = p + r * (Vec3::Z * 16.);
+        assert!(anchor.distance(poses[1].0) < 1.5, "{anchor} {}", poses[1].0);
+        // The relative rotation stays within the 30 degree limits (some solver slack).
+        let relative = r.inverse() * poses[1].1;
+        assert!(relative.angle_between(Quat::IDENTITY).to_degrees() < 60.);
+        // Player movement passes through client ragdolls (owner playtest: the player's
+        // convex SAT path once missed the ragdoll group).
+        let center = poses[0].0;
+        let trace = CollisionWorld::trace_hull(
+            &physics,
+            center - Vec3::X * 64. + Vec3::Z * 2.,
+            center + Vec3::X * 64. + Vec3::Z * 2.,
+            Vec3::new(-16., -16., 0.),
+            Vec3::new(16., 16., 72.),
+        );
+        assert!(
+            trace.fraction == 1. && !trace.start_solid,
+            "the player hull hit the ragdoll: {}",
+            trace.fraction
+        );
+        physics.remove_ragdoll(&handles);
+        assert!(physics.world_sides.ragdoll_bodies.is_empty());
     }
     fn npc_floor_world() -> World {
         World {

@@ -699,6 +699,7 @@ pub enum OverlayCommand {
     ToggleNotarget,
     /// Toggle the AI think loop (ai_enable).
     ToggleAi,
+    ToggleFriendlyFire,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub enum Column {
@@ -716,6 +717,8 @@ enum OptionRow {
     Grenades,
     Notarget,
     Ai,
+    /// Debug: the player's hits hurt friendly-immune NPCs (ours).
+    FriendlyFire,
 }
 /// What a pointer click on a drawn panel row means (`Overlay::click`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -824,6 +827,8 @@ fn filter_char(c: char) -> Option<char> {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Overlay {
     pub open: bool,
+    /// Shown state of the friendly-fire debug option (the host owns the switch).
+    pub friendly_fire: bool,
     pub tab: Tab,
     pub class: usize,
     /// Props tab cursors: folder index and model index inside it.
@@ -957,7 +962,7 @@ impl Overlay {
         if reads_num_grenades(self.class_name()) {
             rows.push(OptionRow::Grenades);
         }
-        rows.extend([OptionRow::Notarget, OptionRow::Ai]);
+        rows.extend([OptionRow::Notarget, OptionRow::Ai, OptionRow::FriendlyFire]);
         rows
     }
     fn select_class(&mut self, class: usize) {
@@ -1129,6 +1134,7 @@ impl Overlay {
                         }
                         OptionRow::Notarget => return Some(OverlayCommand::ToggleNotarget),
                         OptionRow::Ai => return Some(OverlayCommand::ToggleAi),
+                        OptionRow::FriendlyFire => return Some(OverlayCommand::ToggleFriendlyFire),
                         OptionRow::Weapon(_) => {}
                     }
                 }
@@ -1370,6 +1376,13 @@ impl Overlay {
                     ),
                     OptionRow::Ai => (
                         format!("AI: {}", if ai { "ON" } else { "OFF (idle)" }),
+                        false,
+                    ),
+                    OptionRow::FriendlyFire => (
+                        format!(
+                            "player hurts friendlies: {} (debug)",
+                            if self.friendly_fire { "ON" } else { "off" }
+                        ),
                         false,
                     ),
                 };
@@ -1821,7 +1834,8 @@ mod tests {
                 "weapon_smg1 (HL2 maps)",
                 "allegiance: class default",
                 "notarget: off",
-                "AI: OFF (idle)"
+                "AI: OFF (idle)",
+                "player hurts friendlies: off (debug)"
             ]
         );
         assert!(panel
@@ -1844,6 +1858,11 @@ mod tests {
         );
         o.key(OverlayKey::Down);
         assert_eq!(o.key(OverlayKey::Enter), Some(OverlayCommand::ToggleAi));
+        o.key(OverlayKey::Down);
+        assert_eq!(
+            o.key(OverlayKey::Enter),
+            Some(OverlayCommand::ToggleFriendlyFire)
+        );
         // On a weapon row (wrapping down to "no weapon"), Enter spawns with the choices.
         o.key(OverlayKey::Down);
         let Some(OverlayCommand::Spawn(r)) = o.key(OverlayKey::Enter) else {
@@ -1869,7 +1888,7 @@ mod tests {
         }
         let panel = o.panel(true, true);
         assert_eq!(panel.options[0].text, "no weapons (natural attacks)");
-        assert_eq!(panel.options.len(), 4);
+        assert_eq!(panel.options.len(), 5);
         assert_eq!(o.request().equipment, "");
         // The class list scrolls: the selection is always one of the drawn rows.
         o.key(OverlayKey::Up);

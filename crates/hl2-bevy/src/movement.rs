@@ -340,6 +340,12 @@ impl Simulation {
                 game.ai.ignore_player = !game.ai.ignore_player;
                 None
             }
+            OverlayCommand::ToggleFriendlyFire => {
+                let on = !game.scene.player_hurts_friendlies;
+                game.scene.player_hurts_friendlies = on;
+                game.spawn_overlay.friendly_fire = on;
+                None
+            }
             OverlayCommand::ToggleAi => {
                 let on = !game.ai.enabled;
                 game.ai.enabled = on;

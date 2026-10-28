@@ -360,6 +360,23 @@ fn takes_damage(world: &World, physics: &Physics, id: usize) -> bool {
         })
 }
 
+/// CONTENTS_SOLID | CONTENTS_MOVEABLE | CONTENTS_BLOCKLOS.
+const MASK_BLOCKLOS: u32 = 0x4041;
+
+/// StandardFilterRules for a mask without CONTENTS_MONSTER and CONTENTS_WINDOW (retail
+/// server.dll FUN_1027c0a0, as the SDK): only the world (static props included) and
+/// opaque brush entities; studio models (NPCs, doors, props) are not hit.
+fn blocklos_filter(world: &World, entity: usize) -> bool {
+    world
+        .entities
+        .get(entity)
+        .map_or(entity == usize::MAX, |e| {
+            e.get("model").is_some_and(|m| m.starts_with('*'))
+                && e.get("rendermode")
+                    .is_none_or(|m| m.trim().parse() == Ok(0))
+        })
+}
+
 /// One tick of MOVETYPE_FLYGRAVITY (half gravity before and after the move) with
 /// MOVECOLLIDE_FLY_CUSTOM touch handling, plus BubbleThink's 0.1 s angle update.
 pub(crate) fn bolt_tick(
@@ -417,15 +434,36 @@ pub(crate) fn bolt_tick(
             dissolve: false,
             direction,
             origin: bolt.position,
+            attacker: bolt.owner,
         });
-        // CalculateMeleeDamageForce(0.7): damage x ImpulseScale(75, 4) x 0.7 kg in/s.
+        // CalculateMeleeDamageForce(0.7): damage x ImpulseScale(75, 4) x 0.7 kg in/s, also
+        // the death force of an NPC the bolt kills (on the struck solid).
         physics.impulse(hit.entity, direction, bolt.damage * 300. * 0.7 / 39.37);
+        if world
+            .entities
+            .get(hit.entity)
+            .is_some_and(|e| e.class().starts_with("npc_"))
+        {
+            scene.npc_force_points.insert(hit.entity, contact.position);
+            scene.npc_hit_forces.insert(
+                hit.entity,
+                (direction * bolt.damage * 300. * 0.7, contact.position),
+            );
+        }
         sound(scene, "Weapon_Crossbow.BoltHitBody", bolt.position);
-        // The bolt that went through pins the ragdoll to the wall behind (ragdoll
-        // pinning is out of scope; the stuck bolt model is kept).
+        // The bolt that went through pins the ragdoll to the wall behind (the host's
+        // BoltImpact effect: `ragdolls::Impact::Bolt`). UTIL_TraceLine(MASK_BLOCKLOS):
+        // StandardFilterRules skips studio models without CONTENTS_MONSTER (doors and
+        // props: the trace reaches the wall behind a prop_door_rotating), and only the
+        // world or a MOVETYPE_NONE entity takes the bolt (brush entities are PUSH).
         let forward = crate::physics::angles(bolt.angles) * Vec3::X;
         let stuck = physics
-            .projectile_ray(bolt.position, bolt.position + forward * 128., &[hit.entity])
+            .masked_ray(
+                bolt.position,
+                bolt.position + forward * 128.,
+                MASK_BLOCKLOS,
+                &|entity| entity != hit.entity && blocklos_filter(world, entity),
+            )
             .filter(|behind| behind.entity == usize::MAX)
             .map(|behind| (behind.position, forward));
         return BoltOutcome {
@@ -846,6 +884,110 @@ mod tests {
             .any(|s| s.name == "Weapon_Crossbow.BoltHitBody"));
         // The wall 200 units behind is beyond the 128-unit trace: no stuck bolt.
         assert!(projectiles.stuck_bolts.is_empty());
+    }
+
+    #[test]
+    fn bolt_behind_an_npc_passes_studio_doors_but_not_brush_doors() {
+        // BoltTouch's MASK_BLOCKLOS trace (StandardFilterRules): a prop_door_rotating 40
+        // units behind the NPC is skipped and the wall 100 units behind takes the bolt
+        // (the hall's `noexit` door pin); a func_door (brush, MOVETYPE_PUSH) stops it.
+        for (class, model, pinned) in [
+            ("prop_door_rotating", "models/props_c17/door01_left.mdl", 1),
+            ("func_door", "*1", 0),
+        ] {
+            let (mut world, mut scene, mut physics) = bolt_world(Some((0, "npc_metropolice")));
+            world.entities.push(modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), class.into()),
+                    ("model".into(), model.into()),
+                ],
+            });
+            for (x, user) in [(240., 2), (300., 0)] {
+                physics.colliders.insert(
+                    ColliderBuilder::cuboid(1. / 39.37, 200. / 39.37, 200. / 39.37)
+                        .translation(vector![x / 39.37, 0., 0.])
+                        .user_data(user),
+                );
+            }
+            physics.tick(0.015);
+            let (projectiles, damage) = fly(&world, &mut scene, &mut physics, Vec3::X * 2500.);
+            assert_eq!(damage.len(), 1, "{class}");
+            assert_eq!(projectiles.stuck_bolts.len(), pinned, "{class}");
+            if pinned == 1 {
+                assert!((projectiles.stuck_bolts[0].position.x - (299. - 8.)).abs() < 0.5);
+            }
+        }
+    }
+
+    /// The owner's native pin (d1_trainstation_02 main hall, a cop in front of the locked
+    /// `noexit` prop_door_rotating pair at x -3464): the behind trace from the cop's chest
+    /// passes the doors and reaches the world within 128 units.
+    #[test]
+    #[ignore = "requires an owned HL2 installation in HL2_ROOT"]
+    fn owned_hall_noexit_door_lets_the_bolt_trace_reach_the_wall() {
+        let mut vfs =
+            source_assets::vpk::Vfs::mount(&source_assets::install::discover().unwrap()).unwrap();
+        let data = vfs.read("maps/d1_trainstation_02.bsp").unwrap().unwrap();
+        let bsp = source_assets::bsp::Bsp::parse(&data).unwrap();
+        vfs.mount_pak(bsp.lump(40)).unwrap();
+        let mut world = bsp.world("d1_trainstation_02").unwrap();
+        source_assets::models::append_models(&mut world, &vfs);
+        let scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        for (id, state) in scene.states.iter().enumerate() {
+            physics.set_entity(
+                id,
+                state.origin,
+                state.rotation,
+                !state.killed && state.visible,
+            );
+        }
+        physics.refresh_queries();
+        let class = |hit: &crate::physics::RayHit| {
+            world
+                .entities
+                .get(hit.entity)
+                .map_or("world".to_string(), |e| e.class().to_string())
+        };
+        // From the struck cop's chest (map cop #575 at -3512) along the fixture's bolt,
+        // 5 degrees down.
+        let forward = Vec3::new(5f32.to_radians().cos(), 0., -5f32.to_radians().sin());
+        for z in [100., 110., 120., 130.] {
+            let start = Vec3::new(-3525., -1653., z);
+            let end = start + forward * 128.;
+            let all = physics.projectile_ray(start, end, &[575]);
+            let behind = physics.masked_ray(start, end, MASK_BLOCKLOS, &|entity| {
+                blocklos_filter(&world, entity)
+            });
+            println!(
+                "z {z}: first {:?} {:?}; MASK_BLOCKLOS {:?} {:?}",
+                all.map(|h| (h.position.x, class(&h))),
+                all.map(|h| h.entity),
+                behind.map(|h| (h.position.x, class(&h))),
+                behind.map(|h| h.entity),
+            );
+            assert!(all.is_some_and(|h| class(&h) == "prop_door_rotating"));
+            assert!(behind.is_some_and(|h| h.entity == usize::MAX));
+        }
+        // Native no-pin case (oracle T092202Z): a cop ~40 units in front of the station's
+        // east door pair (`station_entrance`, x -3199, leaves meeting at y -2048), bolt 8
+        // degrees down: the trace passes a leaf and finds nothing to stick in within 128.
+        let forward = Vec3::new(8f32.to_radians().cos(), 0., -8f32.to_radians().sin());
+        for z in [105., 112., 120.] {
+            let start = Vec3::new(-3243., -2060., z);
+            let end = start + forward * 128.;
+            let all = physics.projectile_ray(start, end, &[]);
+            let behind = physics.masked_ray(start, end, MASK_BLOCKLOS, &|entity| {
+                blocklos_filter(&world, entity)
+            });
+            println!(
+                "east z {z}: first {:?}; MASK_BLOCKLOS {:?}",
+                all.map(|h| (h.position, class(&h))),
+                behind.map(|h| (h.position, class(&h))),
+            );
+            assert!(all.is_some_and(|h| class(&h) == "prop_door_rotating"));
+            assert!(behind.is_none_or(|h| h.entity != usize::MAX));
+        }
     }
 
     /// Local validation: the installed script, skill.cfg, viewmodel activities/events,

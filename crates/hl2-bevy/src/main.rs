@@ -466,6 +466,10 @@ fn main() -> Result<()> {
         )
         .add_systems(
             PostUpdate,
+            rendering::present_ragdoll_fades.after(rendering::present_entities),
+        )
+        .add_systems(
+            PostUpdate,
             rendering::present_lighting
                 .after(rendering::present_entities)
                 .after(effects::present)
@@ -732,6 +736,7 @@ type EntityDrawQuery<'w, 's> = Query<
         &'static Transform,
         &'static Visibility,
         Option<&'static visibility::PvsDraw>,
+        Option<&'static rendering::NpcWeaponDraw>,
     ),
     With<Mesh3d>,
 >;
@@ -806,7 +811,7 @@ fn monitor(
         let mut mismatches = 0;
         let mut owned_meshes = 0;
         let mut doors = Vec::new();
-        for (owner, transform, visibility, pvs) in &draws {
+        for (owner, transform, visibility, pvs, weapon) in &draws {
             owned_meshes += 1;
             let state = &game.scene.states[owner.0];
             let (origin, rotation) = simulation
@@ -814,7 +819,8 @@ fn monitor(
                 .entity_pose(owner.0)
                 .unwrap_or((state.origin, state.rotation));
             let expected = rendering::entity_transform(origin, rotation);
-            let hidden = !state.visible || state.killed || pvs.is_some_and(|pvs| pvs.culled);
+            let hidden =
+                rendering::draw_hidden(&game, owner.0, weapon) || pvs.is_some_and(|pvs| pvs.culled);
             if transform.translation.distance(expected.translation) > 0.001
                 || transform.rotation.dot(expected.rotation).abs() < 0.99999
                 || (*visibility == Visibility::Hidden) != hidden

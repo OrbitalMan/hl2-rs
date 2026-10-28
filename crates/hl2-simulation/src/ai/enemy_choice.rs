@@ -76,14 +76,15 @@ pub fn should_choose_new_enemy(
 /// TRS_NONE / TRS_FALSE / TRS_TRUE.
 type Tri = Option<bool>;
 
-/// BestEnemy: reachable before unreachable (every enemy counts as reachable here: no
-/// unreachable-entity list yet), then the highest priority, then the closer one, with
+/// BestEnemy: reachable before unreachable (IsUnreachable, whatever the priority), then
+/// the highest priority, then the closer one, with
 /// the SDK's seen (DidSeeEntity: sighted this think) / visible (within look distance
 /// with FVisible) tie-breaks. EnemyDistTolerance is 0 for every HL2 class.
 pub fn best_enemy(
     enemies: &Enemies,
     now: f64,
     mut relation: impl FnMut(usize) -> Relation,
+    unreachable: impl Fn(usize) -> bool,
     distance_sq: impl Fn(usize) -> f32,
     did_see: impl Fn(usize) -> bool,
     mut visible: impl FnMut(usize) -> bool,
@@ -93,6 +94,8 @@ pub fn best_enemy(
     let mut best_priority = -1000;
     let mut best_seen: Tri = None;
     let mut best_visible: Tri = None;
+    // bBestUnreachable starts true (forces the first check).
+    let mut best_unreachable = true;
     for (&key, memory) in &enemies.memories {
         let Some(enemy) = key else {
             continue;
@@ -109,18 +112,24 @@ pub fn best_enemy(
         {
             continue;
         }
+        let is_unreachable = unreachable(enemy);
+        if !best_unreachable && is_unreachable {
+            continue;
+        }
         let Some(current_best) = best else {
             best_priority = priority;
             best_dist_sq = distance_sq(enemy);
             best = Some(enemy);
+            best_unreachable = is_unreachable;
             best_seen = None;
             best_visible = None;
             continue;
         };
-        if priority > best_priority {
+        if best_unreachable && !is_unreachable || priority > best_priority {
             best_priority = priority;
             best_dist_sq = distance_sq(enemy);
             best = Some(enemy);
+            best_unreachable = is_unreachable;
             best_seen = None;
             best_visible = None;
             continue;
@@ -189,6 +198,21 @@ mod tests {
     }
 
     #[test]
+    fn reachable_enemies_come_before_unreachable_ones_whatever_the_priority() {
+        let e = memory_with(&[(1, 10.), (2, 10.), (3, 10.)]);
+        let dist = |id: usize| (id as f32 * 100.).powi(2);
+        // Enemy 1 is the closest and enemy 3 has the highest priority, both unreachable:
+        // the reachable enemy 2 wins.
+        let relation = |id: usize| Some((Disposition::HT, if id == 3 { 5 } else { 0 }));
+        let unreachable = |id: usize| id != 2;
+        let pick = best_enemy(&e, 10., relation, unreachable, dist, |_| true, |_| true);
+        assert_eq!(pick, Some(2));
+        // All unreachable: priority, then distance, as before.
+        let pick = best_enemy(&e, 10., relation, |_| true, dist, |_| true, |_| true);
+        assert_eq!(pick, Some(3));
+    }
+
+    #[test]
     fn a_closer_seen_enemy_displaces_the_first_one() {
         // The zombie report: enemy 1 far away, the player (99) right in front and seen.
         let e = memory_with(&[(1, 10.), (99, 10.)]);
@@ -197,6 +221,7 @@ mod tests {
             &e,
             10.,
             |_| Some((Disposition::HT, 0)),
+            |_| false,
             dist,
             |id| id == 99,
             |_| true,
@@ -207,6 +232,7 @@ mod tests {
             &e,
             10.,
             |_| Some((Disposition::HT, 0)),
+            |_| false,
             dist,
             |id| id == 1,
             |id| id == 1,
@@ -223,6 +249,7 @@ mod tests {
             &e,
             10.,
             |id| Some((Disposition::HT, if id == 3 { 5 } else { 0 })),
+            |_| false,
             dist,
             |_| true,
             |_| true,
@@ -234,6 +261,7 @@ mod tests {
             &e,
             10.,
             |id| (id != 1).then_some((Disposition::HT, 0)),
+            |_| false,
             dist,
             |_| true,
             |_| true,
@@ -244,6 +272,7 @@ mod tests {
             &e,
             10.,
             |_| Some((Disposition::LI, 0)),
+            |_| false,
             dist,
             |_| true,
             |_| true,
