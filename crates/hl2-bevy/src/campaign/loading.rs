@@ -29,6 +29,36 @@ pub(super) fn install_view(
     }
 }
 
+pub(super) fn spawn_worker(
+    request: &Request,
+    options: &crate::Options,
+    ui: &ui_host::Console,
+) -> Result<super::ResultSlot, String> {
+    let result: super::ResultSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let output = result.clone();
+    let map = request.map.clone();
+    let map_game = request.game.clone();
+    let root = options.game.clone();
+    let canvas = ui.source.canvas.clone();
+    let new_game = request.direct;
+    let config = ui.source.config.clone();
+    let progress = ui.source.loading_progress();
+    std::thread::Builder::new()
+        .name("hl2-owned-map-loader".into())
+        .spawn(move || {
+            let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::assets::load_with_progress(
+                    &root, &map_game, &map, canvas, new_game, &config, &progress,
+                )
+            }))
+            .map_err(|_| "owned map loader panicked".to_owned())
+            .and_then(|r| r.map_err(|e| format!("{e:#}")));
+            *output.lock().expect("map loader result") = Some(value);
+        })
+        .map(|_| result)
+        .map_err(|error| format!("Cannot start map loader: {error}"))
+}
+
 pub(super) fn start(request: &Request, ui: &mut ui_host::Console) {
     if request.background {
         ui.source
@@ -123,6 +153,73 @@ pub(super) fn exercise_menu_wait_during_worker(app: &mut bevy::prelude::App) {
     assert_eq!(ui.source.mode(), hl2_ui::console::Mode::MainMenu);
     assert!(ui.source.is_background_loading());
     assert_eq!(ui.source.menu_category(), "episodic");
+}
+
+pub(super) fn log_debug_load_start(
+    request: &Request,
+    sim: &mut crate::simulation::Simulation,
+    ui: &mut ui_host::Console,
+) {
+    if request.background {
+        if sim.background_debug.enabled {
+            let is_wide = ui.source.is_widescreen();
+            let blur_name = ui.source.blur_texture_name(&request.map, is_wide);
+            ui.source.log(format!(
+                "Started loading {}, applied {}.",
+                request.map, blur_name
+            ));
+            sim.background_debug.map_name = request.map.clone();
+            sim.background_debug.blur_texture_name = blur_name;
+            sim.background_debug.state_label = "Loading".to_owned();
+        }
+    } else if sim.background_debug.enabled {
+        let is_wide = ui.source.is_widescreen();
+        let bg_map = ui
+            .source
+            .loading_background
+            .as_ref()
+            .map(|m| m.map.as_str())
+            .unwrap_or("background01");
+        let blur_name = ui.source.blur_texture_name(bg_map, is_wide);
+        ui.source.log(format!(
+            "Started loading map {}, applied {}.",
+            request.map, blur_name
+        ));
+        sim.background_debug.pending_gameplay_finish = true;
+        sim.background_debug.enabled = false;
+        ui.source.background_debug_mode = false;
+        sim.background_debug.state_label = "Gameplay loading".to_owned();
+    }
+}
+
+pub(super) fn log_debug_load_finish(
+    request: &Request,
+    success: bool,
+    sim: &mut crate::simulation::Simulation,
+    ui: &mut ui_host::Console,
+) {
+    if request.background {
+        if sim.background_debug.enabled {
+            if success {
+                let opacity = sim.background_debug.blur_opacity;
+                let blur_name = &sim.background_debug.blur_texture_name;
+                ui.source.log(format!(
+                    "Finished loading {}, success, set blur overlay {} opacity to {}.",
+                    request.map, blur_name, opacity
+                ));
+                sim.background_debug.state_label = "Ready".to_owned();
+            } else {
+                ui.source
+                    .log(format!("Finished loading {}, failure.", request.map));
+                sim.background_debug.state_label = "Failure".to_owned();
+            }
+        }
+    } else if sim.background_debug.pending_gameplay_finish {
+        sim.background_debug.pending_gameplay_finish = false;
+        let status = if success { "success." } else { "failure." };
+        ui.source
+            .log(format!("Finished loading map {}, {}", request.map, status));
+    }
 }
 
 #[cfg(test)]

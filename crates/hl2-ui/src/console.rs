@@ -1,4 +1,5 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
+pub(crate) mod background_debug;
 mod chapter_dialog;
 pub mod commands;
 pub mod complete;
@@ -145,6 +146,8 @@ pub struct Console {
 
     /// `(game, image)` -> pre-blurred background (see `GameUiResources::background_images`).
     pub background_textures: BTreeMap<(String, String), Texture2D>,
+    pub background_debug_mode: bool,
+    pub background_blur_opacity: u8,
     pub config: crate::config::Config,
     /// Map -> chapter of every game (menu backgrounds after leaving a map).
     chapter_index: crate::gameui::chapters::ChapterIndex,
@@ -304,6 +307,8 @@ impl Default for Console {
             chapter_dialogs: BTreeMap::new(),
             chapter_game: None,
             background_textures: BTreeMap::new(),
+            background_debug_mode: false,
+            background_blur_opacity: 50,
             config,
             chapter_index: Default::default(),
         };
@@ -314,9 +319,8 @@ impl Default for Console {
     }
 }
 
-/// Height of the F1 developer overlay's header, and of the viewmodel tweak overlay panel.
+/// Height of the F1 developer overlay's header.
 const DEBUG_HEADER_HEIGHT: f32 = 105.;
-const VIEWMODEL_DEBUG_HEIGHT: f32 = 130.;
 
 impl Console {
     pub fn load(vfs: &Vfs, canvas: Canvas) -> Self {
@@ -543,14 +547,14 @@ impl Console {
         DEBUG_HEADER_HEIGHT
     }
 
-    /// Draws the live viewmodel tuning values with their top edge at `top`; returns the bottom
-    /// edge.
-    pub fn draw_viewmodel_debug(&self, lines: &[String], top: f32) -> f32 {
+    fn draw_debug_lines_panel(&self, lines: &[String], top: f32, max_lines: usize) -> f32 {
+        let count = lines.len().min(max_lines);
+        let height = 20. + count as f32 * 22. + 10.;
         self.canvas.rectangle(
             0.,
             top,
             self.canvas.width(),
-            VIEWMODEL_DEBUG_HEIGHT,
+            height,
             Color::new(0.025, 0.045, 0.07, 0.9),
         );
         let draw = |line: &str, origin: Vec2, color| {
@@ -569,9 +573,10 @@ impl Console {
             }
         };
         let normal = Color::new(0.784, 0.784, 0.784, 1.);
-        for (i, line) in lines.iter().take(5).enumerate() {
+        let last_idx = count.saturating_sub(1);
+        for (i, line) in lines.iter().take(count).enumerate() {
             let y = top + 20. + i as f32 * 22.;
-            let color = if i == 4 {
+            let color = if i == last_idx {
                 Color::from_rgba(240, 180, 90, 255)
             } else if i == 0 {
                 WHITE
@@ -580,7 +585,19 @@ impl Console {
             };
             draw(line, vec2(22., y), color);
         }
-        top + VIEWMODEL_DEBUG_HEIGHT
+        top + height
+    }
+
+    /// Draws the live viewmodel tuning values with their top edge at `top`; returns the bottom
+    /// edge.
+    pub fn draw_viewmodel_debug(&self, lines: &[String], top: f32) -> f32 {
+        self.draw_debug_lines_panel(lines, top, 5)
+    }
+
+    /// Draws the live background visual debug values with their top edge at `top`; returns the bottom
+    /// edge.
+    pub fn draw_background_debug(&self, lines: &[String], top: f32) -> f32 {
+        self.draw_debug_lines_panel(lines, top, lines.len())
     }
 
     fn upcoming_background<'a>(&'a self, menu_cat: &'a str) -> Option<(&'a str, &'a str)> {
@@ -629,6 +646,12 @@ impl Console {
                 crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP,
             );
         } else {
+            if self.background_debug_mode {
+                if let Some(tex) = bg_tex {
+                    let alpha = (self.background_blur_opacity as f32 / 100.0).clamp(0.0, 1.0);
+                    crate::gameui::loading::draw_background_texture_alpha(&self.canvas, tex, alpha);
+                }
+            }
             let dim_alpha = self.dim_overlay_alpha(time);
             if dim_alpha > 0.001 {
                 let (w, h) = (self.canvas.width(), self.canvas.height());
@@ -680,6 +703,8 @@ fn vector(args: &[String]) -> Option<glam::Vec3> {
         .all(|v| v.is_finite())
         .then(|| glam::Vec3::new(values[0], values[1], values.get(2).copied().unwrap_or(0.)))
 }
+#[cfg(test)]
+mod background_debug_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

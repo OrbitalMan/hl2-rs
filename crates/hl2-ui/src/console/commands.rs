@@ -194,6 +194,30 @@ pub const COMMANDS: &[Spec] = &[
         developer::viewmodel_tweak_reset,
     ),
     command(
+        "background_debug_mode",
+        "background_debug_mode <0|1>: toggle background visual debug mode (background map/blur only)",
+        &[Arg::Values(&["0", "1"])],
+        super::background_debug::background_debug_mode,
+    ),
+    command(
+        "background_blur_opacity",
+        "background_blur_opacity [0..100]: query or set blur background overlay opacity (background_debug_mode 1 only)",
+        &[Arg::Free],
+        super::background_debug::background_blur_opacity,
+    ),
+    command(
+        "background_map_fov_horizontal",
+        "background_map_fov_horizontal [degrees]: query or set background map horizontal field of view",
+        &[Arg::Free],
+        super::background_debug::background_map_fov_horizontal,
+    ),
+    command(
+        "background_map_fov_vertical",
+        "background_map_fov_vertical [degrees]: query or set background map vertical field of view",
+        &[Arg::Free],
+        super::background_debug::background_map_fov_vertical,
+    ),
+    command(
         "getpos",
         "getpos: print camera position and Source pitch/yaw/roll in degrees; getpos 2 is not implemented",
         &[],

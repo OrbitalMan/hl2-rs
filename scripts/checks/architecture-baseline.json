@@ -170,7 +170,7 @@
   "crates/hl2-bevy/src/audio.rs": 1174,
   "crates/hl2-bevy/src/effects.rs": 1092,
   "crates/hl2-bevy/src/gameplay.rs": 1643,
-  "crates/hl2-bevy/src/main.rs": 1101,
+  "crates/hl2-bevy/src/main.rs": 1080,
   "crates/hl2-bevy/src/rendering.rs": 1509,
   "crates/hl2-bevy/src/video.rs": 1187,
   "crates/hl2-simulation/src/ai/default_schedules.rs": 1247,
@@ -207,10 +207,10 @@
    114
   ],
   "crates/hl2-bevy/src/campaign.rs::poll": [
-   170
+   154
   ],
   "crates/hl2-bevy/src/canvas_renderer.rs::present": [
-   175
+   156
   ],
   "crates/hl2-bevy/src/effects.rs::install": [
    142
@@ -231,7 +231,7 @@
    808
   ],
   "crates/hl2-bevy/src/input.rs::controls": [
-   138
+   118
   ],
   "crates/hl2-bevy/src/main.rs::main": [
    326
@@ -259,9 +259,6 @@
   ],
   "crates/hl2-bevy/src/runtime_props.rs::poll": [
    106
-  ],
-  "crates/hl2-bevy/src/simulation.rs::console_effects": [
-   112
   ],
   "crates/hl2-bevy/src/simulation.rs::step": [
    167

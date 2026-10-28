@@ -269,7 +269,8 @@ pub(crate) fn controls(
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut ui: Option<ResMut<crate::ui_host::Console>>,
     mut mouse_filter: Local<hl2_ui::input::MouseFilter>,
-    mut viewmodel_repeat: Local<ViewmodelAdjustRepeat>,
+    mut viewmodel_repeat: Local<KeyAdjustRepeat>,
+    mut background_repeat: Local<KeyAdjustRepeat>,
     real_time: Option<Res<Time<Real>>>,
 ) {
     // CGameRules::Think reads `skill` every frame, and weapon selection reads
@@ -285,41 +286,20 @@ pub(crate) fn controls(
         sim.dev_overlay = !sim.dev_overlay;
     }
     let aspect = crate::video::frame_aspect(frame.as_deref());
-    // Loading a map or returning to a background level ends tweak mode.
-    if sim.loading() || sim.background_level {
-        sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
-    }
-    if sim.viewmodel_debug.enabled {
-        let Some(weapon) = game.as_deref().map(|game| game.inventory.active.clone()) else {
-            sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
-            *viewmodel_repeat = ViewmodelAdjustRepeat::default();
-            return;
-        };
-        let profile = hl2_ui::tuning::viewmodel_profile(aspect);
-        select_viewmodel_debug_target(&mut sim.viewmodel_debug, &weapon, profile);
-        let adjusting = !sim.paused() && !sim.transition;
-        let changed = if std::mem::take(&mut sim.viewmodel_debug.reset_pending) {
-            reset_viewmodel_debug_weapon(&mut sim.viewmodel_debug)
-        } else if adjusting {
-            let time = real_time.as_deref().map(Time::elapsed_secs_f64);
-            let fired = viewmodel_repeat.update(&keys, time);
-            let step = viewmodel_adjust_step(&keys);
-            adjust_viewmodel_framing(&mut sim.viewmodel_debug.framing, &fired, step)
-        } else {
-            *viewmodel_repeat = ViewmodelAdjustRepeat::default();
-            false
-        };
-        if changed {
-            commit_viewmodel_debug_edit(
-                &mut sim.viewmodel_debug,
-                weapon,
-                profile,
-                ui.as_deref_mut(),
-            );
-        }
-    } else {
-        *viewmodel_repeat = ViewmodelAdjustRepeat::default();
-    }
+    let time = real_time.as_deref().map(Time::elapsed_secs_f64);
+    let tuning_input = DebugTuningInput {
+        keys: &keys,
+        time,
+        aspect,
+    };
+    process_debug_tuning_keys(
+        &mut sim,
+        game.as_deref(),
+        ui.as_deref_mut(),
+        tuning_input,
+        &mut viewmodel_repeat,
+        &mut background_repeat,
+    );
     if !sim.commands.is_empty() {
         return;
     }
@@ -434,17 +414,22 @@ const VIEWMODEL_ADJUST_KEYS: &[KeyCode] = &[
     KeyCode::ArrowRight,
 ];
 
-/// Latest viewmodel adjust key repeats while held, using the same [`HoldRepeat`] timing as
+/// Latest adjust key repeats while held, using the same [`HoldRepeat`] timing as
 /// Options > Keyboard list arrows.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct ViewmodelAdjustRepeat {
+pub(crate) struct KeyAdjustRepeat {
     key: Option<KeyCode>,
     timer: HoldRepeat,
 }
 
-impl ViewmodelAdjustRepeat {
-    fn update(&mut self, keys: &ButtonInput<KeyCode>, time: Option<f64>) -> Vec<KeyCode> {
-        let pressed: Vec<KeyCode> = VIEWMODEL_ADJUST_KEYS
+impl KeyAdjustRepeat {
+    pub(crate) fn update(
+        &mut self,
+        keys: &ButtonInput<KeyCode>,
+        time: Option<f64>,
+        watch_keys: &[KeyCode],
+    ) -> Vec<KeyCode> {
+        let pressed: Vec<KeyCode> = watch_keys
             .iter()
             .copied()
             .filter(|key| keys.just_pressed(*key))
@@ -484,6 +469,83 @@ fn commit_viewmodel_debug_edit(
             target: "hl2_bevy::viewmodel_debug",
             "Could not serialize tuning.json snapshot: {error}"
         ),
+    }
+}
+
+struct DebugTuningInput<'a> {
+    keys: &'a ButtonInput<KeyCode>,
+    time: Option<f64>,
+    aspect: f32,
+}
+
+fn process_debug_tuning_keys(
+    sim: &mut crate::simulation::Simulation,
+    game: Option<&crate::gameplay::Gameplay>,
+    mut ui: Option<&mut crate::ui_host::Console>,
+    input: DebugTuningInput,
+    vm_repeat: &mut KeyAdjustRepeat,
+    bg_repeat: &mut KeyAdjustRepeat,
+) {
+    if sim.loading() || sim.background_level {
+        sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
+    }
+    if !sim.background_level && !sim.loading() {
+        sim.background_debug.enabled = false;
+        if let Some(ref mut ui) = ui {
+            ui.source.background_debug_mode = false;
+        }
+    }
+    if sim.viewmodel_debug.enabled {
+        let Some(weapon) = game.map(|g| g.inventory.active.clone()) else {
+            sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
+            *vm_repeat = KeyAdjustRepeat::default();
+            return;
+        };
+        let profile = hl2_ui::tuning::viewmodel_profile(input.aspect);
+        select_viewmodel_debug_target(&mut sim.viewmodel_debug, &weapon, profile);
+        let adjusting = !sim.paused() && !sim.transition;
+        let changed = if std::mem::take(&mut sim.viewmodel_debug.reset_pending) {
+            reset_viewmodel_debug_weapon(&mut sim.viewmodel_debug)
+        } else if adjusting {
+            let fired = vm_repeat.update(input.keys, input.time, VIEWMODEL_ADJUST_KEYS);
+            let step = viewmodel_adjust_step(input.keys);
+            adjust_viewmodel_framing(&mut sim.viewmodel_debug.framing, &fired, step)
+        } else {
+            *vm_repeat = KeyAdjustRepeat::default();
+            false
+        };
+        if changed {
+            commit_viewmodel_debug_edit(
+                &mut sim.viewmodel_debug,
+                weapon,
+                profile,
+                ui.as_deref_mut(),
+            );
+        }
+    } else {
+        *vm_repeat = KeyAdjustRepeat::default();
+    }
+    if sim.background_debug.enabled {
+        let adjusting = !sim.paused() && !sim.transition;
+        if adjusting {
+            let fired = bg_repeat.update(
+                input.keys,
+                input.time,
+                crate::background_debug::BACKGROUND_ADJUST_KEYS,
+            );
+            let step = viewmodel_adjust_step(input.keys);
+            sim.background_debug.adjust_fov(&fired, step, input.aspect);
+        } else {
+            *bg_repeat = KeyAdjustRepeat::default();
+        }
+        if let Some(ui) = ui {
+            let is_flexible = ui.source.config.video.flexible_aspect;
+            let label = crate::background_debug::aspect_label(input.aspect, is_flexible);
+            sim.background_debug
+                .check_aspect_change(input.aspect, label, &mut ui.source);
+        }
+    } else {
+        *bg_repeat = KeyAdjustRepeat::default();
     }
 }
 
@@ -652,23 +714,50 @@ mod tests {
 
     #[test]
     fn viewmodel_debug_adjust_keys_repeat_like_options_keyboard_arrows() {
-        let mut repeat = ViewmodelAdjustRepeat::default();
+        let mut repeat = KeyAdjustRepeat::default();
         let mut pressed = ButtonInput::default();
         pressed.press(KeyCode::ArrowUp);
-        assert_eq!(repeat.update(&pressed, Some(0.0)), vec![KeyCode::ArrowUp]);
+        assert_eq!(
+            repeat.update(&pressed, Some(0.0), VIEWMODEL_ADJUST_KEYS),
+            vec![KeyCode::ArrowUp]
+        );
 
         let held = held_keys(&[KeyCode::ArrowUp]);
-        assert!(repeat.update(&held, Some(0.2)).is_empty());
-        assert_eq!(repeat.update(&held, Some(0.4)), vec![KeyCode::ArrowUp]);
-        assert!(repeat.update(&held, Some(0.44)).is_empty());
-        assert_eq!(repeat.update(&held, Some(0.45)), vec![KeyCode::ArrowUp]);
+        assert!(
+            repeat
+                .update(&held, Some(0.2), VIEWMODEL_ADJUST_KEYS)
+                .is_empty()
+        );
+        assert_eq!(
+            repeat.update(&held, Some(0.4), VIEWMODEL_ADJUST_KEYS),
+            vec![KeyCode::ArrowUp]
+        );
+        assert!(
+            repeat
+                .update(&held, Some(0.44), VIEWMODEL_ADJUST_KEYS)
+                .is_empty()
+        );
+        assert_eq!(
+            repeat.update(&held, Some(0.45), VIEWMODEL_ADJUST_KEYS),
+            vec![KeyCode::ArrowUp]
+        );
 
         let mut both = held.clone();
         both.press(KeyCode::ArrowLeft);
-        assert_eq!(repeat.update(&both, Some(0.5)), vec![KeyCode::ArrowLeft]);
+        assert_eq!(
+            repeat.update(&both, Some(0.5), VIEWMODEL_ADJUST_KEYS),
+            vec![KeyCode::ArrowLeft]
+        );
         both.clear_just_pressed(KeyCode::ArrowLeft);
-        assert_eq!(repeat.update(&both, Some(0.9)), vec![KeyCode::ArrowLeft]);
-        assert!(repeat.update(&held, Some(1.0)).is_empty());
+        assert_eq!(
+            repeat.update(&both, Some(0.9), VIEWMODEL_ADJUST_KEYS),
+            vec![KeyCode::ArrowLeft]
+        );
+        assert!(
+            repeat
+                .update(&held, Some(1.0), VIEWMODEL_ADJUST_KEYS)
+                .is_empty()
+        );
     }
 
     #[test]

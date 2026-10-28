@@ -1,9 +1,34 @@
 //! Installation/output side effects after argument parsing has succeeded.
 mod app;
 use super::Options;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 pub(super) use app::make_app;
 use std::{path::PathBuf, sync::Arc};
+
+/// Rejects map-dependent arguments when no `--map` was given.
+pub(crate) fn require_map_for(map: Option<&str>, map_dependent: &[&str]) -> Result<()> {
+    if map.is_none() && !map_dependent.is_empty() {
+        bail!(
+            "--map is required by {}: they apply to a directly loaded map, and without --map the main menu opens",
+            map_dependent.join(", ")
+        );
+    }
+    Ok(())
+}
+
+/// The window mode to start in: an explicit `--windowed`/`--fullscreen`/`--borderless` wins;
+/// otherwise unattended runs start windowed and interactive runs use the stored Video setting.
+pub(crate) fn startup_display_mode(
+    stored: hl2_ui::config::DisplayMode,
+    explicit: Option<hl2_ui::config::DisplayMode>,
+    unattended: bool,
+) -> hl2_ui::config::DisplayMode {
+    explicit.unwrap_or(if unattended {
+        hl2_ui::config::DisplayMode::Windowed
+    } else {
+        stored
+    })
+}
 
 /// Resolved target map and mode for initial application startup.
 #[derive(Clone, Debug, PartialEq, Eq)]

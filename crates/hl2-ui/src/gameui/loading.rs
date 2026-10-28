@@ -433,13 +433,23 @@ pub fn draw_background_texture(
     canvas: &source_ui::canvas::Canvas,
     texture: &source_ui::canvas::Texture2D,
 ) {
+    draw_background_texture_alpha(canvas, texture, 1.0);
+}
+
+/// Draws a pre-blurred background texture with custom alpha opacity over the canvas.
+pub fn draw_background_texture_alpha(
+    canvas: &source_ui::canvas::Canvas,
+    texture: &source_ui::canvas::Texture2D,
+    alpha: f32,
+) {
     let size = glam::vec2(canvas.width(), canvas.height());
+    let color = source_ui::canvas::Color::new(1., 1., 1., alpha.clamp(0., 1.));
     source_ui::canvas::draw_texture_ex(
         canvas,
         texture,
         0.,
         0.,
-        source_ui::canvas::WHITE,
+        color,
         source_ui::canvas::DrawTextureParams {
             source: Some(background_source(
                 size,

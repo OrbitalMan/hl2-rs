@@ -155,6 +155,8 @@ pub struct Simulation {
     pub dev_overlay: bool,
     /// Runtime-only viewmodel tuning overlay and active direct-profile edit.
     pub viewmodel_debug: ViewmodelDebug,
+    /// Runtime background layout visual analysis overlay and FOV tuning.
+    pub background_debug: crate::background_debug::BackgroundDebug,
     pub pending_video_config: Option<hl2_ui::config::VideoSettings>,
     /// Window settings last given to the window: startup values (after command-line overrides)
     /// or the last queued apply. `None` applies the next configuration unconditionally.
@@ -210,6 +212,7 @@ impl Simulation {
             run_after_script: false,
             dev_overlay: false,
             viewmodel_debug: ViewmodelDebug::default(),
+            background_debug: crate::background_debug::BackgroundDebug::default(),
             pending_video_config: None,
             applied_window: None,
             applied_detail: None,
@@ -349,6 +352,8 @@ impl Simulation {
             ui.source
                 .log("viewmodel_tweak_mode needs a loaded gameplay map; start or load one first.");
         } else {
+            self.background_debug.enabled = false;
+            ui.source.background_debug_mode = false;
             self.viewmodel_debug.enabled = true;
             ui.source.log("viewmodel_tweak_mode 1");
         }
@@ -363,6 +368,121 @@ impl Simulation {
                 .log("viewmodel_tweak_reset needs viewmodel_tweak_mode 1.");
         }
     }
+    fn apply_background_debug_effect(
+        &mut self,
+        ui: &mut crate::ui_host::Console,
+        effect: hl2_ui::console::Effect,
+    ) {
+        use hl2_ui::console::Effect;
+        let aspect = self
+            .frame_size
+            .map_or(4. / 3., |s| s[0] as f32 / s[1].max(1) as f32);
+        match effect {
+            Effect::BackgroundDebugMode(on) => {
+                if !on {
+                    self.background_debug.enabled = false;
+                    ui.source.background_debug_mode = false;
+                    ui.source.log("background_debug_mode 0");
+                } else if !self.background_level && !self.loading {
+                    ui.source.log(
+                        "background_debug_mode needs a background map or loading blur; start or return to the main menu.",
+                    );
+                } else {
+                    self.viewmodel_debug = ViewmodelDebug::default();
+                    self.background_debug.enabled = true;
+                    ui.source.background_debug_mode = true;
+                    ui.source.log("background_debug_mode 1");
+                }
+            }
+            Effect::BackgroundBlurOpacity(opacity) => {
+                self.background_debug.blur_opacity = opacity;
+                ui.source.background_blur_opacity = opacity;
+            }
+            Effect::BackgroundMapFovHorizontal(Some(deg)) => {
+                self.background_debug.fov_horizontal = Some(deg);
+                ui.source
+                    .log(format!("background_map_fov_horizontal {deg:.2}"));
+            }
+            Effect::BackgroundMapFovHorizontal(None) => {
+                let (fov_h, _) = self.background_debug.fov(aspect);
+                ui.source.log(format!(
+                    "\"background_map_fov_horizontal\" = \"{fov_h:.2}\""
+                ));
+            }
+            Effect::BackgroundMapFovVertical(Some(deg)) => {
+                self.background_debug.fov_vertical = Some(deg);
+                ui.source
+                    .log(format!("background_map_fov_vertical {deg:.2}"));
+            }
+            Effect::BackgroundMapFovVertical(None) => {
+                let (_, fov_v) = self.background_debug.fov(aspect);
+                ui.source
+                    .log(format!("\"background_map_fov_vertical\" = \"{fov_v:.2}\""));
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_pose_effect(
+        &mut self,
+        ui: &mut crate::ui_host::Console,
+        effect: hl2_ui::console::Effect,
+    ) {
+        use hl2_ui::console::Effect;
+        match effect {
+            Effect::Getpos => ui.source.log(format!(
+                "setpos {:.6} {:.6} {:.6}; setang {:.6} {:.6} 0",
+                self.eye.x,
+                self.eye.y,
+                self.eye.z,
+                -self.pitch.to_degrees(),
+                self.yaw.to_degrees()
+            )),
+            Effect::Setpos { x, y, z } => {
+                self.player.feet = glam::Vec3::new(x, y, z.unwrap_or(self.player.feet.z));
+                self.eye = self.player.eye();
+                ui.source.log(format!(
+                    "Player origin: {} {} {}",
+                    self.player.feet.x, self.player.feet.y, self.player.feet.z
+                ));
+            }
+            Effect::Setang(a) => {
+                self.pitch = -a.x.to_radians().clamp(-1.53, 1.53);
+                self.yaw = a.y.to_radians();
+                ui.source.log(format!(
+                    "View angles: {} {} 0",
+                    -self.pitch.to_degrees(),
+                    self.yaw.to_degrees()
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_npc_command(
+        &mut self,
+        ui: &mut crate::ui_host::Console,
+        game: &mut crate::gameplay::Gameplay,
+        line: &str,
+    ) {
+        match game.spawn_console.parse(line) {
+            Ok(Some(hl2_simulation::ai::spawn::Command::Spawn(request))) => {
+                let message = self.spawn_npc(game, request);
+                ui.source.log(message);
+            }
+            Ok(Some(hl2_simulation::ai::spawn::Command::SetEquipment(value))) => {
+                ui.source.log(format!("npc_create_equipment {value}"));
+            }
+            Ok(Some(hl2_simulation::ai::spawn::Command::SpawnProp(model))) => {
+                let model = crate::runtime_props::model_path(&model);
+                ui.source.log(format!("prop_physics_create {model}"));
+                game.prop_requests.push((model, self.eye, self.forward()));
+            }
+            Ok(None) => {}
+            Err(e) => ui.source.log(e),
+        }
+    }
+
     pub fn console_effects(
         &mut self,
         ui: &mut crate::ui_host::Console,
@@ -391,30 +511,14 @@ impl Simulation {
                 Effect::ViewmodelTweakMode(on) => self.viewmodel_tweak_mode(ui, on),
                 Effect::Flashlight => self.flashlight_toggles += 1,
                 Effect::ViewmodelTweakReset => self.viewmodel_tweak_reset(ui),
-                Effect::Getpos => ui.source.log(format!(
-                    "setpos {:.6} {:.6} {:.6}; setang {:.6} {:.6} 0",
-                    self.eye.x,
-                    self.eye.y,
-                    self.eye.z,
-                    -self.pitch.to_degrees(),
-                    self.yaw.to_degrees()
-                )),
-                Effect::Setpos { x, y, z } => {
-                    self.player.feet = glam::Vec3::new(x, y, z.unwrap_or(self.player.feet.z));
-                    self.eye = self.player.eye();
-                    ui.source.log(format!(
-                        "Player origin: {} {} {}",
-                        self.player.feet.x, self.player.feet.y, self.player.feet.z
-                    ));
+                Effect::BackgroundDebugMode(_)
+                | Effect::BackgroundBlurOpacity(_)
+                | Effect::BackgroundMapFovHorizontal(_)
+                | Effect::BackgroundMapFovVertical(_) => {
+                    self.apply_background_debug_effect(ui, effect)
                 }
-                Effect::Setang(a) => {
-                    self.pitch = -a.x.to_radians().clamp(-1.53, 1.53);
-                    self.yaw = a.y.to_radians();
-                    ui.source.log(format!(
-                        "View angles: {} {} 0",
-                        -self.pitch.to_degrees(),
-                        self.yaw.to_degrees()
-                    ));
+                Effect::Getpos | Effect::Setpos { .. } | Effect::Setang(_) => {
+                    self.apply_pose_effect(ui, effect)
                 }
                 Effect::ChapterMap(target) => {
                     self.request_gameplay_map(ui, target.map, Some(target.game))
@@ -442,22 +546,7 @@ impl Simulation {
                             .log(format!("Queued {target}.{input} after {delay} seconds."));
                     }
                 }
-                Effect::NpcCommand(line) => match game.spawn_console.parse(&line) {
-                    Ok(Some(hl2_simulation::ai::spawn::Command::Spawn(request))) => {
-                        let message = self.spawn_npc(game, request);
-                        ui.source.log(message);
-                    }
-                    Ok(Some(hl2_simulation::ai::spawn::Command::SetEquipment(value))) => {
-                        ui.source.log(format!("npc_create_equipment {value}"));
-                    }
-                    Ok(Some(hl2_simulation::ai::spawn::Command::SpawnProp(model))) => {
-                        let model = crate::runtime_props::model_path(&model);
-                        ui.source.log(format!("prop_physics_create {model}"));
-                        game.prop_requests.push((model, self.eye, self.forward()));
-                    }
-                    Ok(None) => {}
-                    Err(e) => ui.source.log(e),
-                },
+                Effect::NpcCommand(line) => self.apply_npc_command(ui, game, &line),
                 Effect::Quit => ui.quit_requested = true,
                 Effect::ApplyConfig(cfg) => self.apply_config_effect(ui, game, &cfg),
                 Effect::PlaySound(sound) => {
@@ -1550,6 +1639,31 @@ mod tests {
         assert!(!sim.viewmodel_debug.enabled && !sim.viewmodel_debug.reset_pending);
         run(&mut sim, ViewmodelTweakMode(true));
         run(&mut sim, ViewmodelTweakMode(false));
+        assert!(!sim.viewmodel_debug.enabled);
+    }
+
+    #[test]
+    fn background_and_viewmodel_debug_modes_mutually_exclusive() {
+        use hl2_ui::console::Effect::{BackgroundDebugMode, ViewmodelTweakMode};
+        let mut sim = Simulation::new(&World::default(), glam::Vec3::ZERO, 0., 0., false, vec![]);
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
+        let mut run =
+            |sim: &mut Simulation, effect| sim.console_effects(&mut ui, &mut game, vec![effect]);
+
+        sim.background_level = true;
+        run(&mut sim, BackgroundDebugMode(true));
+        assert!(sim.background_debug.enabled);
+        assert!(!sim.viewmodel_debug.enabled);
+
+        sim.background_level = false;
+        run(&mut sim, ViewmodelTweakMode(true));
+        assert!(sim.viewmodel_debug.enabled);
+        assert!(!sim.background_debug.enabled);
+
+        sim.background_level = true;
+        run(&mut sim, BackgroundDebugMode(true));
+        assert!(sim.background_debug.enabled);
         assert!(!sim.viewmodel_debug.enabled);
     }
 

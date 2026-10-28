@@ -308,6 +308,41 @@ type HudResources<'w> = (
     Res<'w, crate::Status>,
     Option<Res<'w, crate::performance::Performance>>,
 );
+fn draw_debug_overlays(
+    ui: &crate::ui_host::Console,
+    sim: &crate::simulation::Simulation,
+    debug_lines: &[String],
+    width: f32,
+    height: f32,
+) -> f32 {
+    let mut stack_top = 0.;
+    if !debug_lines.is_empty() {
+        stack_top = ui.source.draw_debug(debug_lines) + OVERLAY_GAP;
+    }
+    if sim.viewmodel_debug.enabled
+        && let Some(profile) = sim.viewmodel_debug.profile
+    {
+        let value = sim.viewmodel_debug.framing;
+        let lines = vec![
+            format!("aspect_ratio: {}", profile.as_str()),
+            format!("weapon: {}", sim.viewmodel_debug.weapon),
+            format!("fov_offset: {:.2}    [ ]", value.fov_offset),
+            format!(
+                "offset: [{:.2}, {:.2}, {:.2}]    L/R:Y  U/D:Z  ,/.:X",
+                value.offset[0], value.offset[1], value.offset[2]
+            ),
+            "Shift = 1.0  Alt = 0.01    hold to repeat    viewmodel_tweak_reset".to_owned(),
+        ];
+        stack_top = ui.source.draw_viewmodel_debug(&lines, stack_top) + OVERLAY_GAP;
+    }
+    if sim.background_debug.enabled {
+        let aspect = width / height.max(1.);
+        let lines = sim.background_debug.lines(aspect);
+        stack_top = ui.source.draw_background_debug(&lines, stack_top) + OVERLAY_GAP;
+    }
+    stack_top
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn present(
     mut commands: Commands,
@@ -376,26 +411,7 @@ pub fn present(
         ];
     }
     // Overlays stack down the left edge in the order F1, viewmodel tweak, F4; hidden ones leave no gap.
-    let mut stack_top = 0.;
-    if !hud.debug_lines.is_empty() {
-        stack_top = ui.source.draw_debug(&hud.debug_lines) + OVERLAY_GAP;
-    }
-    if sim.viewmodel_debug.enabled
-        && let Some(profile) = sim.viewmodel_debug.profile
-    {
-        let value = sim.viewmodel_debug.framing;
-        let lines = vec![
-            format!("aspect_ratio: {}", profile.as_str()),
-            format!("weapon: {}", sim.viewmodel_debug.weapon),
-            format!("fov_offset: {:.2}    [ ]", value.fov_offset),
-            format!(
-                "offset: [{:.2}, {:.2}, {:.2}]    L/R:Y  U/D:Z  ,/.:X",
-                value.offset[0], value.offset[1], value.offset[2]
-            ),
-            "Shift = 1.0  Alt = 0.01    hold to repeat    viewmodel_tweak_reset".to_owned(),
-        ];
-        stack_top = ui.source.draw_viewmodel_debug(&lines, stack_top) + OVERLAY_GAP;
-    }
+    let stack_top = draw_debug_overlays(&ui, &sim, &hud.debug_lines, width, height);
     // F4 NPC spawn panel (ours, outside the hl2-ui menus).
     hud.spawn_panel = game.spawn_overlay.open.then(|| {
         game.spawn_overlay

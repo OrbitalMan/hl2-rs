@@ -1,0 +1,83 @@
+//! Tests for background visual debug console commands and opacity/FOV controls.
+
+use super::{Console, Effect, Mode};
+
+#[test]
+fn background_debug_mode_command_behavior() {
+    let mut console = Console {
+        base: Mode::MainMenu,
+        ..Default::default()
+    };
+    // In MainMenu, enabling is allowed
+    assert_eq!(
+        console.submit("background_debug_mode 1"),
+        vec![Effect::BackgroundDebugMode(true)]
+    );
+    assert!(console.background_debug_mode);
+
+    // Disabling
+    assert_eq!(
+        console.submit("background_debug_mode 0"),
+        vec![Effect::BackgroundDebugMode(false)]
+    );
+    assert!(!console.background_debug_mode);
+
+    // In gameplay mode (not background, not loading), enabling is rejected
+    console.base = Mode::Gameplay;
+    assert!(console.submit("background_debug_mode 1").is_empty());
+    assert!(!console.background_debug_mode);
+}
+
+#[test]
+fn background_blur_opacity_requires_debug_mode() {
+    let mut console = Console::default();
+    // Default opacity is 50
+    assert_eq!(console.background_blur_opacity, 50);
+
+    // Fails when background_debug_mode is 0
+    assert!(console.submit("background_blur_opacity 75").is_empty());
+    assert_eq!(console.background_blur_opacity, 50);
+
+    // Works when background_debug_mode is 1
+    console.background_debug_mode = true;
+    assert_eq!(
+        console.submit("background_blur_opacity 75"),
+        vec![Effect::BackgroundBlurOpacity(75)]
+    );
+    assert_eq!(console.background_blur_opacity, 75);
+
+    // Query prints current value without effect
+    assert!(console.submit("background_blur_opacity").is_empty());
+
+    // Out-of-bounds (> 100) is rejected
+    assert!(console.submit("background_blur_opacity 101").is_empty());
+    assert_eq!(console.background_blur_opacity, 75);
+}
+
+#[test]
+fn background_map_fov_commands() {
+    let mut console = Console::default();
+    assert_eq!(
+        console.submit("background_map_fov_horizontal"),
+        vec![Effect::BackgroundMapFovHorizontal(None)]
+    );
+    assert_eq!(
+        console.submit("background_map_fov_horizontal 90"),
+        vec![Effect::BackgroundMapFovHorizontal(Some(90.0))]
+    );
+    assert_eq!(
+        console.submit("background_map_fov_vertical"),
+        vec![Effect::BackgroundMapFovVertical(None)]
+    );
+    assert_eq!(
+        console.submit("background_map_fov_vertical 60"),
+        vec![Effect::BackgroundMapFovVertical(Some(60.0))]
+    );
+
+    // Invalid FOV values rejected
+    assert!(console.submit("background_map_fov_horizontal 0").is_empty());
+    assert!(console
+        .submit("background_map_fov_horizontal 180")
+        .is_empty());
+    assert!(console.submit("background_map_fov_vertical 200").is_empty());
+}

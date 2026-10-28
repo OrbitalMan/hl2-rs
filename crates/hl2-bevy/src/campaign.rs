@@ -130,35 +130,17 @@ pub fn poll(
         if loading::reuse_background(&request, &campaign, &mut ui, &mut sim) {
             return;
         }
-        let result: ResultSlot = Arc::new(Mutex::new(None));
-        let output = result.clone();
-        let map = request.map.clone();
-        let map_game = request.game.clone();
-        let root = options.game.clone();
-        let canvas = ui.source.canvas.clone();
-        let new_game = request.direct;
-        let config = ui.source.config.clone();
-        let progress = ui.source.loading_progress();
-        let worker = std::thread::Builder::new()
-            .name("hl2-owned-map-loader".into())
-            .spawn(move || {
-                let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    assets::load_with_progress(
-                        &root, &map_game, &map, canvas, new_game, &config, &progress,
-                    )
-                }))
-                .map_err(|_| "owned map loader panicked".to_owned())
-                .and_then(|r| r.map_err(|e| format!("{e:#}")));
-                *output.lock().expect("map loader result") = Some(value);
-            });
-        if let Err(error) = worker {
-            let error = format!("Cannot start map loader: {error}");
-            ui.source.log(&error);
-            ui.source.loading_failed(&error);
-            campaign.failures.push(error);
-            sim.loading_failed();
-            return;
-        }
+        let result = match loading::spawn_worker(&request, &options, &ui) {
+            Ok(result) => result,
+            Err(error) => {
+                ui.source.log(&error);
+                ui.source.loading_failed(&error);
+                campaign.failures.push(error);
+                sim.loading_failed();
+                return;
+            }
+        };
+        loading::log_debug_load_start(&request, &mut sim, &mut ui);
         loading::start(&request, &mut ui);
         sim.loading = true;
         campaign.job = Some(Job { request, result });
@@ -176,6 +158,7 @@ pub fn poll(
     let mut loaded = match result {
         Ok(loaded) => loaded,
         Err(error) => {
+            loading::log_debug_load_finish(&job.request, false, &mut sim, &mut ui);
             if job.request.background {
                 let warning = format!(
                     "Warning: background map {} failed: {error}",
@@ -259,6 +242,7 @@ pub fn poll(
         ui.source
             .level_loaded_for_map(&loaded.game, &loaded.world.name, false);
     }
+    loading::log_debug_load_finish(&job.request, true, &mut sim, &mut ui);
     ui.source
         .log(format!("Loaded {}/{}", loaded.game, loaded.world.name));
     crate::install_map(

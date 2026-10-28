@@ -1,6 +1,7 @@
 //! Isolated Bevy/wgpu host reusing engine-independent Source simulation.
 mod assets;
 mod audio;
+mod background_debug;
 mod bloom;
 mod camera;
 mod campaign;
@@ -45,6 +46,7 @@ use bevy::{
 };
 pub(crate) use map_install::install_map;
 use serde::Serialize;
+use startup::{require_map_for, startup_display_mode};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -115,29 +117,6 @@ struct Options {
     novid: bool,
     /// Persisted user configuration.
     config: hl2_ui::config::Config,
-}
-/// Rejects map-dependent arguments when no `--map` was given.
-fn require_map_for(map: Option<&str>, map_dependent: &[&str]) -> Result<()> {
-    if map.is_none() && !map_dependent.is_empty() {
-        bail!(
-            "--map is required by {}: they apply to a directly loaded map, and without --map the main menu opens",
-            map_dependent.join(", ")
-        );
-    }
-    Ok(())
-}
-/// The window mode to start in: an explicit `--windowed`/`--fullscreen`/`--borderless` wins;
-/// otherwise unattended runs start windowed and interactive runs use the stored Video setting.
-fn startup_display_mode(
-    stored: hl2_ui::config::DisplayMode,
-    explicit: Option<hl2_ui::config::DisplayMode>,
-    unattended: bool,
-) -> hl2_ui::config::DisplayMode {
-    explicit.unwrap_or(if unattended {
-        hl2_ui::config::DisplayMode::Windowed
-    } else {
-        stored
-    })
 }
 impl Options {
     fn parse() -> Result<Self> {

@@ -1,5 +1,26 @@
 # STATUS
 
+## Background visual debug mode and FOV tuning commands implemented (2026-10-28)
+
+Background visual layout debug mode commands and controls are now implemented. Commands include:
+- `background_debug_mode 0|1`: enables or disables background debug mode. It can only be enabled while
+  in the main menu with a background map or loading blur present; starting or transitioning into a gameplay
+  map automatically disables it. Successful activation automatically disables viewmodel debug mode and vice versa.
+- `background_blur_opacity 0..100`: adjusts the alpha opacity of the pre-blurred background texture (default 50)
+  while background debug mode is enabled, keeping the blur overlay visible over the live 3D background map. During
+  active loading, blur overlay opacity remains 100.
+- `background_map_fov_horizontal [degrees]` and `background_map_fov_vertical [degrees]`: inspect or override
+  background map horizontal and vertical field of view angles independently in degrees.
+- Arrow key tuning: left/right decreases/increases horizontal FOV, down/up decreases/increases vertical FOV,
+  with key-repeat handling and Shift (= 1.0) and Alt (= 0.01) step modifiers.
+- Debug overlay: renders a HUD overlay listing background state, active map name, blur texture name, blur opacity,
+  and horizontal/vertical FOV degrees.
+- Console logging: logs background map loading start and finish (with blur texture and opacity), aspect ratio
+  changes with horizontal/vertical FOV, and gameplay map loading start and finish.
+Full validation suite, architecture guardrails, and Windows cross-target checks pass.
+
+
+
 ## Background map switching and aspect ratio crashes resolved (2026-10-28)
 
 Switching menu background maps at any fixed aspect ratio or after changing aspect ratios no longer crashes.

@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-28 Feature: background visual debug mode console commands and overlay
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** Add console commands `background_debug_mode 0|1`, `background_blur_opacity 0..100`,
+`background_map_fov_horizontal [degrees]`, and `background_map_fov_vertical [degrees]`. In `crates/hl2-ui`,
+implement command handlers, console state tracking, semi-transparent blur drawing at `background_blur_opacity`
+during background display, and shared `draw_debug_lines_panel` for debug overlays. In `crates/hl2-bevy`,
+add `background_debug` module for camera FOV calculation and debug overlay formatting, route arrow key tuning
+(reusing viewmodel debug repeat logic with Shift/Alt step modifiers), override background camera projection
+with independent horizontal/vertical FOV angles, detect and log aspect ratio changes, log background and
+gameplay map transition stages to the console, and enforce mutual exclusivity between background debug and
+viewmodel debug modes on successful activation. Extract `loading::spawn_worker` and `canvas_renderer::draw_debug_overlays`
+to keep function and module sizes within architectural limits, and tighten architecture baselines.
+**Why:** Enable detailed visual and mathematical alignment analysis of chapter background layouts, 3D camera
+field-of-view, and pre-blurred background overlay artwork across diverse display aspect ratios.
+**Tested how:** Validation checks (architecture guardrails, Python tests, cargo test with 1,197 passed,
+strict Clippy, fmt); Windows cross-target check; unit tests for command parsing, mutual exclusivity, arrow key
+adjustments, and aspect change logging.
+**Result:** Background debug mode accurately retains the blur texture over the live 3D background scene at
+the configured opacity, responds to arrow keys for horizontal and vertical FOV adjustments, logs all lifecycle
+and aspect ratio changes to the console, and displays an on-screen debug overlay with active metrics.
+**Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
+**Next:** None in this batch; all requested user tasks complete and verified.
+
+
+
 ## 2026-10-28 Fix: prevent crashes when changing menu background and aspect ratio
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.
