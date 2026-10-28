@@ -1,5 +1,15 @@
 # Local validation — 2026-10-05
 
+## Virtual sequence lookup and raw loaded mapping (2026-10-28)
+
+From this checkout, `C:/Python310/python.exe -B ../../work/hl2-decompiled/actor-virtual-sequences-20261028bs/verify_static.py` passes11 exact unchanged pass14 identities,7 dumpbin windows/723 instruction starts checked against PE bytes,11 selected anchors and2 direct edges. Windows do not establish complete function extents. The optional fresh Ghidra import times out at330 seconds; its diagnostics and zero-record export remain retained. REA closes with open:false/cleanup_pending:false; the temporary recovery setting is reset.
+
+`C:/Python310/python.exe -B ../../work/hl2-decompiled/actor-sequence-content-20261028bt/verify.py` independently verifies5 owned MDLs/1392592 member bytes,1416 offline candidate entries,9 selected descriptors and9 rejection controls. Source directory/archive ranges, CRC/member hashes, includes and duplicate decision remain private. This alone is not a retail-loaded mapping.
+
+`C:/Python310/python.exe -B ../../work/hl2-decompiled/actor-virtual-raw-20261028bw/verify.py` replays3 accepted raw graph samples/201 reads/169128 bytes through the actual collector, compares1416 group/local tuples per sample and admits9 selected tuples/8 cached descriptors against owned checksum/name/label sources. It rejects9 in-memory corruptions, including coherent-hash metadata changes, truncated table, forged output and an empty error key. Two actor acquisitions remain in one tick; the third is excluded from actor-state timing. Root group0 stays uncached; direct-root local0 `ragdoll` is separately read. Root owned44/loaded48 is observed, not a converter trace.
+
+`C:/Python310/python.exe -B ../../work/publishing/seal-research-sequences-20261028.py verify BS BU BV BW` passes37/43/54/46 files and2/9/15/9 external bindings. `C:/Python310/python.exe -B ../../work/hl2-decompiled/actor-sequence-content-20261028bt/seal.py verify` passes8 files/7 external bindings/5 owned member ranges. BU/BV acceptance means intact rejected diagnostic inventories, not successful mapping:1/12 rejected snapshots respectively. All three native games exit0 with six checked installed settings unchanged. The raw title-card screenshot is visually inspected; no actor pose comparison. No Frida attachment, Rust tests/builds or parity test. Document diff, source-whitelist and exact staged-set checks apply. First_map_finished:false; original16 gaps/four missing bodies remain.
+
 ## Selected LookAt registration, passive requests and animation fields (2026-10-27)
 
 From this checkout, `C:/Python310/python.exe -B ../../work/publishing/seal-research-lookat-20261027.py verify BN BO BP BQ` passes closed inventories of46/122/93/18 files,7/15/13/4 external bindings and one bounded installed-content range for BP. It verifies only retained files/ranges; it does not rerun collectors. Historical BJ/BK/BL/BM seals still pass, including the failed BL diagnostic.

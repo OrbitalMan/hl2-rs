@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-28: retail virtual sequence lookup and loaded source mapping
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material subagent owned_sequence_candidates independently checked owned-model candidate order and descriptors, same exposed family; exact identifier unavailable. Claude owns Rust implementation.
+
+**Changed / Why:** Continued the explicit research handoff by resolving the selected citizen's base sequence IDs through actual retail virtual group/local lookup. Kept native bodies, owned model reads, raw captures and failed diagnostics private. Replaced the twice-failed content-coupled passive collector with content-independent raw acquisition and offline checksum/name admission. Public changes are five documentation files.
+
+**Tested how / Result:** Static verification passes11 exact pass14 bodies,7 PE-bound disassembly windows/723 instruction starts/11 anchors. Owned-file checks pass5 MDLs/1392592 member bytes/1416 candidate entries/9 selected descriptors/9 rejection controls. Fresh raw verification passes3 stable graphs/201 reads/169128 bytes,1416 tuple comparisons per graph,9 selected group/local pairs and8 cached descriptor labels, plus9 corruption controls. Two actor samples stay in one tick; one tick-crossing actor sample is excluded from timing. BS/BT/BU/BV/BW seals pass37/8/43/54/46 retained files. Three owned native games exit0/settings unchanged; REA/readers close and owned process inventory is empty. Document diff/whitelist/staged-set checks apply; no Rust build.
+
+**Still broken or not tested / Next:** Root group0 remains uncached; direct-root `ragdoll` and loaded48/owned44 headers are separate witnesses, not ragdoll playback or a converter invocation trace. Only base402 is observed during this fresh window; other selected IDs are table lookups for earlier BP observations. Full table tuple agreement does not admit every clip/source or final pose. BU's uncached-root assumption and BV's alphabetical-order mistake/empty-error repetition remain rejected. Optional fresh Ghidra import times out at330 seconds with no fresh dossier agreement. Screenshot shows title card only. Original16 gaps/four missing scene bodies, overlay/flex/root/final pose, full AV/transfer and Rust parity remain open; first_map_finished:false. Next bind retail overlay/gesture records and animation source before an endline layer capture. Private checkpoint research-followup-continuation-20261028bw.md.
+
 ## 2026-10-27: retail LookAt registration and passive animation-state admission
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents. Claude owns Rust implementation.

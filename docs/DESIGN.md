@@ -1,5 +1,13 @@
 # Design
 
+## Research plan: retail virtual sequence source mapping (2026-10-28)
+
+Resolve the nine base sequence IDs retained in the selected citizen's passive opening capture. Bind retail sequence lookup, virtual group/local-index selection and included-header access with exact pass14 identities and independent PE bytes. Read the selected owned model and its include dependencies in place, preserving source ranges and hashes. Keep an offline reconstruction distinct from an actual loaded virtual table; admit a runtime clip identity only with a guarded raw table/header witness. Preserve missing lookups and rejected assumptions in a new private root. Overlay, flex, root motion, final pose and Rust parity remain separate questions.
+
+After two failed passive diagnostics, stop coupling content interpretation to live acquisition. Collect a bounded raw graph using the byte-bound retail layout, retain uncached groups explicitly, and resolve captured headers offline by checksum/name. The content inventory's alphabetical order is not virtual group order. Treat any error key as failure even when its assertion text is empty; cap consecutive tick-race exclusions separately. Synthetic controls must use independently ordered metadata so the same mistaken assumption cannot pass both collector and fixture.
+
+Outcome: the independent BW raw graph verifies all nine selected group/local pairs and eight cached descriptors against owned content. The direct root descriptor is a separate witness while its group cache is null. Three graphs agree with the1416-entry candidate pattern; one tick-crossing actor acquisition is excluded from timing. Owned root version44 versus loaded48 is an observed header difference, not a traced conversion. Next bind overlay/gesture source and record layout before passive layer/flex measurement. No final-pose or Rust implementation conclusion follows from base sequence labels.
+
 ## Research plan: selected retail LookAt and animation-state admission (2026-10-27)
 
 The callback follow-up is bounded to one authored endline LookAt. First bind its actual scene/actor virtual targets and conditional event insertion using exact retail bodies/bytes. Validate the additional function-entry observer against deterministic generation/call/raw-vector controls before native load. Trace insertion and attention-request mutations, then corroborate selected state in a fresh never-attached process. Keep callback execution, successful registration, request generation and final gaze as separate claims.

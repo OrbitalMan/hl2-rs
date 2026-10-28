@@ -1,5 +1,15 @@
 # Sources and native research
 
+## Retail virtual sequence source witnesses (2026-10-28)
+
+Exact retail bodies and independent PE bytes bind the selected citizen's base-animation header wrapper, virtual group/local-index lookup and cached-header descriptor access. A separate owned-file replay covers the root model and four includes, with1416 candidate entries and one retained duplicate-label decision. This offline replay remains a reference until corroborated by actual loaded state.
+
+Fresh passive BW supplies three raw graphs with all1416 actual group/local pairs matching the candidate pattern. The nine IDs retained in BP agree; eight selected cached descriptors resolve to the expected idle, train-standing/exit, luggage idle/walk/drop, walking and break-room sequences. This run observes actual base402; it does not replay the other animations. ID0's group0/local0 tuple is observed, while its group header remains uncached. An independent direct-root descriptor reads `ragdoll`; BP's early initialization0 does not establish ragdoll playback. Group4 is also uncached, so agreement on tuple structure is not admission of every model/clip identity.
+
+Actual loaded root version48 and owned version44 share checksum/name. No full-byte equivalence or converter execution is asserted. Capture verification replays ordered source reads through the actual collector, checks bracketed graph stability and rejects nine corruptions. One tick-crossing acquisition is excluded from actor-state timing. The screenshot shows the opening title card and supplies no actor-pose comparison.
+
+BU's uncached-root assumption and BV's sorted-content/group-order confusion remain sealed failed diagnostics. BV's empty assertion message bypassed its failure break and produced12 rejected snapshots; none are promoted. BW instead collects content-independent raw data and joins identities offline. A fresh optional Ghidra import timed out; there is no new dossier/extent agreement. All owned runs close normally with checked settings unchanged. Native assets/code/tools remain private; no Rust edits/builds, overlay/flex/root/final-pose parity or ordinary campaign completion. First_map_finished:false.
+
 ## Retail LookAt registration and measured base state (2026-10-27)
 
 The selected endline LookAt on an inactive authored channel reaches actual actor registration, not just callback lookup. Exact retail virtual targets and on-demand bodies bind event construction, conditional insertion, processing and player-directed attention-request storage. An instrumented run observes nonzero registration returns, scene-event count 5 -> 6 and 27 nested processing/request updates with raw stored values matching call arguments. Final post-tail state no longer contains the selected scene-event record. This is one observed event, not a universal rule for inactive actors/channels or a final gaze result.

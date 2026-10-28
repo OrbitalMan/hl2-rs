@@ -1,5 +1,21 @@
 # STATUS
 
+## Retail virtual sequence mapping and fresh raw graph (2026-10-28)
+
+The selected citizen's nine retained base sequence IDs now have actual retail virtual group/local-index witnesses. A fresh never-attached passive capture admits eight cached descriptors and their labels against owned model files. The remaining ID0 maps to group0/local0, whose cache slot is empty; the independently read direct-root header contains local0 `ragdoll`. Do not turn the earlier initialization value0 into ragdoll playback or treat the direct-root read as a filled group-cache witness.
+
+Three stable raw graphs pass201 source reads/169128 bytes and1416 group/local tuple comparisons per graph. Two actor-state acquisitions remain within one tick; one tick-crossing actor sample is excluded from timing. Base sequence402 is observed in this run; other selected IDs come from the earlier BP capture and are table lookups here. Loaded root header version48 matches checksum/name of owned version44 bytes; converter invocation and complete conversion semantics are not traced. The retained screenshot is an opening title card, not pose evidence.
+
+Static lookup verification passes11 exact pass14 bodies,7 independent PE-bound dumpbin windows/723 instruction starts,11 anchors/two direct edges. Separate BT reads five owned MDLs and reconstructs1416 candidate entries with one duplicate-label decision. All nine selected group/local pairs agree with the fresh table; only eight selected cached descriptors are admitted. Nine actual-capture corruption controls pass. BS/BT/BU/BV/BW seals pass37/8/43/54/46 retained files; BU/BV remain rejected diagnostics below. All three owned native processes exit0/settings unchanged; readers and REA close, no owned game/Ghidra process remains. No Rust edits/builds or parity test.
+
+Private checkpoint: work/publishing/research-followup-continuation-20261028bw.md. Next bind actual retail overlay/gesture record layout and animation-source indices before a new endline layer/flex capture. Base selection is not layered animation or final pose. First_map_finished:false; original16 gaps/four missing scene bodies and full audiovisual/camera/transfer fidelity remain open.
+
+## Virtual sequence follow-up: rejected collector assumptions (2026-10-28)
+
+Two fresh passive diagnostic runs stop without an accepted mapping witness. BU rejects an empty root-group header-cache slot. BV separates that slot from the direct root header but then rejects a valid shared-model header because its verifier confuses an alphabetically sorted content list with virtual group order. A blank AssertionError string also bypasses the intended break and repeats 12 rejected snapshots within BV; none are accepted. Both owned games exit 0 with checked installed settings unchanged. Preserve both roots and stop this collector/verifier approach.
+
+The materially different BW approach subsequently passes by collecting the bounded raw virtual/header graph independently of content-list ordering, then verifying header checksum/name and group/local descriptors offline. Exact pass14 lookup bodies and independent PE byte checks remain valid. Optional fresh Ghidra import times out at330 seconds, with diagnostics retained and session closed; no fresh dossier agreement is claimed. No Rust edits/builds; first_map_finished:false.
+
 ## Retail LookAt registration, request updates and base-animation fields (2026-10-27)
 
 The selected endline LookAt from an authored inactive channel does more than enter a callback: the instrumented native trace observes successful actor/base registration, an actor scene-event vector growing 5 -> 6, and 27 processing calls with nested player-directed attention-request updates. Stored target handles, timing, ramp and importance match raw call inputs. The selected scene-event record is absent in the final post-tail snapshot. This establishes registration and requests for this event; final eye/head pose, gaze arbitration and general inactive-channel policy remain untested.
