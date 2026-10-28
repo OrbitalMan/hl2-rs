@@ -288,3 +288,55 @@ fn mouse_options_dynamic_enabling_and_draft_update() {
     assert!(is_enabled("AutoaimScale"));
     assert!(is_enabled("AutoaimScaleLabel"));
 }
+
+#[test]
+fn options_occluders_only_active_when_settled_and_not_closing() {
+    let mut h = Harness::new();
+    let sub_rect = Rect::new(10., 10., 100., 100.);
+    let confirm_rect = Rect::new(20., 20., 50., 50.);
+    let sub = Some(sub_rect);
+    let confirm = Some(confirm_rect);
+    let external = [Rect::new(30., 30., 40., 40.)];
+
+    // Settled with full alpha: both sub and confirm occlude
+    h.dialog.sub_alpha = 1.0;
+    h.dialog.confirm_alpha = 1.0;
+    h.dialog.closing_sub = None;
+    h.dialog.closing_confirm = None;
+    let occ = h.dialog.dialog_occluders(sub, confirm, &external);
+    assert_eq!(occ.len(), 3);
+    assert_eq!(occ[0], sub_rect);
+    assert_eq!(occ[1], confirm_rect);
+    assert_eq!(occ[2], external[0]);
+
+    // Subdialog closing or fading out: sub occluder is suppressed
+    h.dialog.closing_sub = Some(Sub::Gamma);
+    let occ = h.dialog.dialog_occluders(sub, confirm, &external);
+    assert_eq!(occ.len(), 2);
+    assert_eq!(occ[0], confirm_rect);
+    assert_eq!(occ[1], external[0]);
+
+    // Subdialog fading (alpha < 0.999): sub occluder is suppressed
+    h.dialog.closing_sub = None;
+    h.dialog.sub_alpha = 0.5;
+    let occ = h.dialog.dialog_occluders(sub, confirm, &external);
+    assert_eq!(occ.len(), 2);
+
+    // Confirm box closing or fading: confirm occluder is suppressed
+    h.dialog.sub_alpha = 1.0;
+    h.dialog.closing_confirm = Some(MessageBox::new(
+        String::new(),
+        String::new(),
+        String::new(),
+        None,
+    ));
+    let occ = h.dialog.dialog_occluders(sub, confirm, &external);
+    assert_eq!(occ.len(), 2);
+    assert_eq!(occ[0], sub_rect);
+
+    h.dialog.closing_confirm = None;
+    h.dialog.confirm_alpha = 0.8;
+    let occ = h.dialog.dialog_occluders(sub, confirm, &external);
+    assert_eq!(occ.len(), 2);
+    assert_eq!(occ[0], sub_rect);
+}

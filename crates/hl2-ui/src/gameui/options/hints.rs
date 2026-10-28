@@ -163,4 +163,25 @@ impl OptionsDialog {
             );
         }
     }
+
+    pub(super) fn dialog_occluders(
+        &self,
+        sub: Option<Rect>,
+        confirm: Option<Rect>,
+        external: &[Rect],
+    ) -> Vec<Rect> {
+        let mut occluders = Vec::with_capacity(2 + external.len());
+        if self.closing_sub.is_none() && self.sub_alpha >= 0.999 {
+            if let Some(r) = sub {
+                occluders.push(r);
+            }
+        }
+        if self.closing_confirm.is_none() && self.confirm_alpha >= 0.999 {
+            if let Some(r) = confirm {
+                occluders.push(r);
+            }
+        }
+        occluders.extend_from_slice(external);
+        occluders
+    }
 }

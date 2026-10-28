@@ -2184,18 +2184,9 @@ impl OptionsDialog {
         p.frame_background(&spec);
 
         // 2. Push occluders for Options content: any subdialog, confirmation, or external window on top.
-        let mut pushed_options_occluders = 0;
-        if let Some(bounds) = sub_bounds {
+        let occluders = self.dialog_occluders(sub_bounds, confirm_bounds, external_occluders);
+        for &bounds in &occluders {
             base.canvas.push_occluder(bounds);
-            pushed_options_occluders += 1;
-        }
-        if let Some(bounds) = confirm_bounds {
-            base.canvas.push_occluder(bounds);
-            pushed_options_occluders += 1;
-        }
-        for occ in external_occluders {
-            base.canvas.push_occluder(*occ);
-            pushed_options_occluders += 1;
         }
 
         // 3. Draw Options foreground (title, close button) and content.
@@ -2274,7 +2265,7 @@ impl OptionsDialog {
         }
 
         // Pop Options content occluders before drawing subdialog on top.
-        for _ in 0..pushed_options_occluders {
+        for _ in 0..occluders.len() {
             base.canvas.pop_occluder();
         }
 
@@ -2302,14 +2293,9 @@ impl OptionsDialog {
             sp.frame_background(&sub_spec);
 
             // Push occluders for subdialog content (if confirm box or external window is open).
-            let mut pushed_sub_occluders = 0;
-            if let Some(bounds) = confirm_bounds {
+            let sub_occluders = self.dialog_occluders(None, confirm_bounds, external_occluders);
+            for &bounds in &sub_occluders {
                 base.canvas.push_occluder(bounds);
-                pushed_sub_occluders += 1;
-            }
-            for occ in external_occluders {
-                base.canvas.push_occluder(*occ);
-                pushed_sub_occluders += 1;
             }
 
             sp.frame_foreground(
@@ -2347,7 +2333,7 @@ impl OptionsDialog {
                 self.draw_combo(&sp);
             }
 
-            for _ in 0..pushed_sub_occluders {
+            for _ in 0..sub_occluders.len() {
                 base.canvas.pop_occluder();
             }
 

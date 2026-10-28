@@ -186,7 +186,7 @@
   "crates/hl2-simulation/src/projectiles.rs": 1219,
   "crates/hl2-simulation/src/sounds.rs": 1208,
   "crates/hl2-ui/src/closecaption.rs": 1182,
-  "crates/hl2-ui/src/gameui/options.rs": 2694,
+  "crates/hl2-ui/src/gameui/options.rs": 2680,
   "crates/hl2-ui/src/hud.rs": 1827,
   "crates/source-assets/src/models.rs": 1426,
   "crates/source-ui/src/console/panel.rs": 1105,
@@ -443,7 +443,7 @@
    129
   ],
   "crates/hl2-ui/src/gameui/options.rs::draw_with_occluders": [
-   270
+   256
   ],
   "crates/hl2-ui/src/gameui/options.rs::focus_keys": [
    172

@@ -27,10 +27,13 @@ impl Console {
         for (idx, &window) in active_windows.iter().enumerate() {
             let mut occluders = Vec::new();
             for &above in &active_windows[idx + 1..] {
+                if !self.window_occludes(above, time) {
+                    continue;
+                }
                 match above {
                     Window::Console => occluders.push(self.window_bounds(Window::Console)),
                     Window::Options | Window::NewGame => occluders.push(self.window_bounds(above)),
-                    Window::Confirmation => {
+                    Window::Confirmation if self.closing_confirm_box.is_none() => {
                         if let Some(bounds) = quit_bounds {
                             occluders.push(bounds);
                         }
@@ -113,5 +116,10 @@ impl Console {
             self.canvas.pop_occluder();
         }
         self.canvas.set_alpha_multiplier(old_alpha);
+    }
+
+    fn window_occludes(&self, window: Window, time: f64) -> bool {
+        !self.shell.windows.is_closing(window)
+            && self.shell.windows.window_composite_alpha(window, time) >= 0.999
     }
 }

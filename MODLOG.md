@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-28 Fix: suppress occlusion clipping during subdialog and window fade-out
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** Suppress pushing canvas occluders for subdialogs, confirmation boxes, and
+overlay windows (Options, Console, Confirmation) whenever the overlying element is closing
+or translucent (composite alpha < 0.999). Extract dialog occluder collection in Options to
+avoid code growth and tighten baseline line limits. Add unit tests verifying occluder suppression
+during fade-out and closing states.
+**Why:** Pushing an opaque occluder for a closing or fading element clipped underlying dialog
+geometry prematurely. When the element was translucent during fade-out, the occluded region
+appeared as a missing hole that abruptly snapped back to full visibility upon animation completion.
+**Tested how:** validate.sh (1,191 Rust pass, 100 ignored; 27 Python, strict Clippy/fmt/
+architecture); check_windows.sh passes. Unit test verifies occluders are pushed only when
+settled and opaque, and suppressed during closing/fading states.
+**Result:** Underlying dialog geometry renders smoothly behind fading overlays with no visual
+snapping or occluded clipping holes.
+**Still broken or not tested:** Developer console input font and unfocused dialog button hover/click behavior.
+**Next:** Developer console input font and caret positioning fix.
+
+
 ## 2026-10-28 Fix: isolate authored background projection from gameplay FOV
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. No subagents.

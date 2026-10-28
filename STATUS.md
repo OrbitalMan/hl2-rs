@@ -1,5 +1,15 @@
 # STATUS
 
+## Subdialog and window fade-out occlusion snapping resolved (2026-10-28)
+
+Canvas occluders are only registered for overlay windows, subdialogs, and confirmation boxes
+when the overlying layer is active, not closing, and fully opaque (alpha >= 0.999). During
+fade-out animations, underlying dialog content remains unclipped and visible through translucent
+overlays, eliminating premature occlusion holes and visual popping upon completion.
+Full validation (1,191 Rust / 100 ignored, 27 Python), Windows-target checks and architecture
+pass with baseline tightening.
+
+
 ## Background projection policy corrected (2026-10-28)
 
 Supersedes the previous saved-FOV handoff workaround: menu projection is fixed to the authored
