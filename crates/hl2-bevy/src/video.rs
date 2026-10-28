@@ -1089,28 +1089,24 @@ pub(crate) fn suspend_for_resize(
     let Some(mut frame) = frame else {
         return;
     };
-    let image_size = images.get(&frame.image).map(Image::size);
-    if frame.suspended == 0 && image_size.is_some_and(|size| size != frame.resolution) {
-        debug!(
-            "[video] frame resize {image_size:?} -> {}: suspending rendering",
-            frame.resolution
-        );
+    let size = images.get(&frame.image).map(Image::size);
+    if frame.suspended == 0 && size.is_some_and(|s| s != frame.resolution) {
         frame.suspended = SUSPEND_FRAMES;
     }
     if frame.suspended == 0 {
         for (entity, mut camera, suspended) in &mut cameras {
             if let Some(SuspendedCamera(was_active)) = suspended {
                 camera.is_active = *was_active;
-                commands.entity(entity).remove::<SuspendedCamera>();
+                if let Ok(mut cmd) = commands.get_entity(entity) {
+                    cmd.remove::<SuspendedCamera>();
+                }
             }
         }
         return;
     }
     for (entity, mut camera, suspended) in &mut cameras {
-        if suspended.is_none() {
-            commands
-                .entity(entity)
-                .insert(SuspendedCamera(camera.is_active));
+        if let (None, Ok(mut cmd)) = (suspended, commands.get_entity(entity)) {
+            cmd.insert(SuspendedCamera(camera.is_active));
         }
         camera.is_active = false;
     }

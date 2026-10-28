@@ -129,7 +129,7 @@ impl Caster {
         control: &ShadowControl,
         down: bool,
     ) -> Option<bool> {
-        let state = &game.scene.states[self.id];
+        let state = game.scene.states.get(self.id)?;
         let (origin, rotation) = sim
             .physics
             .entity_pose(self.id)
@@ -200,7 +200,11 @@ impl Caster {
 /// Whether a caster's parent chain holds another caster (`ShouldUseParentShadow` /
 /// `WillParentRenderBlobbyShadow`: the child projects nothing of its own).
 pub(super) fn under_caster(game: &Gameplay, casters: &[Caster], id: usize) -> bool {
-    let mut at = game.scene.states[id].parent.as_ref().map(|p| p.entity);
+    let mut at = game
+        .scene
+        .states
+        .get(id)
+        .and_then(|s| s.parent.as_ref().map(|p| p.entity));
     let mut depth = 0;
     while let Some(parent) = at
         && depth < 16

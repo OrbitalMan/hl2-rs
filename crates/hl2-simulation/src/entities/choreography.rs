@@ -375,15 +375,12 @@ impl Scene {
     }
 
     pub fn actor_matrices(&self, rig: &modkit_core::animation::Rig, id: usize) -> Vec<glam::Mat4> {
+        let Some(state) = self.states.get(id) else {
+            return rig.matrices("", 0.);
+        };
         let params = self.actor_pose_values(rig, id);
         self.gestures
-            .compose(
-                rig,
-                id,
-                &self.states[id].animation,
-                self.animation_time(id),
-                &params,
-            )
+            .compose(rig, id, &state.animation, self.animation_time(id), &params)
             .0
     }
 
@@ -417,11 +414,12 @@ impl Scene {
                 params[i] = rig.pose_parameters[i].normalize(value);
             }
         }
-        if let (Some(movement), Some(i)) = (
-            self.states[id].movement_animation.as_ref(),
-            rig.pose_parameter("move_yaw"),
-        ) {
-            params[i] = rig.pose_parameters[i].normalize(movement.move_yaw);
+        let move_yaw = self
+            .states
+            .get(id)
+            .and_then(|s| s.movement_animation.as_ref());
+        if let (Some(m), Some(i)) = (move_yaw, rig.pose_parameter("move_yaw")) {
+            params[i] = rig.pose_parameters[i].normalize(m.move_yaw);
         }
         params
     }
@@ -536,17 +534,19 @@ impl Scene {
 
     /// Sequence sampling uses the paused choreography clock, not wall/game time.
     pub fn animation_time(&self, id: usize) -> f32 {
-        let state = &self.states[id];
+        let Some(state) = self.states.get(id) else {
+            return 0.;
+        };
         if let Some(movement) = &state.movement_animation {
             return movement.elapsed;
         }
-        if let Some(animation) = &state.scene_animation {
-            if let Some(scene) = self.choreography.get(&animation.owner) {
-                if let Some(play) = &scene.playback {
-                    return (play.elapsed - scene.data.events[animation.event].start as f64).max(0.)
-                        as f32;
-                }
-            }
+        let event = state.scene_animation.as_ref().and_then(|a| {
+            let scene = self.choreography.get(&a.owner)?;
+            let elapsed = scene.playback.as_ref()?.elapsed;
+            Some((elapsed, scene.data.events[a.event].start))
+        });
+        if let Some((elapsed, start)) = event {
+            return (elapsed - start as f64).max(0.) as f32;
         }
         (self.time - state.animation_started).max(0.) as f32
     }

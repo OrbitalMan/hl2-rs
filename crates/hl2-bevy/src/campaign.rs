@@ -371,6 +371,14 @@ mod tests {
         let initial_scene_entity = app.world_mut().spawn(MapOwned).id();
 
         app.add_systems(Update, poll);
+        app.add_systems(
+            PostUpdate,
+            (
+                crate::rendering::present_entities,
+                crate::sky::present.run_if(resource_exists::<crate::sky::Sky>),
+                crate::effects::present.run_if(resource_exists::<crate::effects::Effects>),
+            ),
+        );
 
         // 1. Initial state assertion
         {
@@ -668,6 +676,14 @@ mod tests {
 
         let initial_scene_entity = app.world_mut().spawn(MapOwned).id();
         app.add_systems(Update, poll);
+        app.add_systems(
+            PostUpdate,
+            (
+                crate::rendering::present_entities,
+                crate::sky::present.run_if(resource_exists::<crate::sky::Sky>),
+                crate::effects::present.run_if(resource_exists::<crate::effects::Effects>),
+            ),
+        );
 
         // Enter Episode Two submenu (row 2: SwitchExpansion ep2)
         let effects = {
@@ -794,6 +810,14 @@ mod tests {
         ));
 
         app.add_systems(Update, poll);
+        app.add_systems(
+            PostUpdate,
+            (
+                crate::rendering::present_entities,
+                crate::sky::present.run_if(resource_exists::<crate::sky::Sky>),
+                crate::effects::present.run_if(resource_exists::<crate::effects::Effects>),
+            ),
+        );
 
         // Run updates until worker fails
         let mut failed = false;

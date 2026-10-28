@@ -67,6 +67,7 @@ impl Skeleton {
             joints.push(
                 commands
                     .spawn((
+                        crate::campaign::MapOwned,
                         Joint,
                         ChildOf(root),
                         Transform::from_matrix(convert(*pose * bone.inverse_bind.inverse(), scale)),
@@ -78,7 +79,12 @@ impl Skeleton {
         binds.push(Mat4::IDENTITY);
         joints.push(
             commands
-                .spawn((Joint, ChildOf(root), Transform::IDENTITY))
+                .spawn((
+                    crate::campaign::MapOwned,
+                    Joint,
+                    ChildOf(root),
+                    Transform::IDENTITY,
+                ))
                 .id(),
         );
         Self {

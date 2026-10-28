@@ -51,7 +51,9 @@ pub fn present_lighting(
             .unwrap_or_default();
         let origin = match lit.entity {
             Some(id) => {
-                let state = &game.scene.states[id];
+                let Some(state) = game.scene.states.get(id) else {
+                    continue;
+                };
                 let (origin, rotation) = sim
                     .physics
                     .entity_pose(id)

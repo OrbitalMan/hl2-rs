@@ -149,6 +149,7 @@ pub fn install(
 }
 pub fn present(
     mut sky: ResMut<Sky>,
+    frame: Option<Res<crate::video::GameFrame>>,
     mut world: Query<(&Transform, &mut Camera, &Projection), With<FlyCamera>>,
     mut backgrounds: Query<
         (&SkyCamera, &mut Transform, &mut Camera, &mut Projection),
@@ -184,6 +185,10 @@ pub fn present(
             && sky_p.fov != world_p.fov
         {
             sky_p.fov = world_p.fov;
+        }
+        if frame.as_ref().is_some_and(|f| f.suspended > 0) {
+            camera.is_active = false;
+            continue;
         }
         camera.is_active = if kind.0 { visible_2d } else { visible_3d };
         camera.clear_color = if !kind.0 && visible_2d {

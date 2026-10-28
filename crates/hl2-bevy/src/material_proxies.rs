@@ -21,10 +21,10 @@ pub fn present(
     let player_center = eye - glam::Vec3::Z * sim.player.eye_height
         + glam::Vec3::Z * if sim.player.crouched { 18. } else { 36. };
     for (draw, handle) in &draws {
-        let center = draw.entity.map_or(draw.center, |id| {
-            let state = &game.scene.states[id];
-            state.origin + state.rotation * draw.center
-        });
+        let center = draw
+            .entity
+            .and_then(|id| game.scene.states.get(id))
+            .map_or(draw.center, |s| s.origin + s.rotation * draw.center);
         let frames = draw.frames.sample(
             center.distance(player_center),
             [draw.base.len(), draw.second.len()],

@@ -20,14 +20,18 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) mod drawing;
 mod lighting;
 pub(crate) mod lod;
+mod map_draw;
 mod material;
 pub use lighting::present_lighting;
 pub use material::MaterialKey;
 mod model_cache;
+mod runtime;
+use map_draw::{MapDrawContext, insert_map_draw_components};
 use material::{alpha_mode, cube_image_filtered, image_filtered, mip_image_filtered};
 pub(crate) use material::{black_cube, fallback_images, image, make_material, sampler_descriptor};
 pub use model_cache::ModelCache;
 use model_cache::strip_pixels;
+pub use runtime::{despawn_killed_runtime_draws, spawn_runtime_draws};
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 #[bind_group_data(MaterialKey)]
@@ -390,7 +394,10 @@ impl AnimatedMesh {
     }
 }
 /// A private copy of an asset (a mesh or material an entity changes on its own).
-fn copy_asset<A: Asset + Clone>(assets: &mut Assets<A>, handle: &Handle<A>) -> Option<Handle<A>> {
+pub(crate) fn copy_asset<A: Asset + Clone>(
+    assets: &mut Assets<A>,
+    handle: &Handle<A>,
+) -> Option<Handle<A>> {
     let copy = assets.get(handle)?.clone();
     Some(assets.add(copy))
 }
@@ -427,7 +434,9 @@ pub(crate) fn draw_hidden(
     id: usize,
     weapon: Option<&NpcWeaponDraw>,
 ) -> bool {
-    let s = &game.scene.states[id];
+    let Some(s) = game.scene.states.get(id) else {
+        return true;
+    };
     !s.visible
         || s.killed
         || weapon.is_some_and(|w| {
@@ -458,7 +467,10 @@ pub fn present_entities(
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "animation");
     for (owner, mut transform, mut visibility, weapon) in &mut entities {
-        let state = &game.scene.states[owner.0];
+        let Some(state) = game.scene.states.get(owner.0) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
         let (origin, rotation) = sim
             .physics
             .entity_pose(owner.0)
@@ -467,10 +479,10 @@ pub fn present_entities(
         if *transform != pose {
             *transform = pose;
         }
-        let visible = if !draw_hidden(&game, owner.0, weapon) {
-            Visibility::Inherited
-        } else {
+        let visible = if draw_hidden(&game, owner.0, weapon) {
             Visibility::Hidden
+        } else {
+            Visibility::Inherited
         };
         if *visibility != visible {
             *visibility = visible;
@@ -486,64 +498,18 @@ pub fn present_entities(
             continue;
         };
         // Facial flexes deform the bind positions before skinning (both GPU and CPU paths).
-        if let (Some(id), Some(model)) = (
-            animation.entity,
-            flex_models
-                .as_deref()
-                .and_then(|f| f.0.get(&animation.key))
-                .filter(|_| !animation.flex.is_empty()),
-        ) {
-            let values = game.scene.actor_flex_values(id);
-            let weights = model.descriptor_weights(&values, |eye| {
-                eyes.as_deref()
-                    .and_then(|e| e.lid_bases.get(&(id, eye.surface)))
-                    .copied()
-            });
-            let signature = flex_signature(&weights);
-            if signature != animation.flex_signature {
-                let deltas = model.flex.vertex_deltas(&weights);
-                let scale = animation.scale;
-                let mut changed = Vec::new();
-                let anim = &mut *animation;
-                for (i, key) in anim.flex.iter().enumerate() {
-                    let Some(key) = key else {
-                        continue;
-                    };
-                    let target =
-                        anim.flex_base[i] + deltas.get(key).copied().unwrap_or(glam::Vec3::ZERO);
-                    if anim.bind[i].0 != target {
-                        anim.bind[i].0 = target;
-                        changed.push(i);
-                    }
-                }
-                anim.flex_signature = signature;
-                if !changed.is_empty() {
-                    if anim.gpu.is_some() {
-                        if let Some(mut mesh) = meshes.get_mut(&handle.0)
-                            && let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
-                                mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
-                        {
-                            for &i in &changed {
-                                if let Some(p) = positions.get_mut(i) {
-                                    *p = source_to_bevy(Vec3::from_array(
-                                        (anim.bind[i].0 * scale).to_array(),
-                                    ))
-                                    .to_array();
-                                }
-                            }
-                        }
-                    } else {
-                        // Force the CPU skinning path to rebuild from the deformed bind.
-                        anim.sampled = None;
-                    }
-                }
-            }
-        }
+        apply_facial_flexes(
+            &mut animation,
+            handle,
+            &mut meshes,
+            &game,
+            flex_models.as_deref(),
+            eyes.as_deref(),
+        );
         let (clip, key) = if let Some(id) = animation.entity {
-            let state = &game.scene.states[id];
-            if !state.visible || state.killed {
+            let Some(state) = game.scene.states.get(id).filter(|s| s.visible && !s.killed) else {
                 continue;
-            }
+            };
             let clip = state.animation.as_str();
             let time = game.scene.animation_time(id);
             let Some(definition) = rig.clips.get(clip) else {
@@ -645,6 +611,70 @@ pub fn present_entities(
         }
     }
 }
+
+fn apply_facial_flexes(
+    animation: &mut AnimatedMesh,
+    handle: &Mesh3d,
+    meshes: &mut Assets<Mesh>,
+    game: &crate::gameplay::Gameplay,
+    flex_models: Option<&FlexModels>,
+    eyes: Option<&crate::eyes::Eyes>,
+) {
+    let (Some(id), Some(model)) = (
+        animation.entity,
+        flex_models
+            .and_then(|f| f.0.get(&animation.key))
+            .filter(|_| !animation.flex.is_empty()),
+    ) else {
+        return;
+    };
+    let values = game.scene.actor_flex_values(id);
+    let weights = model.descriptor_weights(&values, |eye| {
+        eyes.and_then(|e| e.lid_bases.get(&(id, eye.surface)))
+            .copied()
+    });
+    let signature = flex_signature(&weights);
+    if signature == animation.flex_signature {
+        return;
+    }
+    let deltas = model.flex.vertex_deltas(&weights);
+    let scale = animation.scale;
+    let mut changed = Vec::new();
+    for (i, key) in animation
+        .flex
+        .iter()
+        .enumerate()
+        .filter_map(|(i, k)| k.as_ref().map(|k| (i, k)))
+    {
+        let target = animation.flex_base[i] + deltas.get(key).copied().unwrap_or(glam::Vec3::ZERO);
+        if animation.bind[i].0 != target {
+            animation.bind[i].0 = target;
+            changed.push(i);
+        }
+    }
+    animation.flex_signature = signature;
+    if changed.is_empty() {
+        return;
+    }
+    if animation.gpu.is_some() {
+        let mut mesh = meshes.get_mut(&handle.0);
+        let positions = mesh
+            .as_deref_mut()
+            .and_then(|m| m.attribute_mut(Mesh::ATTRIBUTE_POSITION));
+        if let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) = positions {
+            for &i in &changed {
+                if let Some(p) = positions.get_mut(i) {
+                    *p = source_to_bevy(Vec3::from_array((animation.bind[i].0 * scale).to_array()))
+                        .to_array();
+                }
+            }
+        }
+    } else {
+        // Force the CPU skinning path to rebuild from the deformed bind.
+        animation.sampled = None;
+    }
+}
+
 /// Rotate a bind normal by the weighted bone matrices (CPU skinning path).
 fn skin_normal(
     normal: glam::Vec3,
@@ -1205,17 +1235,17 @@ pub fn spawn_map_filtered(
         // CPU assets retain bounds and eye projection data; GPU skinning keeps their positions immutable.
         let animated = animation.is_some() || irises.contains_key(&name);
         let mut mesh = batch.mesh();
-        if let Some(animation) = &animation
-            && let Some(skeleton) = &animation.gpu
-        {
-            skeleton.attributes(&mut mesh, &animation.bind);
+        if let Some(skeleton) = animation.as_ref().and_then(|a| a.gpu.as_ref()) {
+            skeleton.attributes(&mut mesh, &animation.as_ref().unwrap().bind);
         }
         if animated {
             mesh.asset_usage = RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD;
         }
-        let transform = owner.entity().map_or(Transform::IDENTITY, |id| {
-            let state = &loaded.gameplay.scene.states[id];
-            entity_transform(state.origin, state.rotation)
+        let state = owner
+            .entity()
+            .and_then(|id| loaded.gameplay.scene.states.get(id));
+        let transform = state.map_or(Transform::IDENTITY, |s| {
+            entity_transform(s.origin, s.rotation)
         });
         let handle = meshes.add(mesh);
         let mut draw = commands.spawn((
@@ -1225,96 +1255,17 @@ pub fn spawn_map_filtered(
             MeshMaterial3d(material),
             transform,
         ));
-        if matches!(owner, Owner::SkyWorld)
-            || owner
-                .entity()
-                .is_some_and(|id| world.background_entities.contains(&id))
-        {
-            draw.insert(bevy::camera::visibility::RenderLayers::layer(4));
-        }
-        if matches!(
-            &owner,
-            Owner::World | Owner::Entity(_) | Owner::NpcWeapon(..)
-        ) && !owner
-            .entity()
-            .is_some_and(|id| world.background_entities.contains(&id))
-        {
-            draw.insert((
-                crate::visibility::PvsDraw::default(),
-                DrawTriangles(triangles),
-            ));
-        }
-        if definition.camera {
-            draw.insert(crate::monitors::MonitorMaterial {
-                name: name.clone(),
-                animation: definition.camera_animation.clone(),
-                color: definition.tint,
-                color2: definition.camera_color2,
-            });
-            // Avoid sampling a render attachment while drawing into that same attachment.
-            draw.insert(bevy::camera::visibility::RenderLayers::layer(5));
-        }
-        if let Some(textures) = definition.two_texture.as_ref()
-            && let Some((base, second)) = two_textures.get(&name)
-        {
-            let center = owner
-                .entity()
-                .and_then(|id| world.entities[id].get("model"))
-                .and_then(|model| model.strip_prefix('*'))
-                .and_then(|id| id.parse::<usize>().ok())
-                .and_then(|id| world.brush_models.iter().find(|m| m.id == id))
-                .map_or(glam::Vec3::ZERO, |model| (model.mins + model.maxs) * 0.5);
-            draw.insert(crate::material_proxies::TwoTextureDraw {
-                entity: owner.entity(),
-                center,
-                frames: textures.frames.clone(),
-                scroll: textures.scroll.clone(),
-                base: base.clone(),
-                second: second.clone(),
-            });
-        }
-        if let Owner::NpcWeapon(_, key) = &owner {
-            draw.insert(NpcWeaponDraw(key.clone()));
-        }
-        if let Some(id) = owner.entity() {
-            draw.insert(SourceEntity(id));
-            if let Some(instance) = world.model_instances.iter().find(|i| i.entity == Some(id))
-                && let Some(eye) = loaded.eyes.get(&(instance.asset_key(), name.clone()))
-            {
-                draw.insert(EyeMesh {
-                    key: instance.asset_key(),
-                    eye: eye.clone(),
-                    scale: instance.scale,
-                });
-            } else if let Some(levels) = lod::levels_for_draw(
-                world,
-                id,
-                &name,
-                definition,
-                (&handle, animation.as_ref()),
-                meshes,
-            ) {
-                draw.insert(levels);
-            }
-            let state = &loaded.gameplay.scene.states[id];
-            if !state.visible || state.killed {
-                draw.insert(Visibility::Hidden);
-            }
-        }
-        if let Owner::Weapon(weapon) = &owner {
-            draw.insert((
-                WeaponMesh(weapon.clone()),
-                bevy::camera::visibility::RenderLayers::layer(1),
-                Visibility::Hidden,
-            ));
-            if let Some((skin0, skin1)) = weapon_skins.get(weapon) {
-                if skin1.contains(&name) {
-                    draw.insert(WeaponSkin(1));
-                } else if skin0.contains(&name) {
-                    draw.insert(WeaponSkin(0));
-                }
-            }
-        }
+        let cx = MapDrawContext {
+            owner: &owner,
+            name: &name,
+            triangles,
+            definition,
+            world,
+            loaded,
+            two_textures: &two_textures,
+            weapon_skins: &weapon_skins,
+        };
+        insert_map_draw_components(&mut draw, &cx, &handle, animation.as_ref(), meshes);
         if lit {
             let (entity, key, scale) = match &owner {
                 Owner::Entity(id) => {
@@ -1387,204 +1338,7 @@ pub fn spawn_map_filtered(
         missing,
     });
 }
-type TemplateDraw<'a> = (
-    &'a SourceEntity,
-    &'a Mesh3d,
-    &'a MeshMaterial3d<SourceMaterial>,
-    Option<&'a Name>,
-    Option<&'a bevy::camera::visibility::RenderLayers>,
-    Option<&'a DrawTriangles>,
-    Option<&'a NpcWeaponDraw>,
-    Option<&'a EyeMesh>,
-    Option<&'a ModelLit>,
-    Option<&'a AnimatedMesh>,
-    Has<crate::visibility::PvsDraw>,
-    Option<&'a lod::ModelLevels>,
-);
-/// Runtime spawns (DESIGN 14r part A): build the new entity's draws from its template's
-/// draws built at map load. Static GPU-skinned meshes are shared; meshes the CPU
-/// rewrites per entity (flex faces, eyes, CPU skinning) and lit materials (per-entity
-/// light state) are copied; the entity gets its own skeleton and its weapons are
-/// bone-merged onto it.
-/// Killed runtime entities (NPCs, props, dropped weapons) never come back: their hidden
-/// draws (model roots with their joints, meshes) are despawned once instead of staying
-/// until the map changes. Map entities keep theirs (scripts may show them again).
-pub fn despawn_killed_runtime_draws(
-    mut commands: Commands,
-    mut game: ResMut<crate::gameplay::Gameplay>,
-    draws: Query<(Entity, &SourceEntity)>,
-) {
-    let game = &mut *game;
-    let killed: std::collections::BTreeSet<usize> = game
-        .runtime_entities
-        .iter()
-        .copied()
-        .filter(|id| {
-            game.scene.states.get(*id).is_some_and(|s| s.killed)
-                && !game.despawned_draws.contains(id)
-        })
-        .collect();
-    if killed.is_empty() {
-        return;
-    }
-    for (entity, source) in &draws {
-        if killed.contains(&source.0) {
-            commands.entity(entity).despawn();
-        }
-    }
-    game.despawned_draws.extend(killed);
-}
-pub fn spawn_runtime_draws(
-    mut commands: Commands,
-    mut game: ResMut<crate::gameplay::Gameplay>,
-    mut eyes: ResMut<crate::eyes::Eyes>,
-    draws: Query<TemplateDraw>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<SourceMaterial>>,
-    mut inverse_binds: ResMut<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
-) {
-    if game.render_spawns.is_empty() {
-        return;
-    }
-    let world = game.world.clone();
-    for (template, id) in std::mem::take(&mut game.render_spawns) {
-        eyes.copy_actor(template, id);
-        let Some(instance) = world.model_instances.iter().find(|i| i.entity == Some(id)) else {
-            continue;
-        };
-        let rig = world
-            .rigs
-            .get(&instance.asset_key())
-            .filter(|rig| !rig.bones.is_empty() && rig.bones.len() < 256);
-        let state = &game.scene.states[id];
-        let transform = entity_transform(state.origin, state.rotation);
-        let mut skeleton: Option<crate::gpu_skinning::Skeleton> = None;
-        let template_draws: Vec<_> = draws.iter().filter(|d| d.0.0 == template).collect();
-        // The body first: bone-merged weapons follow its skeleton.
-        let (body, weapons): (Vec<_>, Vec<_>) =
-            template_draws.into_iter().partition(|d| d.6.is_none());
-        for (
-            _,
-            mesh,
-            material,
-            name,
-            layers,
-            triangles,
-            weapon,
-            eye,
-            lit,
-            animation,
-            pvs,
-            levels,
-        ) in body.into_iter().chain(weapons)
-        {
-            let gpu = match (animation.and_then(|a| a.gpu.as_ref()), weapon) {
-                (None, _) => None,
-                (Some(_), None) => {
-                    let Some(rig) = rig else { continue };
-                    if skeleton.is_none() {
-                        let root = commands
-                            .spawn((
-                                crate::campaign::MapOwned,
-                                Transform::IDENTITY,
-                                Visibility::Inherited,
-                                SourceEntity(id),
-                            ))
-                            .id();
-                        skeleton = Some(crate::gpu_skinning::Skeleton::spawn(
-                            &mut commands,
-                            &mut inverse_binds,
-                            rig,
-                            instance.scale,
-                            root,
-                        ));
-                    }
-                    skeleton.clone()
-                }
-                (Some(_), Some(NpcWeaponDraw(key))) => {
-                    let (Some(owner), Some(owner_rig), Some(weapon_rig)) =
-                        (skeleton.as_ref(), rig, world.rigs.get(key))
-                    else {
-                        continue;
-                    };
-                    Some(crate::gpu_skinning::Skeleton::merged(
-                        &mut inverse_binds,
-                        weapon_rig,
-                        owner_rig,
-                        owner,
-                        instance.scale,
-                    ))
-                }
-            };
-            let private_mesh =
-                eye.is_some() || animation.is_some_and(|a| a.gpu.is_none() || !a.flex.is_empty());
-            let levels = levels.and_then(|l| l.copy_for(&mut meshes, private_mesh));
-            let mesh = match (&levels, private_mesh) {
-                (Some(levels), _) => Some(levels.root()),
-                (None, true) => copy_asset(&mut meshes, &mesh.0),
-                (None, false) => Some(mesh.0.clone()),
-            };
-            let material = match lit {
-                Some(_) => copy_asset(&mut materials, &material.0),
-                None => Some(material.0.clone()),
-            };
-            let (Some(mesh), Some(material)) = (mesh, material) else {
-                continue;
-            };
-            let mut draw = commands.spawn((
-                crate::campaign::MapOwned,
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                transform,
-                SourceEntity(id),
-            ));
-            if let Some(name) = name {
-                draw.insert(name.clone());
-            }
-            if let Some(layers) = layers {
-                draw.insert(layers.clone());
-            }
-            if pvs {
-                draw.insert(crate::visibility::PvsDraw::default());
-            }
-            if let Some(levels) = levels {
-                draw.insert(levels);
-            }
-            if let Some(triangles) = triangles {
-                draw.insert(DrawTriangles(triangles.0));
-            }
-            if let Some(weapon) = weapon {
-                draw.insert(NpcWeaponDraw(weapon.0.clone()));
-            }
-            if let Some(eye) = eye {
-                draw.insert(EyeMesh {
-                    key: eye.key.clone(),
-                    eye: eye.eye.clone(),
-                    scale: eye.scale,
-                });
-            }
-            if let Some(lit) = lit {
-                draw.insert(ModelLit {
-                    entity: Some(id),
-                    key: lit.key.clone(),
-                    scale: lit.scale,
-                    half_lambert: lit.half_lambert,
-                    last: None,
-                    dynamic: false,
-                });
-            }
-            if let Some(animation) = animation {
-                if let Some(skeleton) = &gpu {
-                    draw.insert((
-                        skeleton.component(),
-                        bevy::camera::visibility::DynamicSkinnedMeshBounds,
-                    ));
-                }
-                draw.insert(animation.copy_for(id, gpu));
-            }
-        }
-    }
-}
+
 /// One runtime entity's studio-model draws (DESIGN 14r part B: models loaded after the
 /// map): one mesh per material like the map build's entity batches, lit per entity,
 /// GPU-skinned on its own skeleton when the model has bone weights.

@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-28 Fix: prevent crashes when changing menu background and aspect ratio
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** Guard entity lookups against out-of-bounds entity IDs across `rendering.rs`,
+`eyes.rs`, `monitors.rs`, `material_proxies.rs`, `rendering/lighting.rs`, `shadows/caster.rs`,
+and `choreography.rs` using `.get(id)`. Tag spawned `Joint` entities in `gpu_skinning.rs` with
+`MapOwned` so they are despawned on map unload. Guard `commands.get_entity(entity)` before
+modifying `SuspendedCamera` in `video.rs` and `effects.rs`. Keep `SkyCamera` inactive while
+suspended in `sky.rs`. Clear lingering visual effects on map adoption in `effects.rs`.
+Extract `effects/gibs.rs`, `rendering/map_draw.rs`, and `rendering/runtime.rs` to keep module
+and function sizes within architectural limits. Tighten architecture baseline metrics.
+**Why:** Switching background maps (e.g. from `background01` with ~150 entities to
+`ep1_background01` with ~40 entities) replaces `game.scene.states` with the entity list of the
+new map. Any draw queries or rendering systems referencing entity IDs >= 40 panicked with an
+out-of-bounds indexing error. Furthermore, `gpu_skinning::Skeleton::spawn` spawned `Joint` entities
+without `MapOwned`, leaking orphaned joint hierarchies across map loads. Modifying aspect ratio
+suspends camera rendering, and attempting direct commands on despawned entities during map
+switches caused ECS entity-not-found panics.
+**Tested how:** Local checks (architecture guardrails, Python tests, cargo test with 1,194 passed,
+strict Clippy, fmt); Windows cross-target check; headless menu background switch tests.
+**Result:** Changing aspect ratio and switching menu backgrounds across all aspect ratios
+now functions cleanly without panics, entity leaks, or crashes.
+**Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
+**Next:** None in this batch; all requested user tasks complete and verified.
+
+
+
 ## 2026-10-28 Fix: align menu background blur texture on fit-display aspect ratios
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

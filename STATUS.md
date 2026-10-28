@@ -1,5 +1,19 @@
 # STATUS
 
+## Background map switching and aspect ratio crashes resolved (2026-10-28)
+
+Switching menu background maps at any fixed aspect ratio or after changing aspect ratios no longer crashes.
+When switching background maps, the entity count and states are replaced by the incoming map; unchecked indexing
+into `game.scene.states` across entity presentation, eye tracking, monitors, material proxies, dynamic lighting,
+shadow casting, and choreography has been replaced with safe bounds checking (`.get(id)`). Spawned GPU skinning
+joint entities are now marked with `MapOwned` so they are reliably despawned during map reload rather than leaking
+into subsequent scenes. `SuspendedCamera` entity operations in `video.rs` and effect despawning in `effects.rs` now
+use `commands.get_entity` to prevent entity-not-found panics when camera suspension coincides with map despawning.
+`effects/gibs.rs`, `rendering/map_draw.rs`, and `rendering/runtime.rs` were extracted into submodules, and architecture
+baselines were tightened. Full test suite, architecture guardrails, and Windows checks pass.
+
+
+
 ## Menu background blur texture on fit-display aspect ratios aligned (2026-10-28)
 
 Pre-blurred chapter background textures on fit-display screens (such as MacBook Pro Retina panels at

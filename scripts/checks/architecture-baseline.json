@@ -153,10 +153,8 @@
   "dcf92467b908",
   "dd48df98201b",
   "ddcbe13d013d",
-  "e04f1a9b8481",
   "e0e19226a738",
   "e3d96d75b6b0",
-  "e510baedffee",
   "e8ca7eca78c4",
   "e9e17810ab69",
   "eafac703ec4e",
@@ -170,11 +168,11 @@
  "files": {
   "crates/hl2-bevy/src/assets.rs": 1107,
   "crates/hl2-bevy/src/audio.rs": 1174,
-  "crates/hl2-bevy/src/effects.rs": 1180,
+  "crates/hl2-bevy/src/effects.rs": 1092,
   "crates/hl2-bevy/src/gameplay.rs": 1643,
   "crates/hl2-bevy/src/main.rs": 1101,
-  "crates/hl2-bevy/src/rendering.rs": 1755,
-  "crates/hl2-bevy/src/video.rs": 1191,
+  "crates/hl2-bevy/src/rendering.rs": 1509,
+  "crates/hl2-bevy/src/video.rs": 1187,
   "crates/hl2-simulation/src/ai/default_schedules.rs": 1247,
   "crates/hl2-simulation/src/ai/runtime.rs": 2621,
   "crates/hl2-simulation/src/ai/schedule.rs": 1039,
@@ -218,13 +216,13 @@
    142
   ],
   "crates/hl2-bevy/src/effects.rs::present": [
-   282
+   182
   ],
   "crates/hl2-bevy/src/effects.rs::viewmodel_quads": [
    219
   ],
   "crates/hl2-bevy/src/eyes.rs::present": [
-   287
+   272
   ],
   "crates/hl2-bevy/src/gameplay.rs::player_outcome": [
    101
@@ -254,13 +252,10 @@
    139
   ],
   "crates/hl2-bevy/src/rendering.rs::present_entities": [
-   208
+   165
   ],
   "crates/hl2-bevy/src/rendering.rs::spawn_map_filtered": [
-   657
-  ],
-  "crates/hl2-bevy/src/rendering.rs::spawn_runtime_draws": [
-   151
+   578
   ],
   "crates/hl2-bevy/src/runtime_props.rs::poll": [
    106
