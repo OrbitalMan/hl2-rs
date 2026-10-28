@@ -7,6 +7,7 @@ pub const BACKGROUND_ADJUST_KEYS: &[KeyCode] = &[
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
 ];
+pub const BACKGROUND_OPACITY_KEYS: &[KeyCode] = &[KeyCode::Comma, KeyCode::Period];
 
 /// Derives a readable aspect ratio label (e.g. "16:9", "4:3", "Fit Display").
 pub fn aspect_label(aspect: f32, flexible: bool) -> &'static str {
@@ -40,6 +41,7 @@ pub fn aspect_label(aspect: f32, flexible: bool) -> &'static str {
 pub struct BackgroundDebug {
     pub enabled: bool,
     pub blur_opacity: u8,
+    pub base_blur_opacity: u8,
     pub fov_horizontal: Option<f32>,
     pub fov_vertical: Option<f32>,
     pub state_label: String,
@@ -54,6 +56,7 @@ impl Default for BackgroundDebug {
         Self {
             enabled: false,
             blur_opacity: 50,
+            base_blur_opacity: 50,
             fov_horizontal: None,
             fov_vertical: None,
             state_label: "Ready".to_owned(),
@@ -82,7 +85,7 @@ impl BackgroundDebug {
             format!("state: {}  |  map: {}", self.state_label, self.map_name),
             format!("blur_texture: {}", self.blur_texture_name),
             format!(
-                "blur_opacity: {}%  (background_blur_opacity 0..100)",
+                "blur_opacity: {}%  ([: 0  ]: 100  ,: -1%  .: +1%)",
                 self.blur_opacity
             ),
             format!(
@@ -91,6 +94,55 @@ impl BackgroundDebug {
             ),
             "Shift = 1.0  Alt = 0.01    hold to repeat    background_debug_mode 0".to_owned(),
         ]
+    }
+
+    /// Adjusts blur opacity by 1% step for Comma (decrease) or Period (increase).
+    pub fn adjust_opacity_step(&mut self, fired: &[KeyCode]) -> bool {
+        let mut changed = false;
+        for key in fired {
+            match *key {
+                KeyCode::Comma => {
+                    self.blur_opacity = self.blur_opacity.saturating_sub(1);
+                    self.base_blur_opacity = self.blur_opacity;
+                    changed = true;
+                }
+                KeyCode::Period => {
+                    self.blur_opacity = (self.blur_opacity + 1).min(100);
+                    self.base_blur_opacity = self.blur_opacity;
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        changed
+    }
+
+    /// Sets blur opacity to 0, or toggles back to base blur opacity.
+    pub fn toggle_zero_opacity(&mut self) -> bool {
+        if self.blur_opacity == 0 {
+            self.blur_opacity = if self.base_blur_opacity == 0 {
+                50
+            } else {
+                self.base_blur_opacity
+            };
+        } else {
+            self.blur_opacity = 0;
+        }
+        true
+    }
+
+    /// Sets blur opacity to 100, or toggles back to base blur opacity.
+    pub fn toggle_full_opacity(&mut self) -> bool {
+        if self.blur_opacity == 100 {
+            self.blur_opacity = if self.base_blur_opacity == 100 {
+                50
+            } else {
+                self.base_blur_opacity
+            };
+        } else {
+            self.blur_opacity = 100;
+        }
+        true
     }
 
     /// Adjusts FOV based on fired arrow keys.
@@ -215,7 +267,10 @@ mod tests {
         assert!(lines[0].contains("state: Ready"));
         assert!(lines[0].contains("map: background01"));
         assert!(lines[1].contains("blur_texture: background01_widescreen"));
-        assert!(lines[2].contains("blur_opacity: 50%"));
+        assert_eq!(
+            lines[2],
+            "blur_opacity: 50%  ([: 0  ]: 100  ,: -1%  .: +1%)"
+        );
         assert!(lines[3].contains("fov: horizontal"));
         assert!(lines[3].contains("vertical"));
     }
@@ -237,5 +292,40 @@ mod tests {
             .map(|l| l.text.as_str())
             .unwrap_or_default();
         assert!(log.contains("Changed aspect ratio to 16:9, background FOV is set to"));
+    }
+
+    #[test]
+    fn background_debug_opacity_adjustments_and_toggles() {
+        let mut debug = BackgroundDebug::default();
+        assert_eq!(debug.blur_opacity, 50);
+        assert_eq!(debug.base_blur_opacity, 50);
+
+        // Comma decreases opacity by 1
+        assert!(debug.adjust_opacity_step(&[KeyCode::Comma]));
+        assert_eq!(debug.blur_opacity, 49);
+        assert_eq!(debug.base_blur_opacity, 49);
+
+        // Period increases opacity by 1
+        assert!(debug.adjust_opacity_step(&[KeyCode::Period]));
+        assert_eq!(debug.blur_opacity, 50);
+        assert_eq!(debug.base_blur_opacity, 50);
+
+        // Toggle zero sets to 0
+        assert!(debug.toggle_zero_opacity());
+        assert_eq!(debug.blur_opacity, 0);
+        assert_eq!(debug.base_blur_opacity, 50);
+
+        // Repeated click on zero toggles back to base
+        assert!(debug.toggle_zero_opacity());
+        assert_eq!(debug.blur_opacity, 50);
+
+        // Toggle full sets to 100
+        assert!(debug.toggle_full_opacity());
+        assert_eq!(debug.blur_opacity, 100);
+        assert_eq!(debug.base_blur_opacity, 50);
+
+        // Repeated click on full toggles back to base
+        assert!(debug.toggle_full_opacity());
+        assert_eq!(debug.blur_opacity, 50);
     }
 }

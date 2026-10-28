@@ -81,3 +81,24 @@ fn background_map_fov_commands() {
         .is_empty());
     assert!(console.submit("background_map_fov_vertical 200").is_empty());
 }
+
+#[test]
+fn background_debug_mode_suppresses_menu_arrow_navigation() {
+    let mut console = Console {
+        base: Mode::MainMenu,
+        ..Default::default()
+    };
+    console.main_menu.selection = Some(0);
+    let mut input = source_ui::input::Input::default();
+    input.keys.insert(source_ui::input::Key::Down);
+
+    // When background debug mode is false, Down navigates
+    console.background_debug_mode = false;
+    console.menu_input(&input, false);
+    assert_eq!(console.main_menu.selection, Some(1));
+
+    // When background debug mode is true, Down does not navigate
+    console.background_debug_mode = true;
+    console.menu_input(&input, false);
+    assert_eq!(console.main_menu.selection, Some(1));
+}

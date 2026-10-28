@@ -269,8 +269,7 @@ pub(crate) fn controls(
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut ui: Option<ResMut<crate::ui_host::Console>>,
     mut mouse_filter: Local<hl2_ui::input::MouseFilter>,
-    mut viewmodel_repeat: Local<KeyAdjustRepeat>,
-    mut background_repeat: Local<KeyAdjustRepeat>,
+    mut repeats: Local<DebugRepeats>,
     real_time: Option<Res<Time<Real>>>,
 ) {
     // CGameRules::Think reads `skill` every frame, and weapon selection reads
@@ -297,8 +296,7 @@ pub(crate) fn controls(
         game.as_deref(),
         ui.as_deref_mut(),
         tuning_input,
-        &mut viewmodel_repeat,
-        &mut background_repeat,
+        &mut repeats,
     );
     if !sim.commands.is_empty() {
         return;
@@ -414,6 +412,13 @@ const VIEWMODEL_ADJUST_KEYS: &[KeyCode] = &[
     KeyCode::ArrowRight,
 ];
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct DebugRepeats {
+    pub vm: KeyAdjustRepeat,
+    pub bg_fov: KeyAdjustRepeat,
+    pub bg_opacity: KeyAdjustRepeat,
+}
+
 /// Latest adjust key repeats while held, using the same [`HoldRepeat`] timing as
 /// Options > Keyboard list arrows.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -483,13 +488,16 @@ fn process_debug_tuning_keys(
     game: Option<&crate::gameplay::Gameplay>,
     mut ui: Option<&mut crate::ui_host::Console>,
     input: DebugTuningInput,
-    vm_repeat: &mut KeyAdjustRepeat,
-    bg_repeat: &mut KeyAdjustRepeat,
+    repeats: &mut DebugRepeats,
 ) {
     if sim.loading() || sim.background_level {
         sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
     }
     if !sim.background_level && !sim.loading() {
+        if sim.background_debug.enabled {
+            sim.background_debug.fov_horizontal = None;
+            sim.background_debug.fov_vertical = None;
+        }
         sim.background_debug.enabled = false;
         if let Some(ref mut ui) = ui {
             ui.source.background_debug_mode = false;
@@ -498,7 +506,7 @@ fn process_debug_tuning_keys(
     if sim.viewmodel_debug.enabled {
         let Some(weapon) = game.map(|g| g.inventory.active.clone()) else {
             sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
-            *vm_repeat = KeyAdjustRepeat::default();
+            repeats.vm = KeyAdjustRepeat::default();
             return;
         };
         let profile = hl2_ui::tuning::viewmodel_profile(input.aspect);
@@ -507,11 +515,13 @@ fn process_debug_tuning_keys(
         let changed = if std::mem::take(&mut sim.viewmodel_debug.reset_pending) {
             reset_viewmodel_debug_weapon(&mut sim.viewmodel_debug)
         } else if adjusting {
-            let fired = vm_repeat.update(input.keys, input.time, VIEWMODEL_ADJUST_KEYS);
+            let fired = repeats
+                .vm
+                .update(input.keys, input.time, VIEWMODEL_ADJUST_KEYS);
             let step = viewmodel_adjust_step(input.keys);
             adjust_viewmodel_framing(&mut sim.viewmodel_debug.framing, &fired, step)
         } else {
-            *vm_repeat = KeyAdjustRepeat::default();
+            repeats.vm = KeyAdjustRepeat::default();
             false
         };
         if changed {
@@ -523,29 +533,61 @@ fn process_debug_tuning_keys(
             );
         }
     } else {
-        *vm_repeat = KeyAdjustRepeat::default();
+        repeats.vm = KeyAdjustRepeat::default();
     }
     if sim.background_debug.enabled {
-        let adjusting = !sim.paused() && !sim.transition;
-        if adjusting {
-            let fired = bg_repeat.update(
-                input.keys,
-                input.time,
-                crate::background_debug::BACKGROUND_ADJUST_KEYS,
-            );
-            let step = viewmodel_adjust_step(input.keys);
-            sim.background_debug.adjust_fov(&fired, step, input.aspect);
-        } else {
-            *bg_repeat = KeyAdjustRepeat::default();
+        process_background_debug_keys(sim, ui, input, &mut repeats.bg_fov, &mut repeats.bg_opacity);
+    } else {
+        repeats.bg_fov = KeyAdjustRepeat::default();
+        repeats.bg_opacity = KeyAdjustRepeat::default();
+    }
+}
+
+fn process_background_debug_keys(
+    sim: &mut crate::simulation::Simulation,
+    mut ui: Option<&mut crate::ui_host::Console>,
+    input: DebugTuningInput,
+    fov_repeat: &mut KeyAdjustRepeat,
+    opacity_repeat: &mut KeyAdjustRepeat,
+) {
+    let adjusting = !sim.paused() && !sim.transition;
+    let console_open = ui
+        .as_ref()
+        .is_some_and(|u| u.source.mode() == hl2_ui::console::Mode::Console);
+    if adjusting && !console_open {
+        let fired = fov_repeat.update(
+            input.keys,
+            input.time,
+            crate::background_debug::BACKGROUND_ADJUST_KEYS,
+        );
+        let step = viewmodel_adjust_step(input.keys);
+        sim.background_debug.adjust_fov(&fired, step, input.aspect);
+
+        let opacity_fired = opacity_repeat.update(
+            input.keys,
+            input.time,
+            crate::background_debug::BACKGROUND_OPACITY_KEYS,
+        );
+        sim.background_debug.adjust_opacity_step(&opacity_fired);
+
+        if input.keys.just_pressed(KeyCode::BracketLeft) {
+            sim.background_debug.toggle_zero_opacity();
         }
-        if let Some(ui) = ui {
-            let is_flexible = ui.source.config.video.flexible_aspect;
-            let label = crate::background_debug::aspect_label(input.aspect, is_flexible);
-            sim.background_debug
-                .check_aspect_change(input.aspect, label, &mut ui.source);
+        if input.keys.just_pressed(KeyCode::BracketRight) {
+            sim.background_debug.toggle_full_opacity();
+        }
+        if let Some(ref mut ui) = ui {
+            ui.source.background_blur_opacity = sim.background_debug.blur_opacity;
         }
     } else {
-        *bg_repeat = KeyAdjustRepeat::default();
+        *fov_repeat = KeyAdjustRepeat::default();
+        *opacity_repeat = KeyAdjustRepeat::default();
+    }
+    if let Some(ui) = ui {
+        let is_flexible = ui.source.config.video.flexible_aspect;
+        let label = crate::background_debug::aspect_label(input.aspect, is_flexible);
+        sim.background_debug
+            .check_aspect_change(input.aspect, label, &mut ui.source);
     }
 }
 

@@ -419,16 +419,7 @@ fn main() -> Result<()> {
         options.fly,
         movement_commands,
     );
-    simulation.fov = options.config.video.fov;
-    simulation.vertical_fov = options.config.video.vertical_fov;
-    simulation.viewmodel_fov = options.config.video.viewmodel_fov;
-    simulation.applied_window = Some(
-        simulation::WindowSettings::new(options.width, options.height, options.display_mode)
-            .with_flexible_aspect(options.flexible_aspect),
-    );
-    simulation.run_after_script = options.capture_live;
-    simulation.loading = true;
-    simulation.background_level = target.background;
+    simulation.apply_startup_settings(&options, &target);
     let status = Status::default();
     let asset_root = startup::resolve_asset_root()?;
     let default_plugins = DefaultPlugins

@@ -600,6 +600,11 @@ impl Console {
         self.draw_debug_lines_panel(lines, top, lines.len())
     }
 
+    pub fn current_background(&self) -> Option<(&str, &str)> {
+        let menu_cat = self.main_menu.category();
+        self.upcoming_background(menu_cat)
+    }
+
     fn upcoming_background<'a>(&'a self, menu_cat: &'a str) -> Option<(&'a str, &'a str)> {
         let transition = &self.background_transition;
         transition
@@ -646,9 +651,16 @@ impl Console {
                 crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP,
             );
         } else {
-            if self.background_debug_mode {
-                if let Some(tex) = bg_tex {
-                    let alpha = (self.background_blur_opacity as f32 / 100.0).clamp(0.0, 1.0);
+            if let Some(tex) = bg_tex {
+                let map_ready = self.background_level && !self.background_transition.is_failed();
+                let alpha = if map_ready && self.background_debug_mode {
+                    (self.background_blur_opacity as f32 / 100.0).clamp(0.0, 1.0)
+                } else if !map_ready {
+                    1.0
+                } else {
+                    0.0
+                };
+                if alpha > 0.001 {
                     crate::gameui::loading::draw_background_texture_alpha(&self.canvas, tex, alpha);
                 }
             }

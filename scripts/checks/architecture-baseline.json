@@ -165,7 +165,7 @@
   "crates/hl2-bevy/src/audio.rs": 1174,
   "crates/hl2-bevy/src/effects.rs": 1092,
   "crates/hl2-bevy/src/gameplay.rs": 1643,
-  "crates/hl2-bevy/src/main.rs": 1064,
+  "crates/hl2-bevy/src/main.rs": 1055,
   "crates/hl2-bevy/src/rendering.rs": 1509,
   "crates/hl2-bevy/src/video.rs": 1187,
   "crates/hl2-simulation/src/ai/default_schedules.rs": 1247,
@@ -226,10 +226,10 @@
    808
   ],
   "crates/hl2-bevy/src/input.rs::controls": [
-   118
+   116
   ],
   "crates/hl2-bevy/src/main.rs::main": [
-   320
+   311
   ],
   "crates/hl2-bevy/src/main.rs::monitor": [
    145
@@ -265,7 +265,7 @@
    156
   ],
   "crates/hl2-bevy/src/ui_system.rs::update_ui": [
-   274
+   267
   ],
   "crates/hl2-bevy/src/visibility.rs::present": [
    115

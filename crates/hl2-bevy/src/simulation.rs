@@ -1,17 +1,17 @@
 //! Host simulation loop, player physics integration, command scripting, and console cheat execution.
 use crate::source_direction;
-use anyhow::{Result, bail};
 use bevy::{app::RunFixedMainLoopSystems, prelude::*};
 pub(crate) mod commentary;
 pub(crate) mod movie;
+pub(crate) mod script;
 mod view;
 use hl2_simulation::physics::Physics;
 use modkit_core::{
     World,
     movement::{Input, Player, TICK},
 };
-use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path};
+use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default)]
 pub struct ViewmodelDebug {
@@ -26,73 +26,7 @@ pub struct ViewmodelDebug {
         BTreeMap<(String, hl2_ui::tuning::ViewmodelProfile), hl2_ui::tuning::ViewmodelFraming>,
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Command {
-    tick: u64,
-    #[serde(default)]
-    actions: Vec<crate::gameplay::Action>,
-    #[serde(default)]
-    ui: Vec<crate::ui_host::Action>,
-    #[serde(default)]
-    primary: bool,
-    #[serde(default)]
-    secondary: bool,
-    label: Option<String>,
-    eye: Option<[f32; 3]>,
-    yaw: Option<f32>,
-    pitch: Option<f32>,
-    /// Horizontal 4:3 field of view in degrees, like the Source `fov` command.
-    fov: Option<f32>,
-    paused: Option<bool>,
-    dev_overlay: Option<bool>,
-    fly: Option<bool>,
-    #[serde(default)]
-    forward: f32,
-    #[serde(default)]
-    side: f32,
-    #[serde(default)]
-    jump: bool,
-    #[serde(default)]
-    crouch: bool,
-    #[serde(default)]
-    sprint: bool,
-    #[serde(default)]
-    slow: bool,
-}
-pub fn read_script(path: &Path) -> Result<Vec<Command>> {
-    let bytes = std::fs::read(path)?;
-    if bytes.len() > 1024 * 1024 {
-        bail!("movement script exceeds 1 MiB");
-    }
-    let commands: Vec<Command> = serde_json::from_slice(&bytes)?;
-    if commands.is_empty() || commands.len() > 1024 {
-        bail!("movement script must have 1..1024 commands");
-    }
-    let mut previous = 0;
-    for c in &commands {
-        if c.ui.len() > 64
-            || c.ui.iter().any(|a| !a.valid())
-            || c.actions.len() > 64
-            || c.actions.iter().any(|a| !a.valid())
-            || c.tick <= previous
-            || c.tick > 6000
-            || !c.forward.is_finite()
-            || !c.side.is_finite()
-            || c.forward.abs() > 1.
-            || c.side.abs() > 1.
-            || c.eye.is_some_and(|p| p.iter().any(|n| !n.is_finite()))
-            || c.yaw.is_some_and(|n| !n.is_finite())
-            || c.pitch.is_some_and(|n| !(-89. ..=89.).contains(&n))
-            || c.fov.is_some_and(|n| !(1. ..=170.).contains(&n))
-            || c.label.as_ref().is_some_and(|s| s.len() > 128)
-        {
-            bail!("invalid movement command at tick {}", c.tick);
-        }
-        previous = c.tick;
-    }
-    Ok(commands)
-}
+pub use script::{Command, read_script};
 #[derive(Serialize)]
 struct Sample {
     label: String,
@@ -297,6 +231,39 @@ impl Simulation {
         self.loading = false;
         self.transition = true;
     }
+    pub fn apply_startup_settings(
+        &mut self,
+        options: &crate::Options,
+        target: &crate::startup::StartupTarget,
+    ) {
+        self.fov = options.config.video.fov;
+        self.vertical_fov = options.config.video.vertical_fov;
+        self.viewmodel_fov = options.config.video.viewmodel_fov;
+        self.applied_window = Some(
+            WindowSettings::new(options.width, options.height, options.display_mode)
+                .with_flexible_aspect(options.flexible_aspect),
+        );
+        self.run_after_script = options.capture_live;
+        self.loading = true;
+        self.background_level = target.background;
+        let is_wide = options.width as f32 / (options.height as f32).max(1.0) > 4. / 3. + 1e-3;
+        self.init_background_target(target, is_wide);
+    }
+    pub fn init_background_target(
+        &mut self,
+        target: &crate::startup::StartupTarget,
+        is_wide: bool,
+    ) {
+        if target.background {
+            let base = hl2_ui::gameui::resources::blur(&target.map);
+            self.background_debug.map_name = target.map.clone();
+            self.background_debug.blur_texture_name = if is_wide {
+                format!("{base}_widescreen")
+            } else {
+                base.to_owned()
+            };
+        }
+    }
     pub fn change_map(&mut self, world: &World, eye: glam::Vec3, direct: bool) {
         self.physics = Physics::new(world);
         self.eye = eye;
@@ -381,6 +348,8 @@ impl Simulation {
             Effect::BackgroundDebugMode(on) => {
                 if !on {
                     self.background_debug.enabled = false;
+                    self.background_debug.fov_horizontal = None;
+                    self.background_debug.fov_vertical = None;
                     ui.source.background_debug_mode = false;
                     ui.source.log("background_debug_mode 0");
                 } else if !self.background_level && !self.loading {
@@ -391,11 +360,22 @@ impl Simulation {
                     self.viewmodel_debug = ViewmodelDebug::default();
                     self.background_debug.enabled = true;
                     ui.source.background_debug_mode = true;
+                    let is_wide = ui.source.is_widescreen();
+                    if let Some((_, map)) = ui.source.current_background() {
+                        self.background_debug.map_name = map.to_owned();
+                        self.background_debug.blur_texture_name =
+                            ui.source.blur_texture_name(map, is_wide);
+                    } else if let Some(bg) = ui.source.background() {
+                        self.background_debug.map_name = bg.map.clone();
+                        self.background_debug.blur_texture_name =
+                            ui.source.blur_texture_name(&bg.map, is_wide);
+                    }
                     ui.source.log("background_debug_mode 1");
                 }
             }
             Effect::BackgroundBlurOpacity(opacity) => {
                 self.background_debug.blur_opacity = opacity;
+                self.background_debug.base_blur_opacity = opacity;
                 ui.source.background_blur_opacity = opacity;
             }
             Effect::BackgroundMapFovHorizontal(Some(deg)) => {
@@ -529,6 +509,10 @@ impl Simulation {
                         ui.source
                             .log("Gameplay map load in progress; ignoring background map request");
                     } else {
+                        let is_wide = ui.source.is_widescreen();
+                        let blur_name = ui.source.blur_texture_name(&background.map, is_wide);
+                        self.background_debug.map_name = background.map.clone();
+                        self.background_debug.blur_texture_name = blur_name;
                         ui.map_request = Some(background.map);
                         ui.map_request_game = Some(background.game);
                         ui.background_request = true;

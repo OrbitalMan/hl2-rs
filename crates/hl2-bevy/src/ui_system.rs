@@ -222,27 +222,20 @@ pub fn update_ui(
                 .paste
                 .then(|| clipboard.as_deref_mut()?.fetch_text().poll_result()?.ok())
                 .flatten();
-            let effects = ui.source.input(&source_ui::input::Input {
-                text: if modifiers.ctrl || modifiers.command {
-                    String::new()
-                } else {
-                    text.clone()
-                },
-                ctrl: modifiers.ctrl,
-                shift: modifiers.shift,
-                alt: modifiers.alt,
-                paste,
-                copy: modifiers.copy,
-                keys: crate::ui_host::keys(&keys),
-                held_keys: crate::ui_host::held_keys(&keys),
-                pointer,
-                click: buttons.just_pressed(MouseButton::Left),
-                held: buttons.pressed(MouseButton::Left),
-                released: buttons.just_released(MouseButton::Left),
+            let bg_debug = ui.source.background_debug_mode
+                && ui.source.mode() != hl2_ui::console::Mode::Console;
+            let input = prepare_ui_input(UiInputContext {
+                keys: &keys,
+                buttons: &buttons,
                 wheel,
-                binding_keys: crate::ui_host::binding_keys(&keys, &buttons, wheel),
+                modifiers: &modifiers,
+                pointer,
+                text: text.clone(),
+                paste,
                 time: real_time.as_deref().map(Time::elapsed_secs_f64),
+                bg_debug,
             });
+            let effects = ui.source.input(&input);
             if let Some(copied) = ui.source.take_copied()
                 && let Some(clipboard) = clipboard.as_deref_mut()
                 && let Err(error) = clipboard.set_text(copied)
@@ -393,6 +386,61 @@ pub fn update_ui(
                 ui.source.log(message);
             }
         }
+    }
+}
+
+struct UiInputContext<'a> {
+    keys: &'a ButtonInput<KeyCode>,
+    buttons: &'a ButtonInput<MouseButton>,
+    wheel: f32,
+    modifiers: &'a crate::ui_host::Modifiers,
+    pointer: Option<glam::Vec2>,
+    text: String,
+    paste: Option<String>,
+    time: Option<f64>,
+    bg_debug: bool,
+}
+
+fn prepare_ui_input(ctx: UiInputContext) -> source_ui::input::Input {
+    let mut ui_keys = crate::ui_host::keys(ctx.keys);
+    let mut ui_held_keys = crate::ui_host::held_keys(ctx.keys);
+    let input_text = if ctx.modifiers.ctrl || ctx.modifiers.command {
+        String::new()
+    } else if ctx.bg_debug {
+        ctx.text
+            .chars()
+            .filter(|&c| !matches!(c, ',' | '.' | '[' | ']'))
+            .collect()
+    } else {
+        ctx.text
+    };
+    if ctx.bg_debug {
+        for k in [
+            source_ui::input::Key::Up,
+            source_ui::input::Key::Down,
+            source_ui::input::Key::Left,
+            source_ui::input::Key::Right,
+        ] {
+            ui_keys.remove(&k);
+            ui_held_keys.remove(&k);
+        }
+    }
+    source_ui::input::Input {
+        text: input_text,
+        ctrl: ctx.modifiers.ctrl,
+        shift: ctx.modifiers.shift,
+        alt: ctx.modifiers.alt,
+        paste: ctx.paste,
+        copy: ctx.modifiers.copy,
+        keys: ui_keys,
+        held_keys: ui_held_keys,
+        pointer: ctx.pointer,
+        click: ctx.buttons.just_pressed(MouseButton::Left),
+        held: ctx.buttons.pressed(MouseButton::Left),
+        released: ctx.buttons.just_released(MouseButton::Left),
+        wheel: ctx.wheel,
+        binding_keys: crate::ui_host::binding_keys(ctx.keys, ctx.buttons, ctx.wheel),
+        time: ctx.time,
     }
 }
 

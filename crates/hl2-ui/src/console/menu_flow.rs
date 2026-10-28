@@ -492,7 +492,7 @@ impl Console {
             Mode::MainMenu => &mut self.main_menu,
             _ => &mut self.pause_menu,
         };
-        if input.pressed(Key::Up) {
+        if !self.background_debug_mode && input.pressed(Key::Up) {
             let prev = menu.selection;
             menu.step(-1);
             if menu.selection != prev
@@ -504,7 +504,7 @@ impl Console {
                 effects.push(Effect::PlaySound("ui/buttonrollover.wav".into()));
             }
         }
-        if input.pressed(Key::Down) {
+        if !self.background_debug_mode && input.pressed(Key::Down) {
             let prev = menu.selection;
             menu.step(1);
             if menu.selection != prev

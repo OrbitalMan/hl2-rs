@@ -1,5 +1,23 @@
 # STATUS
 
+## Background debug mode navigation isolation, raw names, and blur opacity controls (2026-10-28)
+
+Background debug mode has been refined to address navigation overlap and add granular visual opacity controls:
+- Arrow key navigation override: while background debug mode is active, arrow key presses adjust background camera
+  horizontal and vertical FOV without moving main menu or submenu selections, and debug key characters are filtered
+  from UI text input.
+- Raw map and texture names: the debug HUD overlay and console logs now display raw identifiers (e.g. `ep1_background01`
+  and its corresponding blur texture name).
+- Blur opacity controls: `,` and `.` change current blur opacity by 1% with hold-to-repeat; `[` sets blur opacity to 0%
+  and toggles back to the base `background_blur_opacity` on repeat click; `]` sets blur opacity to 100% and toggles back
+  on repeat click. The overlay line format displays `blur_opacity: X%  ([: 0  ]: 100  ,: -1%  .: +1%)`.
+- FOV reset on exit: disabling background debug mode or ending the background level automatically resets camera horizontal
+  and vertical FOV overrides to authored values.
+- Loading/error opacity clamping: visible blur opacity is clamped to 100% whenever the background map is loading,
+  missing, or failed, ensuring blur opacity adjustments take effect visually only once the background map is ready.
+Verified with full validation suite (`validate.sh`), Windows cross-target check (`check_windows.sh`), and release build.
+
+
 ## Submenu and background switching wgpu crashes and despawn warnings resolved (2026-10-28)
 
 Switching main menu submenus and chapter background maps repeatedly across sessions no longer crashes with wgpu render

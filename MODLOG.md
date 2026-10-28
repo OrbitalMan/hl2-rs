@@ -1,5 +1,40 @@
 # MODLOG
 
+## 2026-10-28 Feature: background debug mode controls refinement and blur opacity key actions
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** In `crates/hl2-bevy/src/background_debug.rs`, define `BACKGROUND_OPACITY_KEYS` (Comma and Period) and
+add `adjust_opacity_step`, `toggle_zero_opacity`, and `toggle_full_opacity` to `BackgroundDebug`, tracking
+`base_blur_opacity` (default 50) and updating the HUD overlay line format to
+`blur_opacity: X%  ([: 0  ]: 100  ,: -1%  .: +1%)`. In `crates/hl2-bevy/src/input.rs`, group key repeat
+handlers into `DebugRepeats`, extract `process_background_debug_keys` to handle arrow key FOV repeat and
+comma/period opacity repeat (1% per tick) and handle bracket toggles, synchronizing
+`ui.source.background_blur_opacity` with `sim.background_debug.blur_opacity`, and reset overridden FOV angles
+on level end. In `crates/hl2-bevy/src/simulation.rs`, reset FOV overrides when background debug mode is
+disabled, initialize and track raw background map and blur texture names across startup and map load events,
+and extract script runner structures into child module `simulation/script.rs` to maintain line limits.
+In `crates/hl2-bevy/src/ui_system.rs`, isolate background debug key actions from UI navigation and text input
+by filtering arrow keys and stripping `,`, `.`, `[`, `]` when background debug mode is active outside the
+console. In `crates/hl2-ui/src/console/menu_flow.rs`, guard menu button arrow navigation against background
+debug mode. In `crates/hl2-ui/src/console.rs`, add `current_background` helper and enforce 100% visible blur
+overlay opacity whenever the background map is loading, missing, or unavailable. In `crates/hl2-bevy/src/main.rs`,
+consolidate startup setting initialization into `apply_startup_settings`. In `scripts/checks/architecture-baseline.json`,
+tighten architectural size baselines.
+**Why:** Address background debug mode feedback: prevent arrow keys from triggering menu and submenu navigation
+while adjusting FOV; display raw map and texture identifiers; allow rapid keyboard control of blur opacity
+(`[` for 0%, `]` for 100%, `,` and `.` for +/-1% with hold-to-repeat); automatically restore camera FOV
+upon exiting debug mode; and ensure blur opacity is visibly clamped to 100% during map loading or error states.
+**Tested how:** Local validation suite (`validate.sh`: architecture guardrails, Python tests, cargo test across
+all workspace crates with all tests passing, strict Clippy, format check, repository isolation, AGENTS.md budget);
+Windows cross-target check (`check_windows.sh`); Bevy release build (`build-bevy.sh`); unit tests for opacity
+adjustment steps and bracket toggling.
+**Result:** Background debug mode provides precise visual inspection of background geometry, FOV, and blur
+textures with isolated arrow keys and instant opacity toggle/adjustment controls without menu navigation
+conflicts or unexpected blur transparency during loading.
+**Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
+**Next:** None in this batch; all background debug remarks implemented and verified.
+
+
 ## 2026-10-28 Fix: resolve render target size mismatch crash and double-despawn warnings on background switches
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.
