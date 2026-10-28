@@ -1,5 +1,23 @@
 # MODLOG
 
+## 2026-10-28 Fix: developer console input caret scaling and shared text entry frame reuse
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** Extract `text_entry_frame` and `caret` methods onto `Painter` in `source-ui::widgets` and reuse them
+in `ConsolePanel::draw`. The console input caret now draws using `painter.caret` at `(1. * scale).round().max(1.)`
+matching standard dialog text entries (such as the mouse sensitivity input field in Options), eliminating the
+hairline 1-pixel width on scaled/high-DPI displays. Extract `text_input` module for `InputFocus`, `BlinkingCaret`,
+and `TextInputModel` to maintain modularity and reduce `widgets.rs` production lines below baseline.
+**Why:** Previously, the developer console drew a fixed 1-pixel unscaled canvas rectangle for its caret, making
+it barely visible on high-DPI and scaled displays, while duplicating sunken border and focus edge drawing code.
+**Tested how:** validate.sh (1,194 Rust pass, 100 ignored; 27 Python, strict Clippy/fmt/architecture);
+check_windows.sh passes. Unit test in `source-ui::console::panel` verified at standard and 2.0x scaled (1440p) canvas.
+**Result:** Developer console input caret matches the thickness, styling, and blink behavior of standard text
+entries across display scales. Duplicated frame and focus edge drawing eliminated; architecture baseline tightened.
+**Still broken or not tested:** Child subdialog parent fade out initial flicker.
+**Next:** Diagnose and eliminate initial flicker when opening child subdialogs over Options.
+
+
 ## 2026-10-28 Fix: align menu background blur texture crop with camera projection across aspect ratios
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

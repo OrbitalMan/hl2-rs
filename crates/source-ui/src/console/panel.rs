@@ -838,14 +838,9 @@ impl ConsolePanel {
         );
 
         // The entry (`TextEntry`), or the reverse history search in its place.
-        painter.fill(layout.entry, painter.theme.entry_bg);
-        painter.sunken(layout.entry);
         let entry_focused = !self.placement.active();
         let model = TextInputModel::new(look.focused, entry_focused);
-        if model.should_draw_focus_edge() {
-            let (e, t) = (layout.entry, painter.theme.entry_focus_edge);
-            painter.border(Rect::new(e.x + 1., e.y + 1., e.w - 2., e.h - 2.), t, t);
-        }
+        painter.text_entry_frame(layout.entry, model.should_draw_focus_edge());
         let (line, cursor) = match self.editor.search() {
             Some((query, found)) => {
                 let line = format!(
@@ -883,9 +878,8 @@ impl ConsolePanel {
         );
         if model.should_draw_caret(time) {
             let caret_x = inner_x + width(start, cursor) + 1.;
-            let caret_top = entry.y + (4. * scale).round();
-            let caret_h = (entry.h - (8. * scale).round()).max(1.);
-            canvas.rectangle(caret_x, caret_top, 1., caret_h, painter.theme.text);
+            let dialog_x = (caret_x - painter.origin.x) / scale;
+            painter.caret(layout.entry, dialog_x);
         }
         painter.button(
             layout.submit,
@@ -1328,12 +1322,31 @@ mod tests {
         let entry = layout.canvas(layout.entry);
         let inner_x = entry.x + (3. * layout.scale).round();
         let expected_caret_x = inner_x + panel.text_width("hello", layout.scale) + 1.;
-        let caret_quad = quads
-            .iter()
-            .find(|q| (q.destination.x - expected_caret_x).abs() < 1e-3 && q.destination.w == 1.0);
+        let expected_w = (1. * layout.scale).round().max(1.);
+        let caret_quad = quads.iter().find(|q| {
+            (q.destination.x - expected_caret_x).abs() < 1e-3 && q.destination.w == expected_w
+        });
         assert!(
             caret_quad.is_some(),
-            "caret quad at {expected_caret_x} should exist in quads"
+            "caret quad at {expected_caret_x} should exist in quads with w={expected_w}"
+        );
+
+        // Scaled high-DPI canvas test: caret scales proportionally (matching Options text entry)
+        canvas.resize(2560., 1440.);
+        panel.draw(&canvas, &look, 0.0, &[]);
+        let scaled_quads = canvas.drain();
+        let scaled_layout = panel.dialog_layout(&canvas);
+        assert_eq!(scaled_layout.scale, 2.0);
+        let scaled_entry = scaled_layout.canvas(scaled_layout.entry);
+        let scaled_inner_x = scaled_entry.x + (3. * scaled_layout.scale).round();
+        let scaled_expected_caret_x =
+            scaled_inner_x + panel.text_width("hello", scaled_layout.scale) + 1.;
+        let scaled_caret = scaled_quads.iter().find(|q| {
+            (q.destination.x - scaled_expected_caret_x).abs() < 1e-3 && q.destination.w == 2.0
+        });
+        assert!(
+            scaled_caret.is_some(),
+            "scaled caret quad at 1440p (scale 2.0) must have width 2.0"
         );
     }
 }

@@ -1,5 +1,16 @@
 # STATUS
 
+## Developer console input caret scaling and shared text entry frame reused (2026-10-28)
+
+The developer console input caret now draws through `painter.caret`, matching the proportional thickness
+and styling of standard dialog text entries (such as the mouse sensitivity text entry in Options). On
+high-DPI and scaled displays, the caret width scales proportionally (`scale.round().max(1.)`) rather than
+drawing a hairline 1-pixel rectangle directly to canvas. Duplicated frame, sunken border, and focus edge
+drawing in `ConsolePanel::draw` is replaced with `painter.text_entry_frame`. Submodule `widgets/text_input.rs`
+was extracted, tightening architecture baselines for both `widgets.rs` and `console/panel.rs`. Full validation
+and Windows checks pass.
+
+
 ## Menu background texture crop aligned with camera projection across aspect ratios (2026-10-28)
 
 `background_source` now aligns texture crop to the authored base aspect ratio (`4:3` for standard textures,
