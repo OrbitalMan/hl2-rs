@@ -287,10 +287,14 @@ impl Console {
     }
 
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
+        if let Some(time) = input.time {
+            self.ui_clock = time;
+        }
         let mut effects = std::mem::take(&mut self.deferred);
         effects.extend(shell::input(self, input));
         // A drag, resize or reset that ended this frame is saved at once.
         self.save_placements();
+        self.sync_dialog_windows();
         effects
     }
 

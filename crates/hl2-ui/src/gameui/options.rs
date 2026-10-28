@@ -2003,13 +2003,15 @@ impl OptionsDialog {
         let canvas = vec2(base.canvas.width(), base.canvas.height());
         let scale = crate::proportional::dialog_scale(canvas);
         let modal = self.sub.is_some() || self.confirm.is_some();
+        let options_theme =
+            if parent_focused.is_some() || self.sub_theme.is_some() || self.confirm_theme.is_some()
+            {
+                base.theme.clone()
+            } else {
+                base.theme
+                    .focus_faded(if modal { 0.0 } else { 1.0 }, !modal)
+            };
         let parent_focused = parent_focused.unwrap_or(self.parent_focused) && !modal;
-        let options_theme = if self.sub_theme.is_some() || self.confirm_theme.is_some() {
-            base.theme.clone()
-        } else {
-            base.theme
-                .focus_faded(if modal { 0.0 } else { 1.0 }, !modal)
-        };
         let p = Painter {
             canvas: base.canvas,
             fonts: base.fonts,
@@ -2040,23 +2042,7 @@ impl OptionsDialog {
         let focused = |target: Target| !modal && self.focus_visible && self.focus == Some(target);
         let (close_armed, close_pressed) = state(Target::Close);
         let close_pressed = close_pressed || (self.escape_held && self.sub.is_none());
-
-        let sub_to_draw = self.sub.or(self.closing_sub);
-        let sub_bounds = sub_to_draw.map(|sub| {
-            let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
-            let o = self.sub_placement.place(&sub_frame(canvas, size)).origin;
-            Rect::new(o.x, o.y, size.x * scale, size.y * scale)
-        });
-
-        let confirm_to_draw = self.confirm.as_ref().or(self.closing_confirm.as_ref());
-        let confirm_bounds = confirm_to_draw.as_ref().map(|confirm| {
-            let layout = confirm.layout(|t| p.text_width(t, false));
-            let o = self
-                .confirm_placement
-                .place(&confirm_frame(canvas, layout.size))
-                .origin;
-            Rect::new(o.x, o.y, layout.size.x * scale, layout.size.y * scale)
-        });
+        let (sub_bounds, confirm_bounds) = self.overlay_bounds(base, canvas, scale);
 
         // 1. Draw Options frame background (unclipped).
         let options_title = loc.text("#GameUI_Options");
@@ -2150,7 +2136,7 @@ impl OptionsDialog {
         }
 
         // 4. Draw subdialog on top (if any).
-        if let Some(sub) = sub_to_draw {
+        if let Some(sub) = self.sub.or(self.closing_sub) {
             let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
             let sp = Painter {
                 canvas: base.canvas,

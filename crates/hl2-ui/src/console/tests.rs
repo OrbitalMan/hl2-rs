@@ -3378,23 +3378,24 @@ fn subdialog_in_focus_renders_focused_frame_while_parent_options_is_unfocused() 
     let options_theme = console.window_theme(Window::Options, 0.0);
     assert!((options_theme.frame_bg.a - console.theme.frame_bg.a).abs() < 1e-4);
 
-    // 2. Open SubDialog:
+    // 2. Open SubDialog through input (matching user click on Advanced button):
     console
         .options
         .open_sub(crate::gameui::options::Sub::VideoAdvanced);
-    console.tick(1.0);
-
-    // SubDialog is focused immediately:
+    let input = source_ui::input::Input {
+        time: Some(1.0),
+        ..Default::default()
+    };
+    console.input(&input);
+    // Frame 0: SubDialog focused, parent Options theme starts smooth fade at 1.0 (no flicker to 0.0):
     assert_eq!(
         console.shell.windows.focus(),
         Layer::Window(Window::SubDialog)
     );
+    let f0_theme = console.window_theme(Window::Options, 1.0);
+    assert!((f0_theme.frame_bg.a - console.theme.frame_bg.a).abs() < 1e-4);
     let sub_theme = console.options.sub_theme.as_ref().expect("sub theme");
-    assert!(
-        (sub_theme.frame_bg.a - console.theme.frame_bg.a).abs() < 1e-4,
-        "subdialog has focused Frame.BgColor (alpha={})",
-        sub_theme.frame_bg.a
-    );
+    assert!((sub_theme.frame_bg.a - console.theme.frame_bg.a).abs() < 1e-4);
     assert_eq!(sub_theme.title_text, console.theme.title_text_focused);
 
     // After 0.3s fade-in transition:
@@ -3402,11 +3403,7 @@ fn subdialog_in_focus_renders_focused_frame_while_parent_options_is_unfocused() 
 
     // Parent Options is out of focus:
     let options_theme = console.window_theme(Window::Options, 1.3);
-    assert!(
-        (options_theme.frame_bg.a - console.theme.frame_bg_out_of_focus.a).abs() < 1e-4,
-        "parent options has out-of-focus Frame.OutOfFocusBgColor (alpha={})",
-        options_theme.frame_bg.a
-    );
+    assert!((options_theme.frame_bg.a - console.theme.frame_bg_out_of_focus.a).abs() < 1e-4);
     assert_eq!(
         options_theme.title_text,
         console.theme.title_text_out_of_focus

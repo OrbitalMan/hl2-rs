@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-28 Fix: eliminate initial flicker when opening child subdialogs over Options
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** In `Console::input`, immediately call `self.sync_dialog_windows()` after `shell::input` runs and update
+`self.ui_clock` from `input.time`. In `OptionsDialog::draw_with_occluders`, preserve `base.theme` whenever
+`parent_focused.is_some()`, `self.sub_theme.is_some()`, or `self.confirm_theme.is_some()`. Extract `overlay_bounds`
+into `options/hints.rs` to streamline bounds calculations and shrink production lines in `options.rs`. Update
+subdialog focus transition test in `console::tests` to verify opening via input without frame 0 flicker.
+**Why:** Previously, clicking a button to open a child subdialog (e.g. Video Advanced) set `options.sub` during input,
+but `sync_dialog_windows()` was deferred until `Console::tick()` on the next frame. Consequently, on the click frame,
+`options.sub_theme` was `None`, causing `options.draw_with_occluders` to fall back to `base.theme.focus_faded(0.0, false)`.
+On the following frame, `sync_dialog_windows()` ran, opened `Window::SubDialog`, and initiated the smooth 1.0 -> 0.0
+focus fade on `Window::Options`, causing the parent dialog to snap to 0.0 on frame 0 and jump back to 1.0 on frame 1
+(a visible flash/flicker at the start of the fade-out).
+**Tested how:** validate.sh (1,194 Rust pass, 100 ignored; 27 Python, strict Clippy/fmt/architecture);
+check_windows.sh passes. Test `subdialog_in_focus_renders_focused_frame_while_parent_options_is_unfocused` in
+`console::tests` verified that opening through input maintains continuous parent theme focus transitions from 1.0 to 0.0.
+**Result:** Opening a child subdialog (like Video Advanced) transitions the parent Options dialog smoothly
+from full focus (1.0) down to out-of-focus (0.0) without any initial flicker or theme snapping. Architecture
+baselines tightened.
+**Still broken or not tested:** Interactive window resizing during runtime.
+**Next:** None in this batch; all requested user tasks complete and verified.
+
+
 ## 2026-10-28 Fix: developer console input caret scaling and shared text entry frame reuse
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

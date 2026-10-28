@@ -1,5 +1,7 @@
 //! Development status overlays share retail hover/occlusion and generic tooltip geometry.
-use super::{layout_widgets, main_frame, page_rect, OptionsDialog, Panel, Widget};
+use super::{
+    confirm_frame, layout_widgets, main_frame, page_rect, sub_frame, OptionsDialog, Panel, Widget,
+};
 use crate::gameui::settings::support;
 use glam::Vec2;
 use source_ui::{
@@ -183,5 +185,31 @@ impl OptionsDialog {
         }
         occluders.extend_from_slice(external);
         occluders
+    }
+
+    pub(super) fn overlay_bounds(
+        &self,
+        base: &Painter,
+        canvas: Vec2,
+        scale: f32,
+    ) -> (Option<Rect>, Option<Rect>) {
+        let sub = self.sub.or(self.closing_sub).map(|sub| {
+            let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
+            let o = self.sub_placement.place(&sub_frame(canvas, size)).origin;
+            Rect::new(o.x, o.y, size.x * scale, size.y * scale)
+        });
+        let confirm = self
+            .confirm
+            .as_ref()
+            .or(self.closing_confirm.as_ref())
+            .map(|confirm| {
+                let layout = confirm.layout(|t| base.text_width(t, false));
+                let o = self
+                    .confirm_placement
+                    .place(&confirm_frame(canvas, layout.size))
+                    .origin;
+                Rect::new(o.x, o.y, layout.size.x * scale, layout.size.y * scale)
+            });
+        (sub, confirm)
     }
 }

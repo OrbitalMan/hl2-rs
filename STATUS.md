@@ -1,5 +1,16 @@
 # STATUS
 
+## Child subdialog parent fade-out initial flicker eliminated (2026-10-28)
+
+Opening a child subdialog over Options (such as Video > Advanced) now transitions the parent dialog's
+focus look continuously from focused (1.0) to out-of-focus (0.0) without initial flicker. `Console::input`
+now synchronizes dialog window states immediately upon handling input, opening `Window::SubDialog` and
+establishing `sub_theme` in the same frame rather than deferring to the subsequent tick. Furthermore,
+`OptionsDialog::draw_with_occluders` preserves the host-provided window theme when `parent_focused` is
+provided, eliminating the premature 1-frame drop to 0.0. `overlay_bounds` was extracted into `options/hints.rs`,
+tightening production and test baselines for `options.rs` and `console/tests.rs`. Full validation and Windows checks pass.
+
+
 ## Developer console input caret scaling and shared text entry frame reused (2026-10-28)
 
 The developer console input caret now draws through `painter.caret`, matching the proportional thickness
