@@ -2,18 +2,20 @@
 use super::world_fov;
 use bevy::prelude::{Handle, UVec2, Window};
 
+const TESTED_ASPECTS: [f32; 8] = [
+    9. / 16.,
+    1.,
+    5. / 4.,
+    4. / 3.,
+    16. / 10.,
+    16. / 9.,
+    21. / 9.,
+    32. / 9.,
+];
+
 #[test]
 fn gameplay_settings_and_zoom_never_change_background_projection() {
-    for aspect in [
-        9. / 16.,
-        1.,
-        5. / 4.,
-        4. / 3.,
-        16. / 10.,
-        16. / 9.,
-        21. / 9.,
-        32. / 9.,
-    ] {
+    for aspect in TESTED_ASPECTS {
         let expected = world_fov(75., 75., aspect, 0., true);
         for view in [20., 75., 87.3083, 110.] {
             for vertical in [0., 60., 90.] {
@@ -32,7 +34,7 @@ fn gameplay_settings_and_zoom_never_change_background_projection() {
 fn projection_rays_match_authored_artwork_crop() {
     use hl2_ui::gameui::loading::background_source;
     let reference_tan = (crate::video::vertical_fov_for(75., 4. / 3.) * 0.5).tan();
-    for aspect in [9. / 16., 1., 4. / 3., 16. / 9., 21. / 9., 32. / 9.] {
+    for aspect in TESTED_ASPECTS {
         let canvas = glam::vec2(aspect * 900., 900.);
         let crop = background_source(canvas, glam::Vec2::ONE);
         let base_aspect = if aspect >= 1.6 { 16. / 9. } else { 4. / 3. };

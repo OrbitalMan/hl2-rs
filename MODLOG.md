@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-28 Fix: align menu background blur texture crop with camera projection across aspect ratios
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** In `background_source`, determine the base authored texture aspect ratio (`16:9` for widescreen
+displays at aspect >= 1.6, `4:3` otherwise). Crop texture sides whenever the canvas aspect is narrower
+than the texture's authored base aspect (including 5:4 for the 4:3 texture and 16:10 for the 16:9 widescreen
+texture). Extend camera projection tests in `hl2-bevy` to verify ray tangent alignment across all 8 standard
+aspect ratios (`9:16`, `1:1`, `5:4`, `4:3`, `16:10`, `16:9`, `21:9`, `32:9`) and eliminate duplicated table code.
+**Why:** Previously, 5:4 and 16:10 aspect ratios fell through to uncropped texture mapping, causing the 4:3
+and 16:9 textures to be horizontally squeezed by 6.25% and 10% respectively. This produced an aspect/FOV
+mismatch between the blurred overlay and the 3D background map when the map finished loading.
+**Tested how:** validate.sh (1,194 Rust pass, 100 ignored; 27 Python, strict Clippy/fmt/architecture);
+check_windows.sh passes; replays pass (`narrow_layout`, `video_portrait`, `hud_aspect`, `video_keep`,
+`bg_compare`, `background_reveal`, `background_fov`). Camera projection ray test passes for all 8 aspect ratios.
+**Result:** Blurred background overlay texture extents match 3D camera projection rays with exact 0.000000
+tangent alignment across all aspect ratios without distortion.
+**Still broken or not tested:** Interactive window resizing during runtime.
+**Next:** None in this batch; all 4 user tasks complete and verified.
+
+
 ## 2026-10-28 Feature: require click-to-focus and disable button hover on unfocused dialogs
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

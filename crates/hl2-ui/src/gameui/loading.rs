@@ -389,20 +389,17 @@ pub struct LoadingDialog {
     pub transition: BackgroundTransitionState,
 }
 
-/// Width / height of the screen a 4:3 pre-blurred background texture is made for (the texture
-/// itself is a squeezed square).
-const BACKGROUND_TEXTURE_ASPECT: f32 = 4. / 3.;
-
 /// The part of a pre-blurred background texture to draw on a `canvas`, in texture pixels
-/// (`texture` is its size). The whole texture on 5:4 through 16:9 as in retail; on narrower
-/// screens (square, portrait) it keeps the full height and crops the sides of the 4:3 image, and
-/// on screens wider than 16:9 ([`crate::tuning::widest_design_aspect`]) it keeps the full width
-/// and crops the top and bottom of the 16:9 widescreen image, so neither stretches.
+/// (`texture` is its size). The 4:3 texture on screens narrower than 16:10 keeps the full height
+/// and crops the sides when narrower than 4:3; the 16:9 widescreen texture crops the sides on 16:10,
+/// and crops the top and bottom on screens wider than 16:9 ([`crate::tuning::widest_design_aspect`]),
+/// so the blurred image does not stretch relative to the background camera's 3D projection.
 pub fn background_source(canvas: glam::Vec2, texture: glam::Vec2) -> source_ui::canvas::Rect {
     let aspect = canvas.x / canvas.y.max(1.);
+    let base_aspect = if aspect >= 1.6 { 16. / 9. } else { 4. / 3. };
     let widest = crate::tuning::widest_design_aspect();
-    if crate::proportional::design_height(canvas) < canvas.y && aspect < BACKGROUND_TEXTURE_ASPECT {
-        let kept = aspect / BACKGROUND_TEXTURE_ASPECT;
+    if aspect < base_aspect {
+        let kept = aspect / base_aspect;
         source_ui::canvas::Rect::new(
             texture.x * (1. - kept) * 0.5,
             0.,
@@ -692,7 +689,7 @@ mod tests {
         let canvas = Canvas::default();
         for (w, h, source_w, source_h) in [
             (1080., 1920., 2. * 0.5625 * 0.75, 2.),
-            (1280., 1024., 2., 2.),
+            (1280., 1024., 2. * (5. / 4.) / (4. / 3.), 2.),
             (5120., 1440., 2., 1.),
         ] {
             canvas.resize(w, h);
@@ -716,18 +713,20 @@ mod tests {
     fn narrow_and_ultrawide_screens_fill_with_the_centre_of_the_background() {
         use glam::vec2;
         let texture = vec2(512., 512.);
-        for canvas in [
-            vec2(1280., 1024.),
-            vec2(1024., 768.),
-            vec2(1920., 1200.),
-            vec2(1920., 1080.),
-        ] {
+        for canvas in [vec2(1024., 768.), vec2(1920., 1080.)] {
             assert_eq!(
                 background_source(canvas, texture),
                 source_ui::canvas::Rect::new(0., 0., 512., 512.),
-                "{canvas}: whole texture as in retail"
+                "{canvas}: whole texture"
             );
         }
+        let five_four = background_source(vec2(1280., 1024.), texture);
+        assert!((five_four.x - 16.).abs() < 1e-3 && (five_four.w - 480.).abs() < 1e-3);
+        assert_eq!(five_four.h, 512.);
+
+        let sixteen_ten = background_source(vec2(1920., 1200.), texture);
+        assert!((sixteen_ten.x - 25.6).abs() < 1e-3 && (sixteen_ten.w - 460.8).abs() < 1e-3);
+        assert_eq!(sixteen_ten.h, 512.);
         let square = background_source(vec2(1080., 1080.), texture);
         assert_eq!(square.h, 512.);
         assert!(

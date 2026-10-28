@@ -1,5 +1,15 @@
 # STATUS
 
+## Menu background texture crop aligned with camera projection across aspect ratios (2026-10-28)
+
+`background_source` now aligns texture crop to the authored base aspect ratio (`4:3` for standard textures,
+`16:9` for widescreen textures). Screens narrower than the texture's base aspect (such as 5:4 for 4:3
+artwork and 16:10 for widescreen artwork) now crop horizontal margins rather than squeezing the texture,
+eliminating aspect distortion against the 3D background camera. All 8 standard aspect ratios (`9:16`, `1:1`,
+`5:4`, `4:3`, `16:10`, `16:9`, `21:9`, `32:9`) are tested and match camera projection rays with exact
+tangent parity. Full validation and replay suite pass.
+
+
 ## Unfocused dialog click-to-focus and button hover suppression implemented (2026-10-28)
 
 Non-modal dialog frames (`Layer::Window`, including Options and the developer console) now require
