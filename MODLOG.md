@@ -12,9 +12,9 @@
 
 **Result:** Two corpses rest 3.2 s after the kill (before: never, 16 s run); with two corpses down 10 of 11 later pistol shots push (the refusal came while both still tumbled); single-corpse pistol and crowbar 8/8. Pre-34 build: 0 of 10 with two corpses (the failure predates session 34). Sessions 31-35 merge into main cleanly with an identical tree.
 
-**Still broken or not tested:** native time-to-rest and per-hit push size not A/B'd (the oracle refuses while the owner's hl2.exe runs); rest thresholds tuned, IVP's not read; the settle check runs per 15 ms update (native: per client frame). PR #4 conflicts with the merged main in 13 files. Everything else in the STATUS session 35 open list.
+**Still broken or not tested:** native time-to-rest and per-hit push size not A/B'd (the oracle refuses while the owner's hl2.exe runs); rest thresholds tuned, IVP's not read; the settle check runs per 15 ms update (native: per client frame). PR #4 conflicts with the merged main in 13 files (main = c83748f, pushed on the owner's go-ahead). Everything else in the STATUS session 35 open list.
 
-**Next:** owner playtest of post-death pushes; push the merged main (owner decision, PR #4 then needs a merge of main); native time-to-rest A/B; shotgun length.
+**Next:** owner playtest of post-death pushes; PR #4 merges main (13 conflicting files) before its Windows playtest; native time-to-rest A/B; shotgun length.
 
 ## 2026-10-28 session 34: crossbow pins behind doors, ragdoll punch re-measured, multidamage death force
 
