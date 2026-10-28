@@ -19,6 +19,10 @@ const SHOT_IMPULSE: f32 = 4000.;
 const BLAST_IMPULSE: f32 = 500.;
 /// g_ragdoll_fadespeed: alpha per second while a retired ragdoll fades out.
 const FADE_SPEED: f32 = 600.;
+/// CRagdoll::CheckSettleStationaryRagdoll: RAGDOLL_SLEEP_TOLERANCE (units per axis per
+/// update) and ragdoll_sleepaftertime (seconds).
+const SLEEP_TOLERANCE: f32 = 1.;
+const SLEEP_AFTER_TIME: f64 = 5.;
 
 /// Client-side effects that strike existing ragdolls.
 #[derive(Clone, Copy, Debug)]
@@ -60,6 +64,39 @@ pub struct Ragdoll {
     fade: Option<f32>,
     /// C_ClientRagdoll::HandleAnimatedFriction.
     friction: AnimatedFriction,
+    /// CRagdoll::CheckSettleStationaryRagdoll.
+    settle: Settle,
+}
+
+/// CRagdoll's m_vecLastOrigin and m_flLastOriginChangeTime.
+#[derive(Clone, Copy, Debug)]
+struct Settle {
+    origin: Option<Vec3>,
+    changed: f64,
+}
+
+impl Settle {
+    /// RagdollCreate: "It's moving now..."
+    fn new(now: f64) -> Self {
+        Self {
+            origin: None,
+            changed: now,
+        }
+    }
+    /// One CheckSettleStationaryRagdoll (VPhysicsUpdate, once per update while a solid is
+    /// awake) with the root solid's position: true once the root has moved at most
+    /// SLEEP_TOLERANCE on every axis per update for ragdoll_sleepaftertime.
+    fn check(&mut self, origin: Vec3, now: f64) -> bool {
+        let moved = self
+            .origin
+            .is_none_or(|last| (origin - last).abs().max_element() > SLEEP_TOLERANCE);
+        self.origin = Some(origin);
+        if moved {
+            self.changed = now;
+            return false;
+        }
+        now - self.changed >= SLEEP_AFTER_TIME
+    }
 }
 
 /// m_iFrictionAnimState (RAGDOLL_FRICTION_NONE, _IN, _HOLD, _OUT, _OFF).
@@ -155,10 +192,14 @@ pub struct Ragdolls {
     /// Shots tested against ragdolls, and the last one that missed (diagnostics).
     pub shots_seen: u32,
     pub last_missed_shot: Option<(Vec3, Vec3)>,
+    /// Shots FX_AffectRagdolls refused because more than one ragdoll was simulating.
+    pub shots_busy: u32,
     pub blast_pushes: u32,
     pub pins: u32,
     /// Ragdolls that started with a death pose's animation velocity.
     pub death_poses: u32,
+    /// PhysForceRagdollToSleep calls (CheckSettleStationaryRagdoll).
+    pub forced_sleeps: u32,
     /// Crossbow BoltImpacts that found no ragdoll solid after their retry, and the last
     /// one's ray (diagnostics).
     pub bolt_misses: u32,
@@ -302,6 +343,7 @@ impl Ragdolls {
                 pins: Vec::new(),
                 fade: None,
                 friction: AnimatedFriction::default(),
+                settle: Settle::new(scene.time),
             },
         );
         self.spawned += 1;
@@ -367,6 +409,24 @@ impl Ragdolls {
     pub fn fading(&self) -> usize {
         self.active.values().filter(|r| r.fade.is_some()).count()
     }
+    /// Diagnostics: per ragdoll entity, its awake solids' activity (Physics::ragdoll_activity).
+    pub fn activity(&self, physics: &Physics) -> BTreeMap<usize, Vec<(usize, f32, f32, f32)>> {
+        self.active
+            .iter()
+            .map(|(&id, r)| (id, physics.ragdoll_activity(&r.bodies)))
+            .collect()
+    }
+    /// CRagdollLRURetirement m_iSimulatedRagdollCount: ragdolls whose root solid is awake.
+    pub fn simulating(&self, physics: &Physics) -> usize {
+        self.active
+            .values()
+            .filter(|r| {
+                physics
+                    .ragdoll_body_center(r.bodies[0])
+                    .is_some_and(|(_, awake)| awake)
+            })
+            .count()
+    }
     pub fn remove(&mut self, scene: &mut Scene, physics: &mut Physics, id: usize) {
         if let Some(r) = self.active.remove(&id) {
             physics.remove_ragdoll(&r.bodies);
@@ -392,16 +452,8 @@ impl Ragdolls {
             match impact {
                 Impact::Shot { start, end } => {
                     // FX_AffectRagdolls: not while more than one ragdoll simulates.
-                    let simulating = self
-                        .active
-                        .values()
-                        .filter(|r| {
-                            physics
-                                .ragdoll_body_center(r.bodies[0])
-                                .is_some_and(|(_, awake)| awake)
-                        })
-                        .count();
-                    if simulating > 1 {
+                    if self.simulating(physics) > 1 {
+                        self.shots_busy += 1;
                         continue;
                     }
                     self.shots_seen += 1;
@@ -412,7 +464,9 @@ impl Ragdolls {
                     let Some(id) = owner(&self.active, body) else {
                         continue;
                     };
-                    let ragdoll = &self.active[&id];
+                    let Some(ragdoll) = self.active.get_mut(&id) else {
+                        continue;
+                    };
                     if ragdoll.born >= scene.time {
                         continue;
                     }
@@ -426,6 +480,7 @@ impl Ragdolls {
                         dir.normalize_or_zero() * SHOT_IMPULSE,
                         at,
                     );
+                    ragdoll.settle.changed = scene.time;
                     self.shot_pushes += 1;
                 }
                 Impact::Blast {
@@ -436,7 +491,7 @@ impl Ragdolls {
                     if radius <= 0. || magnitude <= 0. {
                         continue;
                     }
-                    for (&id, ragdoll) in &self.active {
+                    for (&id, ragdoll) in &mut self.active {
                         if ragdoll.born >= scene.time {
                             continue;
                         }
@@ -459,6 +514,8 @@ impl Ragdolls {
                             continue;
                         };
                         physics.ragdoll_impulse_at(ragdoll.bodies[0], push * BLAST_IMPULSE, center);
+                        // ImpactTrace: ResetRagdollSleepAfterTime.
+                        ragdoll.settle.changed = scene.time;
                         self.blast_pushes += 1;
                     }
                 }
@@ -529,6 +586,22 @@ impl Ragdolls {
                 .think(ragdoll.model.animated_friction, scene.time)
             {
                 physics.ragdoll_joint_friction(&ragdoll.bodies, friction as f32);
+            }
+        }
+        // CRagdoll::VPhysicsUpdate -> CheckSettleStationaryRagdoll: a ragdoll that stays
+        // (nearly) still is forced asleep, so FX_AffectRagdolls' simulating count drops.
+        for ragdoll in self.active.values_mut() {
+            let awake = ragdoll.bodies.iter().any(|h| {
+                physics
+                    .ragdoll_body_center(*h)
+                    .is_some_and(|(_, awake)| awake)
+            });
+            let Some(root) = ragdoll.bodies.first().and_then(|h| physics.body_state(*h)) else {
+                continue;
+            };
+            if awake && ragdoll.settle.check(root.position, scene.time) {
+                physics.ragdoll_sleep(&ragdoll.bodies);
+                self.forced_sleeps += 1;
             }
         }
         for (&id, ragdoll) in &self.active {
@@ -655,6 +728,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_still_ragdoll_is_forced_asleep_after_ragdoll_sleepaftertime() {
+        // Created at t 10, then creeping 0.1 units per 15 ms update: asleep at t 15.
+        let mut settle = Settle::new(10.);
+        let mut slept = None;
+        for tick in 0..400 {
+            let now = 10. + f64::from(tick) * 0.015;
+            let origin = Vec3::new(0.1 * tick as f32, 0., 70.);
+            if settle.check(origin, now) {
+                slept = Some(now);
+                break;
+            }
+        }
+        assert!(slept.is_some_and(|t| (t - 15.).abs() < 0.016), "{slept:?}");
+        // A step over 1 unit on one axis restarts the five seconds; so does an impact.
+        let mut settle = Settle::new(0.);
+        assert!(!settle.check(Vec3::ZERO, 0.));
+        assert!(!settle.check(Vec3::new(0., 1.5, 0.), 4.));
+        assert!(!settle.check(Vec3::new(0., 1.5, 0.), 8.9));
+        assert!(settle.check(Vec3::new(0., 1.5, 0.), 9.));
+        settle.changed = 9.;
+        assert!(!settle.check(Vec3::new(0., 1.5, 0.), 13.9));
+    }
+    #[test]
     fn death_poses_follow_the_hit_side_and_hitgroup() {
         use crate::skill::*;
         // An NPC facing +X (yaw 0); its right is -Y.
@@ -763,6 +859,7 @@ mod tests {
                     pins: Vec::new(),
                     fade: None,
                     friction: AnimatedFriction::default(),
+                    settle: Settle::new(0.),
                 },
             );
         }

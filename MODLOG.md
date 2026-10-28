@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-28 session 35: ragdolls rest, so post-death hits push again; merge to main prepared
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) `ragdolls::Settle`: CRagdoll::CheckSettleStationaryRagdoll (root within 1 unit per axis per update for ragdoll_sleepaftertime 5 s, then PhysForceRagdollToSleep via `Physics::ragdoll_sleep`) and ResetRagdollSleepAfterTime on shot/blast pushes. (2) Client ragdoll solids rest under 2 rad/s for 0.5 s (Rapier activation; was 0.5 rad/s for 2 s). (3) Diagnostics: `simulating`, `shots_busy`, `forced_sleeps`, per-solid `activity` in the report. (4) STATUS: consolidated open bugs list for future branches; trial merge of sessions 31-35 into main and of PR #4 on top.
+
+**Why:** Owner playtest of session 34: bullets and the crowbar no longer pushed corpses after death (native: three corpses react minutes later). FX_AffectRagdolls refuses pushes while more than one ragdoll simulates (SDK fx_impact.cpp; retail client.dll FUN_1012ffa0, LRU FUN_101aa3a0); our ragdolls never rested (Rapier per-solid thresholds vs limb jitter), so any two corpses blocked every later hit. Present since session 32; session 34's weaker joint friction adds jitter. Retail FUN_101a5390 confirms the settle rule (1.0, 5 s).
+
+**Tested how:** unit tests (settle timing/reset; landed ragdoll rests, impact wakes, forced sleep holds); packaged artifacts/s35 fixtures c-two-sleep, c-two-shots, c-pistol, c-crowbar, and the same against a pre-34 build (a8d41f3) in a scratch worktree; workspace tests; strict Clippy/fmt; regression artifacts/s35-regression (movement 26/26, weapons 17/17, attention 26/26; finals vs s34-regression: Breen slate 9 px, max 5); owned suite 63 pass.
+
+**Result:** Two corpses rest 3.2 s after the kill (before: never, 16 s run); with two corpses down 10 of 11 later pistol shots push (the refusal came while both still tumbled); single-corpse pistol and crowbar 8/8. Pre-34 build: 0 of 10 with two corpses (the failure predates session 34). Sessions 31-35 merge into main cleanly with an identical tree.
+
+**Still broken or not tested:** native time-to-rest and per-hit push size not A/B'd (the oracle refuses while the owner's hl2.exe runs); rest thresholds tuned, IVP's not read; the settle check runs per 15 ms update (native: per client frame). PR #4 conflicts with the merged main in 13 files. Everything else in the STATUS session 35 open list.
+
+**Next:** owner playtest of post-death pushes; push the merged main (owner decision, PR #4 then needs a merge of main); native time-to-rest A/B; shotgun length.
+
 ## 2026-10-28 session 34: crossbow pins behind doors, ragdoll punch re-measured, multidamage death force
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

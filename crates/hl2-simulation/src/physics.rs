@@ -96,6 +96,12 @@ const INTERACTIVE_DEBRIS_GROUPS: InteractionGroups = InteractionGroups::new(
 /// every server trace ignore them. Self collisions follow the model's collision rules
 /// (contact pair filter).
 const RAGDOLL_GROUP: Group = Group::GROUP_8;
+/// Rest thresholds for client ragdoll solids (see spawn_ragdoll): angular speed (rad/s)
+/// and seconds every solid must stay under them (linear: Rapier's 0.4 m/s, ~16 units/s).
+/// Tuned so landed hall corpses rest within about a second; IVP's own deactivation
+/// constants are not read (retail vphysics.dll).
+const RAGDOLL_SLEEP_ANGULAR: f32 = 2.;
+const RAGDOLL_SLEEP_TIME: f32 = 0.5;
 const RAGDOLL_GROUPS: InteractionGroups = InteractionGroups::new(
     RAGDOLL_GROUP,
     Group::ALL
@@ -2049,6 +2055,13 @@ impl Physics {
                     // Client ragdolls never push server props.
                     .dominance_group(-1),
             );
+            // IVP deactivates a resting ragdoll moments after it lands (FX_AffectRagdolls
+            // then counts it as asleep); Rapier's defaults (0.5 rad/s on every solid for
+            // 2 s) never let a landed ragdoll sleep: its light limbs keep jittering at up to
+            // ~1 rad/s while the root moves ~1 unit/s (session 35 hall corpses).
+            let activation = self.bodies[handle].activation_mut();
+            activation.angular_threshold = RAGDOLL_SLEEP_ANGULAR;
+            activation.time_until_sleep = RAGDOLL_SLEEP_TIME;
             let material = surface_material(world, &body.surfaceprop);
             for shape in shapes {
                 let builder = ColliderBuilder::new(shape)
@@ -2226,6 +2239,36 @@ impl Physics {
                     joint.data.set_motor_velocity(axis, 0., 1e3);
                     joint.data.set_motor_max_force(axis, torque);
                 }
+            }
+        }
+    }
+    /// Diagnostics: each awake ragdoll solid's index, speed (units/s), angular speed (rad/s)
+    /// and Rapier time_since_can_sleep, fastest first.
+    pub fn ragdoll_activity(&self, handles: &[RigidBodyHandle]) -> Vec<(usize, f32, f32, f32)> {
+        let mut out: Vec<_> = handles
+            .iter()
+            .enumerate()
+            .filter_map(|(i, h)| {
+                let b = self.bodies.get(*h)?;
+                (!b.is_sleeping()).then(|| {
+                    let a = b.activation();
+                    (
+                        i,
+                        b.linvel().norm() / SCALE,
+                        b.angvel().norm(),
+                        a.time_since_can_sleep,
+                    )
+                })
+            })
+            .collect();
+        out.sort_by(|a, b| b.1.total_cmp(&a.1));
+        out
+    }
+    /// CRagdoll::PhysForceRagdollToSleep: PhysForceClearVelocity and Sleep on every solid.
+    pub fn ragdoll_sleep(&mut self, handles: &[RigidBodyHandle]) {
+        for handle in handles {
+            if let Some(body) = self.bodies.get_mut(*handle) {
+                body.sleep();
             }
         }
     }
@@ -5016,6 +5059,48 @@ mod tests {
         assert!(pinned.distance(wall) < 4., "{pinned} vs wall {wall}");
         physics.remove_ragdoll(&handles);
         physics.remove_body(anchor);
+    }
+    #[test]
+    fn a_landed_ragdoll_rests_and_wakes_on_an_impact() {
+        // A landed ragdoll rests; PhysForceRagdollToSleep on a moving one: every solid sleeps and stays asleep
+        // (FX_AffectRagdolls' simulating count drops); an ImpactTrace push wakes it.
+        let model = two_cube_ragdoll();
+        let world = npc_floor_world();
+        let mut physics = Physics::new(&world);
+        let poses = [
+            (Vec3::new(0., 0., 60.), Quat::IDENTITY),
+            (Vec3::new(0., 0., 76.), Quat::IDENTITY),
+        ];
+        let handles = physics.spawn_ragdoll(&world, &model, &poses, Vec3::ZERO, 1);
+        let awake = |physics: &Physics| {
+            handles
+                .iter()
+                .filter(|h| physics.ragdoll_body_center(**h).is_some_and(|(_, a)| a))
+                .count()
+        };
+        // Landed, it rests on its own within a few seconds (RAGDOLL_SLEEP_*).
+        let rested = (0..300).find(|_| {
+            physics.tick(0.015);
+            awake(&physics) == 0
+        });
+        assert!(rested.is_some_and(|tick| tick > 20), "{rested:?}");
+        let (center, _) = physics.ragdoll_body_center(handles[0]).unwrap();
+        physics.ragdoll_impulse_at(handles[0], Vec3::X * 4000., center);
+        physics.tick(0.015);
+        assert_eq!(awake(&physics), 2);
+        for _ in 0..100 {
+            physics.tick(0.015);
+        }
+        physics.ragdoll_sleep(&handles);
+        for _ in 0..20 {
+            physics.tick(0.015);
+            assert_eq!(awake(&physics), 0);
+        }
+        let (center, _) = physics.ragdoll_body_center(handles[0]).unwrap();
+        physics.ragdoll_impulse_at(handles[0], Vec3::X * 4000., center);
+        physics.tick(0.015);
+        assert_eq!(awake(&physics), 2);
+        assert!(physics.ragdoll_body_center(handles[0]).unwrap().0.x > center.x);
     }
     #[test]
     fn a_two_body_ragdoll_falls_jointed_and_stays_out_of_traces() {
