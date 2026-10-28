@@ -333,6 +333,9 @@ pub struct RagdollModel {
     /// (body indices) collide with each other.
     pub self_collisions: bool,
     pub collision_pairs: Vec<(usize, usize)>,
+    /// CRagdollAnimatedFriction ("animatedfriction"): min and max joint friction, then the
+    /// ramp-in, ramp-out and hold times (C_ClientRagdoll::HandleAnimatedFriction).
+    pub animated_friction: Option<[f32; 5]>,
 }
 /// One ragdoll solid: the studio bone it simulates and its authored parameters.
 #[derive(Clone, Debug, Serialize, Deserialize)]

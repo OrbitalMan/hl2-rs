@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-28 session 34: crossbow pins behind doors, ragdoll punch re-measured, multidamage death force
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) Crossbow pins: BoltTouch's behind-trace uses MASK_BLOCKLOS with StandardFilterRules (studio models skipped: the trace passes prop_door_rotating leaves), `Physics::masked_ray`; `ragdoll_ray` tests ragdoll solids directly so a pin on the ragdoll's spawn tick finds it; `bolt_misses`/`last_missed_bolt` diagnostics. (2) Shotgun death force: a pellet batch that kills its target gives the ragdoll every pellet's summed force (ApplyMultiDamage). (3) Ragdolls: death poses (from the parked session 33b branch, without the withdrawn push), animated joint friction (C_ClientRagdoll::HandleAnimatedFriction), constraint torques x DEG2RAD (ragdoll .phy friction and phys_hinge). Branch `wip/session34-20261028`.
+
+**Why:** Owner reports: the hall cop pins to the noexit door natively but not in ours; shotgun kills lack native punch. Retail server.dll FUN_1027c0a0 (StandardFilterRules) and vphysics.dll FUN_1000c820/FUN_1000b110 (SetAngularMotor/InitHinge x DEG2RAD), FUN_10028df0 (ragdoll constraint parser), SDK c_baseanimating.cpp/death_pose.cpp/ragdoll_shared.cpp/gamerules.cpp.
+
+**Tested how:** unit tests (door behind-trace, spawn-tick ragdoll ray, death poses, friction ramp, shotgun batch force); owned test on d1_trainstation_02 (hall noexit pins, east station_entrance does not); packaged pin-hall vs native T104329Z; single-shot native recordings (private ragdoll-punch-20261028) vs packaged pk-/pkf- fixtures measured by background subtraction; regression artifacts/s34-regression; strict Clippy/fmt.
+
+**Result:** Pin-hall corpse hangs upright against the door like native. Front-facing 40 HP cop, one shot: 357 native 122.5 / ours 127 units; shotgun native 95.5-99.2 / ours ~25 before, 127-133 after; SMG grenade throws both out of the 245-unit view. Session 33's "native ~2x ours" came from refire-contaminated recordings and a tracker locked onto walls (rejected). Regression 26/26, 17/17, 26/26, finals within known variance.
+
+**Still broken or not tested:** shotgun ~30% long (one spread each); the vphysics ragdoll constraint init's torque conversion is assumed DEG2RAD (not read); phys_hinge friction change not re-tested in its scenes; native SetHealth makes the cop turn (ours does not); pistol slide not re-measured; death-pose convention checked against the SDK and these A/Bs only.
+
+**Next:** owner playtest and merge decision; shotgun spread/force-bone A/B; prop_ragdoll entities, headcrab release, burning ragdolls; NPC behaviors in campaign order.
+
 ## 2026-10-28: retail virtual sequence lookup and loaded source mapping
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material subagent owned_sequence_candidates independently checked owned-model candidate order and descriptors, same exposed family; exact identifier unavailable. Claude owns Rust implementation.

@@ -10,9 +10,9 @@
 //! playground uses it for the tic-tac-toe blocks (OnPlayerUse, magnitude 18) and the
 //! swings (trigger_once, magnitude 0.2/0.25), all NODAMAGE.
 //!
+//! The target center is BodyTarget -> WorldSpaceCenter, the collision bounds' center.
 //! Not modeled: SF_PHYSEXPLOSION_PUSH_PLAYER / DISORIENT_PLAYER (counted in
-//! `unsupported`), the target center is the body's center of mass rather than the
-//! collision bounds' center (BodyTarget -> WorldSpaceCenter).
+//! `unsupported`).
 //!
 //! env_physimpact (CPhysImpact::InputImpact) shares the module: a trace from the entity
 //! along its angles, or toward its direction entity (UTIL_PointAtNamedEntity), for
@@ -79,7 +79,12 @@ impl PhysExplosions {
                 let Some(body) = physics.entity_body(target) else {
                     continue;
                 };
-                let Some(spot) = physics.center_of_mass(body) else {
+                // BodyTarget -> WorldSpaceCenter: the collision bounds' center (session 17:
+                // the tic-tac-toe blocks' mass centers sit 2 units off their hinge axis).
+                let Some(spot) = physics
+                    .bounds_center(body)
+                    .or_else(|| physics.center_of_mass(body))
+                else {
                     continue;
                 };
                 let mut from = origin;

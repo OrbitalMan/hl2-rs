@@ -366,6 +366,7 @@ pub fn ragdoll_model(
         joints,
         self_collisions: ragdoll.self_collisions,
         collision_pairs,
+        animated_friction: ragdoll.animated_friction,
     }))
 }
 

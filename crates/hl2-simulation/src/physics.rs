@@ -1054,8 +1054,9 @@ impl Physics {
             }
             let joint: GenericJoint = match class {
                 "phys_hinge" => {
-                    // kg in^2/s^2 -> N m.
-                    let friction = number("hingefriction") * 1000. * SCALE * SCALE;
+                    // SetAxisFriction(hingefriction x 1000), x DEG2RAD into IVP (retail
+                    // vphysics InitHinge FUN_1000b110).
+                    let friction = (number("hingefriction") * 1000.).to_radians();
                     let mut joint = GenericJointBuilder::new(JointAxesMask::LOCKED_REVOLUTE_AXES)
                         .local_frame1(local(a))
                         .local_frame2(local(b))
@@ -2111,13 +2112,14 @@ impl Physics {
                 .limits(JointAxis::AngX, limit(0))
                 .limits(JointAxis::AngY, limit(1))
                 .limits(JointAxis::AngZ, limit(2));
-            // constraint_axislimit_t torque: joint friction (kg in^2/s^2 -> N m, as
-            // phys_hinge).
+            // constraint_axislimit_t torque: joint friction, x DEG2RAD into IVP (retail
+            // vphysics converts every constraint torque so: InitHinge FUN_1000b110,
+            // SetAngularMotor FUN_1000c820; the ragdoll init itself is not read).
             for (axis, friction) in [JointAxis::AngX, JointAxis::AngY, JointAxis::AngZ]
                 .into_iter()
                 .zip(joint.friction)
             {
-                let friction = friction * 1000. * SCALE * SCALE;
+                let friction = friction.to_radians();
                 if friction > 0. {
                     builder = builder
                         .motor_velocity(axis, 0., 1e3)
@@ -2201,6 +2203,39 @@ impl Physics {
         if let Some(body) = self.bodies.get_mut(handle) {
             let f = impulse / 39.37;
             body.apply_impulse_at_point(vector![f.x, f.y, f.z], Point::from(vector(point)), true);
+        }
+    }
+    /// IPhysicsConstraint::SetAngularMotor(0, friction) on every joint between two of these
+    /// ragdoll bodies (crossbow pins excluded): retail vphysics FUN_1000c820 hands a
+    /// ragdoll constraint friction x DEG2RAD (N m) to all its axes (FUN_10031810).
+    pub fn ragdoll_joint_friction(&mut self, handles: &[RigidBodyHandle], friction: f32) {
+        let torque = friction.abs().to_radians();
+        let joints: Vec<ImpulseJointHandle> = handles
+            .iter()
+            .flat_map(|&body| {
+                self.impulses
+                    .attached_joints(body)
+                    .filter(move |(_, child, _, _)| *child == body)
+                    .filter(|(parent, ..)| handles.contains(parent))
+                    .map(|(_, _, joint, _)| joint)
+            })
+            .collect();
+        for handle in joints {
+            if let Some(joint) = self.impulses.get_mut(handle, true) {
+                for axis in [JointAxis::AngX, JointAxis::AngY, JointAxis::AngZ] {
+                    joint.data.set_motor_velocity(axis, 0., 1e3);
+                    joint.data.set_motor_max_force(axis, torque);
+                }
+            }
+        }
+    }
+    /// IPhysicsObject::AddVelocity: linear (Source units/s) and world angular (rad/s).
+    pub fn ragdoll_add_velocity(&mut self, handle: RigidBodyHandle, linear: Vec3, angular: Vec3) {
+        if let Some(body) = self.bodies.get_mut(handle) {
+            let v = *body.linvel() + vector(linear);
+            let w = *body.angvel() + vector![angular.x, angular.y, angular.z];
+            body.set_linvel(v, true);
+            body.set_angvel(w, true);
         }
     }
     /// A ragdoll body's center of mass (Source units) and whether it is simulating.
@@ -2837,6 +2872,22 @@ impl Physics {
     /// World center of mass (units); the body's linear velocity is the velocity there.
     pub fn center_of_mass(&self, handle: RigidBodyHandle) -> Option<Vec3> {
         let c = self.bodies.get(handle)?.center_of_mass();
+        Some(Vec3::new(c.x, c.y, c.z) / SCALE)
+    }
+    /// CCollisionProperty::WorldSpaceCenter of a VPhysics body: the center of its
+    /// collision bounds in body space (the OBB), placed at the body's pose.
+    pub fn bounds_center(&self, handle: RigidBodyHandle) -> Option<Vec3> {
+        let body = self.bodies.get(handle)?;
+        let local = body
+            .colliders()
+            .iter()
+            .filter_map(|c| self.colliders.get(*c))
+            .filter_map(|c| {
+                let pose = c.position_wrt_parent().copied()?;
+                Some(c.shape().compute_aabb(&pose))
+            })
+            .reduce(|a, b| a.merged(&b))?;
+        let c = body.position() * local.center();
         Some(Vec3::new(c.x, c.y, c.z) / SCALE)
     }
     /// Mass (kg) of an entity's dynamic VPhysics body.
@@ -4918,6 +4969,7 @@ mod tests {
             }],
             self_collisions: false,
             collision_pairs: Vec::new(),
+            animated_friction: None,
         }
     }
     #[test]
