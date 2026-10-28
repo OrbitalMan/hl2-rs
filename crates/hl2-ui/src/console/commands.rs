@@ -206,16 +206,10 @@ pub const COMMANDS: &[Spec] = &[
         super::background_debug::background_blur_opacity,
     ),
     command(
-        "background_map_fov_horizontal",
-        "background_map_fov_horizontal [degrees]: query or set background map horizontal field of view",
+        "background_map_fov",
+        "background_map_fov [degrees]: query or set background map field of view",
         &[Arg::Free],
-        super::background_debug::background_map_fov_horizontal,
-    ),
-    command(
-        "background_map_fov_vertical",
-        "background_map_fov_vertical [degrees]: query or set background map vertical field of view",
-        &[Arg::Free],
-        super::background_debug::background_map_fov_vertical,
+        super::background_debug::background_map_fov,
     ),
     command(
         "getpos",

@@ -348,8 +348,7 @@ impl Simulation {
             Effect::BackgroundDebugMode(on) => {
                 if !on {
                     self.background_debug.enabled = false;
-                    self.background_debug.fov_horizontal = None;
-                    self.background_debug.fov_vertical = None;
+                    self.background_debug.fov = None;
                     ui.source.background_debug_mode = false;
                     ui.source.log("background_debug_mode 0");
                 } else {
@@ -383,26 +382,15 @@ impl Simulation {
                 self.background_debug.base_blur_opacity = opacity;
                 ui.source.background_blur_opacity = opacity;
             }
-            Effect::BackgroundMapFovHorizontal(Some(deg)) => {
-                self.background_debug.fov_horizontal = Some(deg);
-                ui.source
-                    .log(format!("background_map_fov_horizontal {deg:.2}"));
+            Effect::BackgroundMapFov(Some(deg)) => {
+                self.background_debug.fov = Some(deg);
+                ui.source.log(format!("background_map_fov {deg:.2}"));
             }
-            Effect::BackgroundMapFovHorizontal(None) => {
-                let (fov_h, _) = self.background_debug.fov(aspect);
-                ui.source.log(format!(
-                    "\"background_map_fov_horizontal\" = \"{fov_h:.2}\""
-                ));
-            }
-            Effect::BackgroundMapFovVertical(Some(deg)) => {
-                self.background_debug.fov_vertical = Some(deg);
+            Effect::BackgroundMapFov(None) => {
+                let fov = self.background_debug.fov(aspect);
+                self.background_debug.fov = None;
                 ui.source
-                    .log(format!("background_map_fov_vertical {deg:.2}"));
-            }
-            Effect::BackgroundMapFovVertical(None) => {
-                let (_, fov_v) = self.background_debug.fov(aspect);
-                ui.source
-                    .log(format!("\"background_map_fov_vertical\" = \"{fov_v:.2}\""));
+                    .log(format!("\"background_map_fov\" = \"{fov:.2}\""));
             }
             _ => {}
         }
@@ -498,10 +486,7 @@ impl Simulation {
                 Effect::ViewmodelTweakReset => self.viewmodel_tweak_reset(ui),
                 Effect::BackgroundDebugMode(_)
                 | Effect::BackgroundBlurOpacity(_)
-                | Effect::BackgroundMapFovHorizontal(_)
-                | Effect::BackgroundMapFovVertical(_) => {
-                    self.apply_background_debug_effect(ui, effect)
-                }
+                | Effect::BackgroundMapFov(_) => self.apply_background_debug_effect(ui, effect),
                 Effect::Getpos | Effect::Setpos { .. } | Effect::Setang(_) => {
                     self.apply_pose_effect(ui, effect)
                 }

@@ -108,24 +108,16 @@ pub(crate) fn present_player_view(
             sim.background_level,
         );
         if let Projection::Perspective(perspective) = &mut *projection {
-            if sim.background_debug.enabled {
-                let (fov_h, fov_v) = sim.background_debug.fov(aspect);
-                let fov_v_rad = fov_v.to_radians();
-                let fov_h_rad = fov_h.to_radians();
-                let custom_aspect = (fov_h_rad * 0.5).tan() / (fov_v_rad * 0.5).tan().max(1e-5);
-                if perspective.fov != fov_v_rad {
-                    perspective.fov = fov_v_rad;
-                }
-                if perspective.aspect_ratio != custom_aspect {
-                    perspective.aspect_ratio = custom_aspect;
-                }
+            let active_fov = if sim.background_debug.enabled {
+                sim.background_debug.fov(aspect).to_radians()
             } else {
-                if perspective.fov != fov {
-                    perspective.fov = fov;
-                }
-                if perspective.aspect_ratio != aspect {
-                    perspective.aspect_ratio = aspect;
-                }
+                fov
+            };
+            if perspective.fov != active_fov {
+                perspective.fov = active_fov;
+            }
+            if perspective.aspect_ratio != aspect {
+                perspective.aspect_ratio = aspect;
             }
         }
     }

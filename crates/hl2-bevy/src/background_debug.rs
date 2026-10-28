@@ -1,12 +1,7 @@
 //! Background visual debug mode: overlay, blur adjustment, and camera FOV tuning.
 
 use bevy::prelude::KeyCode;
-pub const BACKGROUND_ADJUST_KEYS: &[KeyCode] = &[
-    KeyCode::ArrowUp,
-    KeyCode::ArrowDown,
-    KeyCode::ArrowLeft,
-    KeyCode::ArrowRight,
-];
+pub const BACKGROUND_ADJUST_KEYS: &[KeyCode] = &[KeyCode::ArrowDown, KeyCode::ArrowUp];
 pub const BACKGROUND_OPACITY_KEYS: &[KeyCode] = &[KeyCode::Comma, KeyCode::Period];
 
 /// Derives a readable aspect ratio label (e.g. "16:9", "4:3", "Fit Display").
@@ -42,8 +37,7 @@ pub struct BackgroundDebug {
     pub enabled: bool,
     pub blur_opacity: u8,
     pub base_blur_opacity: u8,
-    pub fov_horizontal: Option<f32>,
-    pub fov_vertical: Option<f32>,
+    pub fov: Option<f32>,
     pub state_label: String,
     pub map_name: String,
     pub blur_texture_name: String,
@@ -57,8 +51,7 @@ impl Default for BackgroundDebug {
             enabled: false,
             blur_opacity: 50,
             base_blur_opacity: 50,
-            fov_horizontal: None,
-            fov_vertical: None,
+            fov: None,
             state_label: "Ready".to_owned(),
             map_name: "background01".to_owned(),
             blur_texture_name: "background01_widescreen".to_owned(),
@@ -69,29 +62,23 @@ impl Default for BackgroundDebug {
 }
 
 impl BackgroundDebug {
-    /// Current horizontal and vertical field of view in degrees.
-    pub fn fov(&self, aspect: f32) -> (f32, f32) {
+    /// Current field of view in degrees.
+    pub fn fov(&self, aspect: f32) -> f32 {
         let def_v = crate::camera::world_fov(75., 75., aspect, 0., true).to_degrees();
-        let def_h = (2. * (aspect * (def_v.to_radians() * 0.5).tan()).atan()).to_degrees();
-        let h = self.fov_horizontal.unwrap_or(def_h);
-        let v = self.fov_vertical.unwrap_or(def_v);
-        (h, v)
+        self.fov.unwrap_or(def_v)
     }
 
     /// Formats the lines displayed in the debug overlay.
     pub fn lines(&self, aspect: f32) -> Vec<String> {
-        let (fov_h, fov_v) = self.fov(aspect);
+        let fov = self.fov(aspect);
         vec![
             format!("state: {}  |  map: {}", self.state_label, self.map_name),
             format!("blur_texture: {}", self.blur_texture_name),
             format!(
-                "blur_opacity: {}%  ([: 0  ]: 100  ,: -1%  .: +1%)",
+                "blur_opacity: {}%  (left: 0  right: 100  ,: -1%  .: +1%)",
                 self.blur_opacity
             ),
-            format!(
-                "fov: horizontal {:.2}°  vertical {:.2}°  (L/R: H, D/U: V)",
-                fov_h, fov_v
-            ),
+            format!("fov: {:.2}°  (D/U)", fov),
             "Shift = 1.0  Alt = 0.01    hold to repeat    background_debug_mode 0".to_owned(),
         ]
     }
@@ -147,28 +134,18 @@ impl BackgroundDebug {
 
     /// Adjusts FOV based on fired arrow keys.
     pub fn adjust_fov(&mut self, fired: &[KeyCode], step: f32, aspect: f32) -> bool {
-        let (mut h, mut v) = self.fov(aspect);
+        let mut v = self.fov(aspect);
         let mut changed = false;
         for key in fired {
             match *key {
-                KeyCode::ArrowLeft => {
-                    h = ((h - step) * 100.0).round() / 100.0;
-                    self.fov_horizontal = Some(h.clamp(1.0, 170.0));
-                    changed = true;
-                }
-                KeyCode::ArrowRight => {
-                    h = ((h + step) * 100.0).round() / 100.0;
-                    self.fov_horizontal = Some(h.clamp(1.0, 170.0));
-                    changed = true;
-                }
                 KeyCode::ArrowDown => {
                     v = ((v - step) * 100.0).round() / 100.0;
-                    self.fov_vertical = Some(v.clamp(1.0, 170.0));
+                    self.fov = Some(v.clamp(1.0, 170.0));
                     changed = true;
                 }
                 KeyCode::ArrowUp => {
                     v = ((v + step) * 100.0).round() / 100.0;
-                    self.fov_vertical = Some(v.clamp(1.0, 170.0));
+                    self.fov = Some(v.clamp(1.0, 170.0));
                     changed = true;
                 }
                 _ => {}
@@ -177,7 +154,7 @@ impl BackgroundDebug {
         changed
     }
 
-    /// Checks if aspect ratio changed, updates baseline FOVs, and logs to console.
+    /// Checks if aspect ratio changed, updates baseline FOVs, blur texture name, and logs to console.
     pub fn check_aspect_change(
         &mut self,
         aspect: f32,
@@ -194,11 +171,11 @@ impl BackgroundDebug {
         self.last_aspect = Some(aspect);
         if changed {
             let def_v = crate::camera::world_fov(75., 75., aspect, 0., true).to_degrees();
-            let def_h = (2. * (aspect * (def_v.to_radians() * 0.5).tan()).atan()).to_degrees();
-            self.fov_horizontal = Some(def_h);
-            self.fov_vertical = Some(def_v);
+            self.fov = Some(def_v);
+            let is_wide = aspect > 4. / 3. + 1e-3;
+            self.blur_texture_name = console.blur_texture_name(&self.map_name, is_wide);
             console.log(format!(
-                "Changed aspect ratio to {aspect_label}, background FOV is set to {def_h:.2} / {def_v:.2}."
+                "Changed aspect ratio to {aspect_label}, background FOV is set to {def_v:.2}."
             ));
         }
     }
@@ -212,44 +189,27 @@ mod tests {
     fn background_debug_default_fov_and_overrides() {
         let mut debug = BackgroundDebug::default();
         let aspect = 16. / 9.;
-        let (def_h, def_v) = debug.fov(aspect);
+        let def_v = debug.fov(aspect);
         assert!((def_v - 59.85).abs() < 0.2);
-        assert!((def_h - 91.31).abs() < 0.2);
 
-        // Setting explicit horizontal FOV
-        debug.fov_horizontal = Some(95.0);
-        let (h, v) = debug.fov(aspect);
-        assert_eq!(h, 95.0);
-        assert_eq!(v, def_v);
-
-        // Setting explicit vertical FOV
-        debug.fov_vertical = Some(65.0);
-        let (h, v) = debug.fov(aspect);
-        assert_eq!(h, 95.0);
-        assert_eq!(v, 65.0);
+        // Setting explicit FOV
+        debug.fov = Some(65.0);
+        assert_eq!(debug.fov(aspect), 65.0);
     }
 
     #[test]
     fn background_debug_arrow_adjustments() {
         let mut debug = BackgroundDebug::default();
         let aspect = 16. / 9.;
-        let (init_h, init_v) = debug.fov(aspect);
+        let init_v = debug.fov(aspect);
 
-        // ArrowRight increases horizontal FOV
-        assert!(debug.adjust_fov(&[KeyCode::ArrowRight], 1.0, aspect));
-        assert!((debug.fov_horizontal.unwrap() - (init_h + 1.0)).abs() < 0.02);
-
-        // ArrowLeft decreases horizontal FOV
-        assert!(debug.adjust_fov(&[KeyCode::ArrowLeft], 0.5, aspect));
-        assert!((debug.fov_horizontal.unwrap() - (init_h + 0.5)).abs() < 0.02);
-
-        // ArrowUp increases vertical FOV
+        // ArrowUp increases FOV
         assert!(debug.adjust_fov(&[KeyCode::ArrowUp], 2.0, aspect));
-        assert!((debug.fov_vertical.unwrap() - (init_v + 2.0)).abs() < 0.02);
+        assert!((debug.fov.unwrap() - (init_v + 2.0)).abs() < 0.02);
 
-        // ArrowDown decreases vertical FOV
+        // ArrowDown decreases FOV
         assert!(debug.adjust_fov(&[KeyCode::ArrowDown], 1.0, aspect));
-        assert!((debug.fov_vertical.unwrap() - (init_v + 1.0)).abs() < 0.02);
+        assert!((debug.fov.unwrap() - (init_v + 1.0)).abs() < 0.02);
     }
 
     #[test]
@@ -269,10 +229,9 @@ mod tests {
         assert!(lines[1].contains("blur_texture: background01_widescreen"));
         assert_eq!(
             lines[2],
-            "blur_opacity: 50%  ([: 0  ]: 100  ,: -1%  .: +1%)"
+            "blur_opacity: 50%  (left: 0  right: 100  ,: -1%  .: +1%)"
         );
-        assert!(lines[3].contains("fov: horizontal"));
-        assert!(lines[3].contains("vertical"));
+        assert!(lines[3].contains("fov: "));
     }
 
     #[test]
@@ -292,6 +251,11 @@ mod tests {
             .map(|l| l.text.as_str())
             .unwrap_or_default();
         assert!(log.contains("Changed aspect ratio to 16:9, background FOV is set to"));
+        assert_eq!(debug.blur_texture_name, "background01_widescreen");
+
+        // Change to 4:3 updates blur_texture_name to 4:3
+        debug.check_aspect_change(4. / 3., "4:3", &mut console);
+        assert_eq!(debug.blur_texture_name, "background01");
     }
 
     #[test]

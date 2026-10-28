@@ -8,12 +8,16 @@ fn background_debug_mode_command_behavior() {
         base: Mode::MainMenu,
         ..Default::default()
     };
-    // In MainMenu, enabling is allowed
+    console.set_mode(Mode::Console);
+    assert_eq!(console.mode(), Mode::Console);
+
+    // In MainMenu, enabling is allowed and focuses the menu base
     assert_eq!(
         console.submit("background_debug_mode 1"),
         vec![Effect::BackgroundDebugMode(true)]
     );
     assert!(console.background_debug_mode);
+    assert_eq!(console.mode(), Mode::MainMenu);
 
     // Disabling
     assert_eq!(
@@ -58,28 +62,17 @@ fn background_blur_opacity_requires_debug_mode() {
 fn background_map_fov_commands() {
     let mut console = Console::default();
     assert_eq!(
-        console.submit("background_map_fov_horizontal"),
-        vec![Effect::BackgroundMapFovHorizontal(None)]
+        console.submit("background_map_fov"),
+        vec![Effect::BackgroundMapFov(None)]
     );
     assert_eq!(
-        console.submit("background_map_fov_horizontal 90"),
-        vec![Effect::BackgroundMapFovHorizontal(Some(90.0))]
-    );
-    assert_eq!(
-        console.submit("background_map_fov_vertical"),
-        vec![Effect::BackgroundMapFovVertical(None)]
-    );
-    assert_eq!(
-        console.submit("background_map_fov_vertical 60"),
-        vec![Effect::BackgroundMapFovVertical(Some(60.0))]
+        console.submit("background_map_fov 60"),
+        vec![Effect::BackgroundMapFov(Some(60.0))]
     );
 
     // Invalid FOV values rejected
-    assert!(console.submit("background_map_fov_horizontal 0").is_empty());
-    assert!(console
-        .submit("background_map_fov_horizontal 180")
-        .is_empty());
-    assert!(console.submit("background_map_fov_vertical 200").is_empty());
+    assert!(console.submit("background_map_fov 0").is_empty());
+    assert!(console.submit("background_map_fov 200").is_empty());
 }
 
 #[test]

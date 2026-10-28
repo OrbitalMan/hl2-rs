@@ -25,7 +25,7 @@ impl Console {
                 .background_textures
                 .keys()
                 .any(|(_, name)| name == &wide_key);
-            if found {
+            if found || self.background_textures.is_empty() {
                 return wide_key;
             }
         }
@@ -56,6 +56,8 @@ pub(super) fn background_debug_mode(
         }
         console.background_debug_mode = true;
         console.log("background_debug_mode 1");
+        console.shell.windows.focus_base();
+        console.sync_mode();
         Ok(Some(Effect::BackgroundDebugMode(true)))
     } else {
         console.background_debug_mode = false;
@@ -92,13 +94,13 @@ pub(super) fn background_blur_opacity(
     Ok(Some(Effect::BackgroundBlurOpacity(opacity)))
 }
 
-pub(super) fn background_map_fov_horizontal(
+pub(super) fn background_map_fov(
     _console: &mut Console,
     spec: &'static Spec,
     args: &[String],
 ) -> Outcome {
     if args.is_empty() {
-        return Ok(Some(Effect::BackgroundMapFovHorizontal(None)));
+        return Ok(Some(Effect::BackgroundMapFov(None)));
     }
     let [value] = args else {
         return Err(spec.usage());
@@ -107,23 +109,5 @@ pub(super) fn background_map_fov_horizontal(
     if !(1.0..=170.0).contains(&deg) {
         return Err(spec.usage());
     }
-    Ok(Some(Effect::BackgroundMapFovHorizontal(Some(deg))))
-}
-
-pub(super) fn background_map_fov_vertical(
-    _console: &mut Console,
-    spec: &'static Spec,
-    args: &[String],
-) -> Outcome {
-    if args.is_empty() {
-        return Ok(Some(Effect::BackgroundMapFovVertical(None)));
-    }
-    let [value] = args else {
-        return Err(spec.usage());
-    };
-    let deg: f32 = parse(value).map_err(|_| spec.usage())?;
-    if !(1.0..=170.0).contains(&deg) {
-        return Err(spec.usage());
-    }
-    Ok(Some(Effect::BackgroundMapFovVertical(Some(deg))))
+    Ok(Some(Effect::BackgroundMapFov(Some(deg))))
 }

@@ -51,10 +51,8 @@ pub enum Effect {
     BackgroundDebugMode(bool),
     /// background_blur_opacity: set opacity of background blur overlay (0..=100).
     BackgroundBlurOpacity(u8),
-    /// background_map_fov_horizontal: query (None) or set (Some) background map horizontal FOV.
-    BackgroundMapFovHorizontal(Option<f32>),
-    /// background_map_fov_vertical: query (None) or set (Some) background map vertical FOV.
-    BackgroundMapFovVertical(Option<f32>),
+    /// background_map_fov: query (None) or set (Some) background map FOV.
+    BackgroundMapFov(Option<f32>),
 }
 
 /// A map of one installed game, named by the game's installation folder (`hl2`, `episodic`,

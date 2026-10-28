@@ -1,5 +1,35 @@
 # MODLOG
 
+## 2026-10-28 Refactor: background debug FOV unification, menu focus on enable, arrow opacity toggles, and dev overlay ordering
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:**
+- In `crates/hl2-ui/src/console/background_debug.rs`: upon enabling `background_debug_mode 1`, focus the menu base (`console.shell.windows.focus_base(); console.sync_mode();`) so the console moves out of focus and background debug key inputs are immediately active; in `blur_texture_name`, check if widescreen texture is present or if background textures map is empty, ensuring aspect ratio updates accurately reflect normal and widescreen blur texture names; rename `background_map_fov_vertical` to `background_map_fov` and remove `background_map_fov_horizontal`.
+- In `crates/hl2-ui/src/console/commands.rs`: register `background_map_fov` in place of `background_map_fov_vertical` and remove `background_map_fov_horizontal`.
+- In `crates/hl2-ui/src/console/effect.rs`: replace `BackgroundMapFovVertical` with `BackgroundMapFov` and remove `BackgroundMapFovHorizontal`.
+- In `crates/hl2-ui/src/console/background_debug_tests.rs`: update tests to verify menu focus on debug mode enable and test `background_map_fov` query, set, and range validation.
+- In `crates/hl2-bevy/src/background_debug.rs`: unify FOV state into `fov: Option<f32>` and method `fov(&self, aspect: f32) -> f32`; configure `BACKGROUND_ADJUST_KEYS` to down/up arrows; update HUD overlay line to `fov: X.XX° (D/U)` and blur opacity line to `(left: 0 right: 100 ,: -1% .: +1%)`; update `check_aspect_change` to recompute baseline FOV and blur texture name for the active map on aspect changes.
+- In `crates/hl2-bevy/src/camera.rs`: simplify camera perspective projection when background debug mode is enabled to apply `fov(aspect).to_radians()` with standard frame aspect.
+- In `crates/hl2-bevy/src/canvas_renderer.rs`: move `ui.source.draw(clock.elapsed_secs_f64())` to before `draw_debug_overlays` so that the background blur texture, menu buttons, and dialogs are rendered beneath developer overlays (F1 developer overlay, F4 NPC spawn panel, viewmodel debug, and background debug overlay).
+- In `crates/hl2-bevy/src/input.rs`: map `ArrowLeft` (and `BracketLeft`) to toggle 0% blur opacity and `ArrowRight` (and `BracketRight`) to toggle 100% blur opacity; use `ArrowDown` and `ArrowUp` to adjust FOV; update unit tests.
+- In `crates/hl2-bevy/src/simulation.rs`: apply `Effect::BackgroundMapFov` for query and setting, logging `"background_map_fov" = "X.XX"` or `background_map_fov X.XX`.
+**Why:**
+- Address user feedback:
+  1. Enabling `background_debug_mode 1` from the console immediately shifts focus to the menu so debug keys are active without requiring manual click/focus.
+  2. Horizontal FOV does not affect Half-Life 2 camera projection; remove it and rename vertical FOV controls to `background_map_fov`. Move 0%/100% opacity toggles to left/right arrow keys (`ArrowLeft`/`ArrowRight`), matching up/down arrow keys for FOV.
+  3. Ensure no in-game element, dialog, or background blur overlay covers developer overlays by rendering UI before developer debug overlays and spawn panels.
+  4. Ensure the `blur_texture` overlay label dynamically updates when aspect ratio changes between widescreen and 4:3.
+**Tested how:**
+- Validation suite (`validate.sh`: architecture guardrails, Python tests, cargo test across all workspace crates with 184 tests in `hl2-bevy` and 339 tests in `hl2-ui`, strict Clippy, format check, repository isolation, AGENTS.md budget).
+- Windows cross-target check (`check_windows.sh`).
+- Bevy release binary compilation (`scripts/build-bevy.sh`).
+**Result:**
+- Menu receives focus immediately when enabling background debug mode; left/right arrows toggle 0% and 100% blur opacity; down/up arrows adjust unified camera FOV; developer overlays consistently render on top of the background blur overlay and menu windows; blur texture label updates dynamically upon aspect ratio changes.
+**Still broken or not tested:**
+- Interactive window dragging and resizing during live gameplay.
+**Next:**
+- Await owner feedback or next UI task.
+
 ## 2026-10-28 Fix: enable background debug key actions during menu simulation pause
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

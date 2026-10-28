@@ -1,5 +1,22 @@
 # STATUS
 
+## Background debug FOV unification, menu focus, arrow opacity toggles, and dev overlay ordering (2026-10-28)
+
+Background debug mode has been updated:
+- Menu base focus on enable: activating `background_debug_mode 1` (typically via console command) focuses the menu base and
+  moves the console out of focus, allowing background debug keyboard controls to function immediately without manual clicking.
+- FOV controls unified to `background_map_fov`: horizontal FOV commands and state have been removed; camera FOV is unified
+  under `background_map_fov [degrees]` and adjusted with `ArrowDown` and `ArrowUp`. The overlay line displays `fov: X.XX° (D/U)`.
+- Left/Right arrows for opacity toggles: `ArrowLeft` sets blur opacity to 0% (and toggles back to base opacity on repeated press),
+  while `ArrowRight` sets blur opacity to 100% (and toggles back on repeated press). `BracketLeft` and `BracketRight` remain supported.
+  The overlay line displays `blur_opacity: X%  (left: 0  right: 100  ,: -1%  .: +1%)`.
+- Developer overlay ordering: in 2D canvas presentation, the UI (including menu background blur quad, buttons, and dialogs) is now
+  drawn before developer overlays, ensuring that neither the background blur overlay nor in-game dialogs cover the F1 developer overlay,
+  the F4 NPC spawn panel, viewmodel debug overlay, or background debug overlay.
+- Dynamic blur texture label: the `blur_texture` HUD label recomputes and dynamically updates upon aspect ratio changes between
+  widescreen and standard 4:3 formats.
+Verified with full validation suite (`validate.sh`), Windows cross-target check (`check_windows.sh`), and release build.
+
 ## Background debug key responsiveness in menu pause state resolved (2026-10-28)
 
 Background debug mode keys (arrow keys for camera horizontal/vertical FOV, `,`/`.` for 1% opacity adjustment, and `[`/`]`

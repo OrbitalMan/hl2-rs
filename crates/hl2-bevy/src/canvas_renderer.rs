@@ -410,6 +410,7 @@ pub fn present(
             format!("Map reconstruction preview  |  position {:.1}, {:.1}, {:.1}  |  Bevy/wgpu  |  {:.2} ms  |  {} materials / {} colliders / {} bodies", eye.x, eye.y, eye.z, hud.timing.frame_ms, stats.materials, sim.physics.colliders.len(), sim.physics.bodies.len()),
         ];
     }
+    ui.source.draw(clock.elapsed_secs_f64());
     // Overlays stack down the left edge in the order F1, viewmodel tweak, F4; hidden ones leave no gap.
     let stack_top = draw_debug_overlays(&ui, &sim, &hud.debug_lines, width, height);
     // F4 NPC spawn panel (ours, outside the hl2-ui menus).
@@ -454,7 +455,6 @@ pub fn present(
         .spawn_font
         .as_ref()
         .map_or(0, |font| font.rows_fit(stack_top, height));
-    ui.source.draw(clock.elapsed_secs_f64());
     game.scene
         .sounds
         .extend(hud.source.drain_sounds().into_iter().map(Into::into));

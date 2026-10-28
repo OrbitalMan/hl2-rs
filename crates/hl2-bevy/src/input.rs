@@ -500,8 +500,7 @@ fn process_debug_tuning_keys(
             .is_some_and(|u| !u.source.can_enable_background_debug());
     if in_gameplay {
         if sim.background_debug.enabled {
-            sim.background_debug.fov_horizontal = None;
-            sim.background_debug.fov_vertical = None;
+            sim.background_debug.fov = None;
         }
         sim.background_debug.enabled = false;
         if let Some(ref mut ui) = ui {
@@ -574,10 +573,14 @@ fn process_background_debug_keys(
         );
         sim.background_debug.adjust_opacity_step(&opacity_fired);
 
-        if input.keys.just_pressed(KeyCode::BracketLeft) {
+        if input.keys.just_pressed(KeyCode::ArrowLeft)
+            || input.keys.just_pressed(KeyCode::BracketLeft)
+        {
             sim.background_debug.toggle_zero_opacity();
         }
-        if input.keys.just_pressed(KeyCode::BracketRight) {
+        if input.keys.just_pressed(KeyCode::ArrowRight)
+            || input.keys.just_pressed(KeyCode::BracketRight)
+        {
             sim.background_debug.toggle_full_opacity();
         }
         if let Some(ref mut ui) = ui {
@@ -990,16 +993,16 @@ mod tests {
         assert_eq!(sim.background_debug.blur_opacity, 50);
         assert_eq!(ui.source.background_blur_opacity, 50);
 
-        // 6. ArrowRight, ArrowLeft, ArrowUp, ArrowDown adjust FOV
+        // 6. ArrowLeft toggles 0 opacity, ArrowRight toggles 100 opacity
         let mut keys = ButtonInput::default();
-        keys.press(KeyCode::ArrowRight);
+        keys.press(KeyCode::ArrowLeft);
         let tuning_input = DebugTuningInput {
             keys: &keys,
             time: Some(0.0),
             aspect: 16.0 / 9.0,
         };
         process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
-        let h1 = sim.background_debug.fov_horizontal.unwrap();
+        assert_eq!(sim.background_debug.blur_opacity, 0);
 
         let mut keys = ButtonInput::default();
         keys.press(KeyCode::ArrowLeft);
@@ -1009,9 +1012,29 @@ mod tests {
             aspect: 16.0 / 9.0,
         };
         process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
-        let h2 = sim.background_debug.fov_horizontal.unwrap();
-        assert!(h2 < h1);
+        assert_eq!(sim.background_debug.blur_opacity, 50);
 
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::ArrowRight);
+        let tuning_input = DebugTuningInput {
+            keys: &keys,
+            time: Some(0.0),
+            aspect: 16.0 / 9.0,
+        };
+        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
+        assert_eq!(sim.background_debug.blur_opacity, 100);
+
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::ArrowRight);
+        let tuning_input = DebugTuningInput {
+            keys: &keys,
+            time: Some(0.0),
+            aspect: 16.0 / 9.0,
+        };
+        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
+        assert_eq!(sim.background_debug.blur_opacity, 50);
+
+        // 7. ArrowUp and ArrowDown adjust FOV
         let mut keys = ButtonInput::default();
         keys.press(KeyCode::ArrowUp);
         let tuning_input = DebugTuningInput {
@@ -1020,9 +1043,20 @@ mod tests {
             aspect: 16.0 / 9.0,
         };
         process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
-        assert!(sim.background_debug.fov_vertical.is_some());
+        let fov1 = sim.background_debug.fov.unwrap();
 
-        // 7. When console is open, keys do not adjust opacity or FOV
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::ArrowDown);
+        let tuning_input = DebugTuningInput {
+            keys: &keys,
+            time: Some(0.0),
+            aspect: 16.0 / 9.0,
+        };
+        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
+        let fov2 = sim.background_debug.fov.unwrap();
+        assert!(fov2 < fov1);
+
+        // 8. When console is open, keys do not adjust opacity or FOV
         ui.source.set_mode(hl2_ui::console::Mode::Console);
         let mut keys = ButtonInput::default();
         keys.press(KeyCode::Comma);
