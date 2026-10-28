@@ -1,5 +1,30 @@
 # MODLOG
 
+## 2026-10-28 Fix: align menu background blur texture on fit-display aspect ratios
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** In `crates/hl2-ui/src/gameui/loading.rs`, `crates/hl2-ui/src/console.rs`, and
+`crates/hl2-ui/src/console/loading.rs`, change widescreen aspect threshold from `>= 1.6` to
+`> 4. / 3. + 1e-3` and inspect texture aspect in `background_source`. In
+`crates/hl2-bevy/src/camera/background_tests.rs`, expand `TESTED_ASPECTS` to include 1.5 (3:2)
+and MacBook Retina 1.54 fit-display ratios (3024/1964 and 3456/2234), verifying that ray extents
+match the 3D camera projection across all intermediate ratios.
+**Why:** On fit-display aspect ratios between 4:3 and 16:10 (e.g. MacBook Pro Retina panels at ~1.54
+aspect ratio), `is_widescreen` was previously evaluating to `false` because of the `>= 1.6` threshold.
+This caused the engine to select the 4:3 texture (`background01.vtf`) instead of the widescreen
+texture, and `background_source` fell through to uncropped drawing, horizontally stretching the 4:3
+texture by ~15.5% while the 3D background camera rendered with an undistorted vertical FOV.
+**Tested how:** validate.sh (1,194 Rust pass, 100 ignored; 27 Python, strict Clippy/fmt/architecture);
+unit tests in `camera::background_tests` verified ray alignment across 11 aspect ratios including 1.5,
+1.54, 16:10, 16:9, and ultrawide.
+**Result:** Pre-blurred background artwork on fit-display screens (such as MacBook Retina at 1.54)
+loads the widescreen texture and applies precise horizontal cropping, perfectly matching the 3D
+background camera rays with zero distortion.
+**Still broken or not tested:** Background map switching crashes at fixed and dynamic aspect ratios.
+**Next:** Diagnose and fix ECS entity lifecycle and camera suspension crashes during background map switches.
+
+
+
 ## 2026-10-28 Fix: eliminate initial flicker when opening child subdialogs over Options
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

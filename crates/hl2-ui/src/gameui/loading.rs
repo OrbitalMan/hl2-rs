@@ -396,7 +396,16 @@ pub struct LoadingDialog {
 /// so the blurred image does not stretch relative to the background camera's 3D projection.
 pub fn background_source(canvas: glam::Vec2, texture: glam::Vec2) -> source_ui::canvas::Rect {
     let aspect = canvas.x / canvas.y.max(1.);
-    let base_aspect = if aspect >= 1.6 { 16. / 9. } else { 4. / 3. };
+    let tex_aspect = texture.x / texture.y.max(1.);
+    let base_aspect = if tex_aspect >= 1.5 {
+        16. / 9.
+    } else if tex_aspect > 1.05 {
+        4. / 3.
+    } else if aspect > 4. / 3. + 1e-3 {
+        16. / 9.
+    } else {
+        4. / 3.
+    };
     let widest = crate::tuning::widest_design_aspect();
     if aspect < base_aspect {
         let kept = aspect / base_aspect;

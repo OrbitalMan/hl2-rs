@@ -44,7 +44,8 @@ impl Console {
             .filter(|l| !l.is_background() && !l.is_failed())
         {
             let _ = loading;
-            let is_widescreen = self.canvas.width() / self.canvas.height().max(1.0) >= 1.6;
+            let is_widescreen =
+                self.canvas.width() / self.canvas.height().max(1.0) > 4. / 3. + 1e-3;
             let bg = self
                 .loading_background
                 .as_ref()

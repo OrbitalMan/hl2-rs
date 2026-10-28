@@ -2,11 +2,14 @@
 use super::world_fov;
 use bevy::prelude::{Handle, UVec2, Window};
 
-const TESTED_ASPECTS: [f32; 8] = [
+const TESTED_ASPECTS: [f32; 11] = [
     9. / 16.,
     1.,
     5. / 4.,
     4. / 3.,
+    1.5,
+    3024. / 1964.,
+    3456. / 2234.,
     16. / 10.,
     16. / 9.,
     21. / 9.,
@@ -37,7 +40,11 @@ fn projection_rays_match_authored_artwork_crop() {
     for aspect in TESTED_ASPECTS {
         let canvas = glam::vec2(aspect * 900., 900.);
         let crop = background_source(canvas, glam::Vec2::ONE);
-        let base_aspect = if aspect >= 1.6 { 16. / 9. } else { 4. / 3. };
+        let base_aspect = if aspect > 4. / 3. + 1e-3 {
+            16. / 9.
+        } else {
+            4. / 3.
+        };
         let tan_v = (world_fov(110., 110., aspect, 90., true) * 0.5).tan();
         // Visible image-space ray extents follow the same crop as the blurred artwork.
         assert!(

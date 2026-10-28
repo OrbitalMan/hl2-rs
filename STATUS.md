@@ -1,5 +1,18 @@
 # STATUS
 
+## Menu background blur texture on fit-display aspect ratios aligned (2026-10-28)
+
+Pre-blurred chapter background textures on fit-display screens (such as MacBook Pro Retina panels at
+~1.54 aspect ratio and 3:2 displays at 1.5) now select the widescreen texture and crop horizontal
+margins precisely to match the 3D background camera projection. Previously, `is_widescreen` was
+gated at `aspect >= 1.6`, classifying intermediate aspect ratios as 4:3 and stretching the 4:3
+texture uncropped across the canvas. Threshold was lowered to `aspect > 4. / 3. + 1e-3` across
+`console.rs`, `console/loading.rs`, and `gameui/loading.rs`. `background_tests.rs` verifies
+exact ray parity across 11 aspect ratios including 1.5, 3024/1964, and 3456/2234. Full validation
+suite passes.
+
+
+
 ## Child subdialog parent fade-out initial flicker eliminated (2026-10-28)
 
 Opening a child subdialog over Options (such as Video > Advanced) now transitions the parent dialog's

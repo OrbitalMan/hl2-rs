@@ -608,7 +608,7 @@ impl Console {
         } else {
             self.main_menu.category()
         };
-        let is_widescreen = self.canvas.width() / self.canvas.height().max(1.0) >= 1.6;
+        let is_widescreen = self.canvas.width() / self.canvas.height().max(1.0) > 4. / 3. + 1e-3;
         let upcoming = self.upcoming_background(menu_cat);
         let bg_tex =
             upcoming.and_then(|(game, map)| self.background_texture(game, map, is_widescreen));
