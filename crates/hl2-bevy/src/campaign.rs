@@ -116,10 +116,11 @@ fn next_map_request(
 pub fn poll(
     mut commands: Commands,
     (options, mut campaign, mut ui, mut game, mut sim): Host,
-    (mut meshes, mut materials, mut images, mut sounds, mut effect_materials, mut inverse_binds): StartupAssets,
+    mut assets: StartupAssets,
     old_draws: Query<Entity, With<MapOwned>>,
     mut windows: Query<&mut CursorOptions, With<PrimaryWindow>>,
     status: Res<Status>,
+    frame: Option<Res<crate::video::GameFrame>>,
 ) {
     if let Some(job) = &campaign.job {
         loading::preserve_gameplay_request(&job.request, &mut ui);
@@ -226,7 +227,7 @@ pub fn poll(
         background: job.request.background,
     });
     for entity in &old_draws {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
     loading::install_view(&job.request, &options, &mut loaded, &mut sim, eye);
     if job.request.direct {
@@ -245,25 +246,14 @@ pub fn poll(
     loading::log_debug_load_finish(&job.request, true, &mut sim, &mut ui);
     ui.source
         .log(format!("Loaded {}/{}", loaded.game, loaded.world.name));
-    crate::install_map(
+    crate::map_install::install_loaded_map(
         loaded,
         &mut commands,
-        (
-            &mut meshes,
-            &mut materials,
-            &mut images,
-            &mut sounds,
-            &mut effect_materials,
-            &mut inverse_binds,
-        ),
+        &mut assets,
         &status,
-        (
-            options.cpu_skinning,
-            options.no_pvs,
-            options.world_partition,
-        ),
+        &options,
         ui.source.config.video.advanced.filtering,
-        options.mute,
+        frame.as_ref().map(|f| &f.image),
     );
     crate::capture::installed_frame(&mut commands, options.capture.as_ref());
 }

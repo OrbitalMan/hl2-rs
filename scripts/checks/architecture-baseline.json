@@ -24,7 +24,6 @@
   }
  },
  "duplicates": [
-  "05ac8e6c038a",
   "07341ef0ab54",
   "09b9626c2bad",
   "0c78f9d77d45",
@@ -94,7 +93,6 @@
   "74e26e982e06",
   "76516891ea51",
   "78c292436aaf",
-  "796f8affe434",
   "7c74c483b8f8",
   "7d3a1164b59c",
   "7fe4cad39c12",
@@ -106,7 +104,6 @@
   "8c809c98128a",
   "8d00c63721c0",
   "91da6daa7a2a",
-  "92a262edd854",
   "93546c5975fe",
   "993d94d596d0",
   "9b232cd1417f",
@@ -138,7 +135,6 @@
   "c598e4b6274f",
   "c775201a664b",
   "ccba164609c7",
-  "cdc674450b22",
   "ce0f6e21b531",
   "ce408197dc4f",
   "ce439e7b222c",
@@ -158,7 +154,6 @@
   "e8ca7eca78c4",
   "e9e17810ab69",
   "eafac703ec4e",
-  "f3e1c6a1eeec",
   "f59070197c8c",
   "fc1edf5f2624",
   "fc72ef3719ed",
@@ -170,7 +165,7 @@
   "crates/hl2-bevy/src/audio.rs": 1174,
   "crates/hl2-bevy/src/effects.rs": 1092,
   "crates/hl2-bevy/src/gameplay.rs": 1643,
-  "crates/hl2-bevy/src/main.rs": 1080,
+  "crates/hl2-bevy/src/main.rs": 1064,
   "crates/hl2-bevy/src/rendering.rs": 1509,
   "crates/hl2-bevy/src/video.rs": 1187,
   "crates/hl2-simulation/src/ai/default_schedules.rs": 1247,
@@ -207,7 +202,7 @@
    114
   ],
   "crates/hl2-bevy/src/campaign.rs::poll": [
-   154
+   144
   ],
   "crates/hl2-bevy/src/canvas_renderer.rs::present": [
    156
@@ -234,7 +229,7 @@
    118
   ],
   "crates/hl2-bevy/src/main.rs::main": [
-   326
+   320
   ],
   "crates/hl2-bevy/src/main.rs::monitor": [
    145
@@ -243,7 +238,7 @@
    203
   ],
   "crates/hl2-bevy/src/main.rs::setup": [
-   119
+   102
   ],
   "crates/hl2-bevy/src/performance.rs::install": [
    136

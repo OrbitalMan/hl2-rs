@@ -213,6 +213,20 @@ const HELP_LINES: &[&str] = &[
     "      --yaw <degrees>                 Set initial camera yaw angle in degrees (requires --map)",
 ];
 
+/// Resolves the asset root for Bevy AssetPlugin: prefers packaged `bevy-assets` beside executable if it has shaders,
+/// otherwise falls back to compile-time `assets` directory.
+pub(crate) fn resolve_asset_root() -> Result<PathBuf> {
+    let packaged_assets = std::env::current_exe()?
+        .parent()
+        .context("executable has no directory")?
+        .join("bevy-assets");
+    if packaged_assets.join("shaders/source.wgsl").is_file() {
+        Ok(packaged_assets)
+    } else {
+        Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"))
+    }
+}
+
 pub(super) fn print_help() {
     for line in HELP_LINES {
         println!("{line}");

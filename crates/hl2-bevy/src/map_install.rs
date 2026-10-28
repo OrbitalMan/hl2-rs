@@ -11,6 +11,15 @@ use bevy::{
     mesh::Mesh,
 };
 
+pub(crate) type StartupAssets<'w> = (
+    bevy::ecs::system::ResMut<'w, Assets<Mesh>>,
+    bevy::ecs::system::ResMut<'w, Assets<rendering::SourceMaterial>>,
+    bevy::ecs::system::ResMut<'w, Assets<Image>>,
+    bevy::ecs::system::ResMut<'w, Assets<AudioSource>>,
+    bevy::ecs::system::ResMut<'w, Assets<effects::EffectMaterial>>,
+    bevy::ecs::system::ResMut<'w, Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
+);
+
 pub(crate) type MapAssets<'a> = (
     &'a mut Assets<Mesh>,
     &'a mut Assets<rendering::SourceMaterial>,
@@ -19,14 +28,47 @@ pub(crate) type MapAssets<'a> = (
     &'a mut Assets<effects::EffectMaterial>,
     &'a mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
 );
+
+pub(crate) fn install_loaded_map(
+    loaded: assets::LoadedMap,
+    commands: &mut Commands,
+    assets: &mut StartupAssets,
+    status: &Status,
+    options: &crate::Options,
+    filtering: hl2_ui::config::Filtering,
+    target: Option<&bevy::asset::Handle<Image>>,
+) {
+    let (meshes, materials, images, sounds, effect_materials, inverse_binds) = assets;
+    install_map(
+        loaded,
+        commands,
+        (
+            &mut **meshes,
+            &mut **materials,
+            &mut **images,
+            &mut **sounds,
+            &mut **effect_materials,
+            &mut **inverse_binds,
+        ),
+        status,
+        (
+            options.cpu_skinning,
+            options.no_pvs,
+            options.world_partition,
+        ),
+        (filtering, options.mute),
+        target,
+    );
+}
+
 pub(crate) fn install_map(
     loaded: assets::LoadedMap,
     commands: &mut Commands,
     (meshes, materials, images, sounds, effect_materials, inverse_binds): MapAssets,
     status: &Status,
     (cpu_skinning, no_pvs, world_partition): (bool, bool, bool),
-    filtering: hl2_ui::config::Filtering,
-    mute: bool,
+    (filtering, mute): (hl2_ui::config::Filtering, bool),
+    target: Option<&bevy::asset::Handle<Image>>,
 ) {
     {
         let mut stats = status.0.lock().expect("map stats");
@@ -67,7 +109,7 @@ pub(crate) fn install_map(
     commands.insert_resource(eyes::Eyes::new(&loaded));
     commands.insert_resource(shadows::MapShadows::new(&loaded));
     commands.insert_resource(console_host::MapEntityNames::of(&loaded.world.entities));
-    sky::install(&loaded, commands, meshes, materials, images);
+    sky::install(&loaded, commands, meshes, materials, images, target);
     commands.insert_resource(sky::Sky::new(
         loaded.bsp,
         loaded.world.background_camera.clone(),

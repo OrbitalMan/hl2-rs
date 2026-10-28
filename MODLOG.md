@@ -1,5 +1,36 @@
 # MODLOG
 
+## 2026-10-28 Fix: resolve render target size mismatch crash and double-despawn warnings on background switches
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** In `crates/hl2-bevy/src/sky.rs`, spawn `SkyCamera` with `RenderTarget::Image(target.clone().into())`
+matching the active offscreen frame image instead of defaulting to `RenderTarget::Window`, and extract
+`spawn_skybox_faces` helper. In `crates/hl2-bevy/src/map_install.rs`, add `StartupAssets` type alias and
+`install_loaded_map` to consolidate map setup and eliminate code duplication between `campaign.rs` and `main.rs`,
+forwarding `target: Option<&Handle<Image>>` to `sky::install`. In `crates/hl2-bevy/src/campaign.rs`, pass the
+active frame image handle to `install_loaded_map` and use `try_despawn()` for map-owned draw cleanup. In
+`crates/hl2-bevy/src/gpu_skinning.rs`, remove redundant `MapOwned` from child `Joint` entities parented to `root`
+to avoid cascade double-despawn warnings. In `crates/hl2-bevy/src/rendering/runtime.rs`, use `try_despawn()`.
+In `crates/hl2-bevy/src/startup.rs`, extract `resolve_asset_root` to keep `main.rs` production lines within limits.
+In `crates/hl2-bevy/src/main.rs`, order `present_frame` before `rendering::present_entities` and `sky::present`,
+and extract `init_console_ui`. In `scripts/checks/architecture-baseline.json`, tighten baselines for `main.rs`,
+`main`, `setup`, and `poll`.
+**Why:** Switching menu submenus and background maps repeatedly crashed with a fatal wgpu validation error:
+`Attachments have differing sizes: the depth attachment's texture view has extent (2976, 2232, 1) but is followed by the color attachment at index 0's texture view which has (2638, 1978, 1)`.
+When `campaign::poll` despawned the old map and installed the new one, `sky::install` spawned `SkyCamera` without an
+explicit `RenderTarget`, defaulting to the primary window target while depth was sized to the offscreen game frame.
+Additionally, joints spawned with both `ChildOf(root)` and `MapOwned` triggered ECS dead-entity warnings when
+despawning root cascaded to children before map-owned entity iteration.
+**Tested how:** Full validation suite (`validate.sh`: architecture guardrails, Python test runner, cargo test with
+all 182 unit tests and 128 integration tests passing, strict Clippy, fmt check, repository isolation); Windows cross-target
+strict Clippy check (`check_windows.sh`); 10-iteration continuous replay suite (`bevy-menu-submenus.json` for 2,000 frames
+per run across 10 consecutive runs with all 10 runs exiting with code 0).
+**Result:** Submenu and background switching runs smoothly across continuous map and submenu transitions without wgpu
+render target validation errors or ECS entity despawn warnings.
+**Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
+**Next:** None in this batch; crash isolated, resolved, and verified.
+
+
 ## 2026-10-28 Feature: background visual debug mode console commands and overlay
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

@@ -49,7 +49,7 @@ pub fn despawn_killed_runtime_draws(
     }
     for (entity, source) in &draws {
         if killed.contains(&source.0) {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
     game.despawned_draws.extend(killed);

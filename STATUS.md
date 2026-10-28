@@ -1,5 +1,17 @@
 # STATUS
 
+## Submenu and background switching wgpu crashes and despawn warnings resolved (2026-10-28)
+
+Switching main menu submenus and chapter background maps repeatedly across sessions no longer crashes with wgpu render
+target validation errors. During map transitions, `sky::install` now explicitly spawns `SkyCamera` with
+`RenderTarget::Image(image.into())` matching the offscreen frame image instead of defaulting to `RenderTarget::Window`.
+The offscreen frame handle is threaded from `campaign::poll` through `install_loaded_map` into `sky::install`. Child
+joint entities in `gpu_skinning.rs` no longer have redundant `MapOwned` tags that conflicted with recursive hierarchy
+despawning, and cleanup queries use `try_despawn()`. `resolve_asset_root` and `init_console_ui` helpers were extracted
+to keep `main.rs` functions and file line counts strictly within baseline limits. Verified with full validation checks,
+Windows cross-target check, and 10 consecutive 2,000-frame automated stress replays of `bevy-menu-submenus.json` (10/10 runs passing).
+
+
 ## Background visual debug mode and FOV tuning commands implemented (2026-10-28)
 
 Background visual layout debug mode commands and controls are now implemented. Commands include:

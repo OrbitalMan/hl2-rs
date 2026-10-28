@@ -44,7 +44,7 @@ use bevy::{
     render::{renderer::RenderAdapterInfo, view::screenshot::Screenshot},
     window::{CursorOptions, PrimaryWindow, WindowResolution},
 };
-pub(crate) use map_install::install_map;
+pub(crate) use map_install::{StartupAssets, install_loaded_map};
 use serde::Serialize;
 use startup::{require_map_for, startup_display_mode};
 use std::{
@@ -430,15 +430,7 @@ fn main() -> Result<()> {
     simulation.loading = true;
     simulation.background_level = target.background;
     let status = Status::default();
-    let packaged_assets = std::env::current_exe()?
-        .parent()
-        .context("executable has no directory")?
-        .join("bevy-assets");
-    let asset_root = if packaged_assets.join("shaders/source.wgsl").is_file() {
-        packaged_assets
-    } else {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
-    };
+    let asset_root = startup::resolve_asset_root()?;
     let default_plugins = DefaultPlugins
         .set(bevy::log::LogPlugin {
             custom_layer: console_host::log_layer,
@@ -534,7 +526,9 @@ fn main() -> Result<()> {
         )
         .add_systems(
             PostUpdate,
-            crate::video::present_frame.before(rendering::present_entities),
+            crate::video::present_frame
+                .before(rendering::present_entities)
+                .before(sky::present),
         )
         .add_systems(
             PostUpdate,
@@ -698,20 +692,12 @@ fn main() -> Result<()> {
     }
     Ok(())
 }
-type StartupAssets<'w> = (
-    ResMut<'w, Assets<Mesh>>,
-    ResMut<'w, Assets<rendering::SourceMaterial>>,
-    ResMut<'w, Assets<Image>>,
-    ResMut<'w, Assets<AudioSource>>,
-    ResMut<'w, Assets<effects::EffectMaterial>>,
-    ResMut<'w, Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
-);
 fn setup(
     mut commands: Commands,
     mut prepared: ResMut<PreparedMap>,
     options: Res<Options>,
     status: Res<Status>,
-    (mut meshes, mut materials, mut images, mut sounds, mut effect_materials, mut inverse_binds): StartupAssets,
+    mut assets: StartupAssets,
     mut present_materials: ResMut<Assets<video::PresentMaterial>>,
     (adapter, _windows): (
         Option<Res<RenderAdapterInfo>>,
@@ -726,43 +712,26 @@ fn setup(
         .unwrap_or_else(|| Vec3::from_array(spawn.to_array()));
     let yaw = options.yaw.unwrap_or(yaw);
     let ui = hl2_ui::console::Console::load(&loaded.vfs, loaded.hud.canvas.clone());
-    install_map(
+    install_loaded_map(
         loaded,
         &mut commands,
-        (
-            &mut meshes,
-            &mut materials,
-            &mut images,
-            &mut sounds,
-            &mut effect_materials,
-            &mut inverse_binds,
-        ),
+        &mut assets,
         &status,
-        (
-            options.cpu_skinning,
-            options.no_pvs,
-            options.world_partition,
-        ),
+        &options,
         options.config.video.advanced.filtering,
-        options.mute,
+        None,
     );
-    let mut console_ui = ui_host::Console::new(ui);
-    console_ui.source.set_history(console_host::load_history());
-    console_ui.source.index_chapters();
-    set_system_recommendation(&mut console_ui, adapter.as_deref());
-    request_startup_map(&mut console_ui, &target);
-    simulation::movie::startup_video_sequence(&options, target.background, &mut console_ui);
-    commands.insert_resource(console_ui);
-    // Every game camera below renders into the game frame (see `video::present_frame`).
+    commands.insert_resource(init_console_ui(ui, adapter.as_deref(), &target, &options));
     video::install_frame(
         &mut commands,
-        &mut images,
-        &mut meshes,
+        &mut assets.2,
+        &mut assets.0,
         &mut present_materials,
         UVec2::new(options.width, options.height),
         options.flexible_aspect,
         options.display_mode.effective() == hl2_ui::config::DisplayMode::Windowed,
     );
+    // Every game camera below renders into the game frame (see `video::present_frame`).
     let max_samples = video::adapter_max_msaa_samples(adapter.as_deref());
     let msaa = video::msaa_for_hardware(options.config.video.advanced.antialiasing, max_samples);
     commands.spawn((
@@ -824,6 +793,21 @@ fn setup(
         tonemap::ToneMapped,
         bevy::camera::visibility::RenderLayers::layer(0).with(5),
     ));
+}
+
+fn init_console_ui(
+    ui: hl2_ui::console::Console,
+    adapter: Option<&RenderAdapterInfo>,
+    target: &startup::StartupTarget,
+    options: &Options,
+) -> ui_host::Console {
+    let mut console_ui = ui_host::Console::new(ui);
+    console_ui.source.set_history(console_host::load_history());
+    console_ui.source.index_chapters();
+    set_system_recommendation(&mut console_ui, adapter);
+    request_startup_map(&mut console_ui, target);
+    simulation::movie::startup_video_sequence(options, target.background, &mut console_ui);
+    console_ui
 }
 
 fn set_system_recommendation(
