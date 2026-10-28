@@ -94,6 +94,10 @@ pub struct Windows<W> {
     base_focused: bool,
     /// The layer the held button belongs to.
     press: Option<Layer<W>>,
+    /// An in-progress press began as an unfocused window click to activate/focus it.
+    activating_press: bool,
+    /// Whether the current frame's pointer input is part of an activating click.
+    activating_click: bool,
     /// Time of the current frame, stamped on focus changes.
     now: f64,
     /// `Frame.FocusTransitionEffectTime` and `Frame.TransitionEffectTime` in seconds.
@@ -113,6 +117,8 @@ impl<W> Default for Windows<W> {
             },
             base_focused: false,
             press: None,
+            activating_press: false,
+            activating_click: false,
             now: 0.,
             fade_time: 0.3,
             unfocused_alpha: 0.3,
@@ -164,6 +170,12 @@ impl<W: WindowId> Windows<W> {
     /// Whether the specified layer holds focus.
     pub fn is_focused(&self, layer: Layer<W>) -> bool {
         self.focus() == layer
+    }
+
+    /// Whether the current frame's pointer interaction is an activating click
+    /// that raised or focused an inactive window or the base.
+    pub fn activating_click(&self) -> bool {
+        self.activating_click
     }
 
     /// All windows currently present (including those fading out), bottom to top.
@@ -240,19 +252,19 @@ impl<W: WindowId> Windows<W> {
         }
     }
 
+    fn drop_press_for(&mut self, window: W) {
+        if self.press == Some(Layer::Window(window)) {
+            self.press = None;
+            self.activating_press = false;
+            self.activating_click = false;
+        }
+    }
+
     /// Closes `window`. If `fade_time > 0`, it begins fading out over `fade_time` while focus
     /// immediately restores to the next active surface.
     pub fn close(&mut self, window: W) {
         if self.fade_time <= 0. {
-            self.take_record(window);
-            if self.press == Some(Layer::Window(window)) {
-                self.press = None;
-            }
-            if !self.order.iter().any(|r| !r.closing) {
-                self.base_focused = false;
-            }
-            let focus = self.focus();
-            self.set_focus(focus);
+            self.close_immediate(window);
             return;
         }
 
@@ -268,9 +280,7 @@ impl<W: WindowId> Windows<W> {
             let current_focus = rec.focus_fade.at(now, self.fade_time);
             rec.focus_fade = Fade::new(current_focus, 0.0, now);
         }
-        if self.press == Some(Layer::Window(window)) {
-            self.press = None;
-        }
+        self.drop_press_for(window);
         let focus = self.focus();
         self.set_focus(focus);
     }
@@ -278,9 +288,7 @@ impl<W: WindowId> Windows<W> {
     /// Immediately removes `window` without fading.
     pub fn close_immediate(&mut self, window: W) {
         self.take_record(window);
-        if self.press == Some(Layer::Window(window)) {
-            self.press = None;
-        }
+        self.drop_press_for(window);
         if !self.order.iter().any(|r| !r.closing) {
             self.base_focused = false;
         }
@@ -293,6 +301,8 @@ impl<W: WindowId> Windows<W> {
         self.order.clear();
         self.base_focused = false;
         self.press = None;
+        self.activating_press = false;
+        self.activating_click = false;
         let now = self.now;
         let duration = self.fade_time;
         if self.base_fade.to != 1. {
@@ -403,20 +413,40 @@ impl<W: WindowId> Windows<W> {
                 .map(Layer::Window)
                 .or(base_takes_pointer.then_some(Layer::Base))
         });
-        if pointer.click && pressed.is_none() {
+        let prior_focus = self.focus();
+        let was_activating = self.activating_press;
+        let activating = if pointer.click && pressed.is_none() {
             match layer {
-                Some(Layer::Window(window)) => self.raise(window),
-                Some(Layer::Base) => self.focus_base(),
-                None => {}
+                Some(Layer::Window(window)) => {
+                    let changed = prior_focus != Layer::Window(window);
+                    self.raise(window);
+                    changed
+                }
+                Some(Layer::Base) => {
+                    self.focus_base();
+                    false
+                }
+                None => false,
             }
-        }
-        self.press = if pointer.released || !(pointer.click || pointer.held) {
+        } else {
+            false
+        };
+        let ending = pointer.released || !(pointer.click || pointer.held);
+        self.press = if ending {
             None
         } else if pointer.click && pressed.is_none() {
             layer
         } else {
             self.press
         };
+        self.activating_press = if ending {
+            false
+        } else if activating {
+            true
+        } else {
+            self.activating_press
+        };
+        self.activating_click = activating || was_activating;
         layer
     }
 
@@ -574,6 +604,37 @@ mod tests {
             [Window::Console, Window::Options],
             "focusing the base keeps the windows' order"
         );
+    }
+
+    #[test]
+    fn clicking_an_unfocused_window_activates_it_and_subsequent_clicks_are_normal() {
+        let mut w = both();
+        assert_eq!(w.focus(), Layer::Window(Window::Console));
+        assert!(!w.activating_click());
+
+        // Hover over unfocused window: does not activate
+        w.route(hover(25.), None, true, hit);
+        assert!(!w.activating_click());
+        assert_eq!(w.focus(), Layer::Window(Window::Console));
+
+        // Click on unfocused window: activates focus
+        w.route(click(25.), None, true, hit);
+        assert!(w.activating_click());
+        assert_eq!(w.focus(), Layer::Window(Window::Options));
+
+        // Release: still part of the activating gesture
+        w.route(release(25.), None, true, hit);
+        assert!(w.activating_click());
+
+        // Hover over now-focused window: not activating
+        w.route(hover(25.), None, true, hit);
+        assert!(!w.activating_click());
+
+        // Next click on the now-focused window: normal click, not activating
+        w.route(click(25.), None, true, hit);
+        assert!(!w.activating_click());
+        w.route(release(25.), None, true, hit);
+        assert!(!w.activating_click());
     }
 
     #[test]

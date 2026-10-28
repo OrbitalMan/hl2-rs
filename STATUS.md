@@ -1,5 +1,15 @@
 # STATUS
 
+## Unfocused dialog click-to-focus and button hover suppression implemented (2026-10-28)
+
+Non-modal dialog frames (`Layer::Window`, including Options and the developer console) now require
+an activating click when out of focus before controls accept clicks. Button hover highlights and arming
+are suppressed while the dialog is unfocused. The activating click raises and focuses the dialog without
+triggering the control beneath the cursor; subsequent clicks on focused controls interact normally.
+The base main menu behind dialogs retains immediate click response per retail Source behavior.
+All tests, lint, Windows-target checks, and architecture guardrails pass with baseline tightening.
+
+
 ## Developer console input font and caret positioning aligned (2026-10-28)
 
 The developer console input entry field now renders with the shared monospace `ConsoleFont`

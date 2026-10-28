@@ -1,5 +1,27 @@
 # MODLOG
 
+## 2026-10-28 Feature: require click-to-focus and disable button hover on unfocused dialogs
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** Require non-modal dialog windows (`Layer::Window`, e.g. Options dialog and developer console)
+to receive an activating click when out of focus before their controls accept clicks. When out of focus,
+disable button and control arming on hover. Route activating clicks to raise/focus the dialog without
+triggering the control under the cursor, while preserving coordinates for focus updates. Gated strictly
+on `Layer::Window` so base menu clicks behind dialogs remain immediate. Gate button armed state on
+`parent_focused` across Options dialog, subdialogs, and console. Extract `sub_frame` module to organize
+dialog layout reflow and tighten `options.rs` production lines and test baselines.
+**Why:** In retail VGUI, out-of-focus dialogs do not highlight or arm buttons when the cursor hovers them,
+and an initial click on the unfocused dialog raises and focuses it rather than firing the button underneath.
+**Tested how:** validate.sh (1,194 Rust pass, 100 ignored; 27 Python, strict Clippy/fmt/architecture);
+check_windows.sh passes. Added unit tests for window activating clicks, unfocused button hover suppression,
+and options focus interactions.
+**Result:** Unfocused dialog buttons do not highlight on hover; clicking an unfocused dialog activates
+focus without activating the button, and subsequent clicks hit the button normally. Base menu retains
+immediate click response.
+**Still broken or not tested:** Menu background FOV/aspect ratio alignment across all standard aspect ratios.
+**Next:** Menu background camera FOV and texture crop alignment across aspect ratios.
+
+
 ## 2026-10-28 Fix: align developer console input font and caret positioning
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

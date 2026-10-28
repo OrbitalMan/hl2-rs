@@ -22,8 +22,10 @@
 //! presses the default button (docs/gameui.md section 6c).
 
 mod hints;
+mod sub_frame;
 use super::settings::support::{self, binding_for_control as control_binding};
 pub use hints::{ActiveTooltip, HintReport};
+use sub_frame::{drawn_controls, footer_reflow, frame_size};
 
 use super::{
     display::DisplayModes,
@@ -474,123 +476,6 @@ pub fn button_rects() -> [Rect; 3] {
     let apply = DIALOG_SIZE.x - CLIENT_INSET_X - 80.;
     let rect = |x: f32| Rect::new(x, y, BUTTON_SIZE.x, BUTTON_SIZE.y);
     [rect(apply - 160.), rect(apply - 80.), rect(apply)]
-}
-
-/// Frame size of a sub-dialog: as authored ([`authored_frame_size`]), taller by the footer
-/// reflow ([`footer_reflow`]) when content reaches into the footer.
-fn frame_size(res: &GameUiResources, sub: Sub) -> Vec2 {
-    let size = authored_frame_size(res, sub);
-    let Some(layout) = res.layout(sub.panel().layout()) else {
-        return size;
-    };
-    let controls = drawn_controls(sub.panel(), layout);
-    let (shift, _) = footer_reflow(sub.panel(), &controls, (size.x, size.y));
-    size + vec2(0., shift)
-}
-
-/// Frame size of a sub-dialog as authored: its layout's frame record; for a layout without one,
-/// the extent of its controls with the left margin repeated on the right and bottom; else the
-/// fallback.
-fn authored_frame_size(res: &GameUiResources, sub: Sub) -> Vec2 {
-    let Some(layout) = res.layout(sub.panel().layout()) else {
-        return sub.fallback_size();
-    };
-    if let Some(frame) = layout
-        .controls
-        .iter()
-        .find(|c| matches!(c.kind, ControlKind::Other(_)) && c.wide >= 200. && c.tall >= 100.)
-    {
-        return vec2(frame.wide, frame.tall);
-    }
-    let rects: Vec<(f32, f32, f32, f32)> = layout
-        .controls
-        .iter()
-        .filter(|c| c.visible && !is_frame_chrome(c))
-        .map(|c| c.rect((0., 0.)))
-        .collect();
-    let left = rects.iter().map(|r| r.0).fold(f32::INFINITY, f32::min);
-    let right = rects.iter().map(|r| r.0 + r.2).fold(0., f32::max);
-    let bottom = rects.iter().map(|r| r.1 + r.3).fold(0., f32::max);
-    if rects.is_empty() || !left.is_finite() {
-        return sub.fallback_size();
-    }
-    vec2(right + left, bottom + left)
-}
-
-/// Space kept between a dialog's lowest content control and its footer when the footer moves.
-const FOOTER_GAP: f32 = 8.;
-
-/// The controls a layout draws (visible, not frame chrome or the frame record itself).
-fn drawn_controls(panel: Panel, layout: &source_ui::layout::Layout) -> Vec<&Control> {
-    layout
-        .controls
-        .iter()
-        .filter(|c| {
-            (c.visible || settings::force_visible(panel, &c.name))
-                && support::available(panel, c, support::Platform::current())
-        })
-        .filter(|c| !matches!(c.kind, ControlKind::Other(_)) && !is_frame_chrome(c))
-        .collect()
-}
-
-/// A dialog footer that overlaps content moves below it.
-///
-/// VGUI places controls absolutely. The installed Video > Advanced layout keeps older macOS
-/// (`[$OSX]`) footer positions that predate its Classic Effects row, so OK/Cancel land on that
-/// combo. The footer is the OK/Cancel buttons plus the unbound caption over them (a label
-/// without `associate`, at most two button heights above the button row: the installed caption
-/// sits 26 units above it on Windows, 6 on macOS). When content reaches
-/// into the footer, the footer moves down to `FOOTER_GAP` below the lowest content control, and
-/// the frame grows by the same amount. Returns the shift and whether each control is footer.
-fn footer_reflow(panel: Panel, controls: &[&Control], parent: (f32, f32)) -> (f32, Vec<bool>) {
-    let is_button = |c: &Control| {
-        matches!(
-            control_binding(panel, c),
-            Some(Binding::Command(Command::SubOk | Command::SubCancel))
-        )
-    };
-    let buttons: Vec<(f32, f32)> = controls
-        .iter()
-        .filter(|c| is_button(c))
-        .map(|c| (c.rect(parent).1, c.tall))
-        .collect();
-    let Some((button_top, button_tall)) =
-        buttons.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0))
-    else {
-        return (0., vec![false; controls.len()]);
-    };
-    let footer: Vec<bool> = controls
-        .iter()
-        .map(|c| {
-            is_button(c)
-                || (c.kind == ControlKind::Label
-                    && c.associate.is_empty()
-                    && control_binding(panel, c).is_none()
-                    && c.rect(parent).1 >= button_top - 2. * button_tall)
-        })
-        .collect();
-    let footer_top = controls
-        .iter()
-        .zip(&footer)
-        .filter(|(_, f)| **f)
-        .map(|(c, _)| c.rect(parent).1)
-        .fold(f32::INFINITY, f32::min);
-    let content_bottom = controls
-        .iter()
-        .zip(&footer)
-        .filter(|(_, f)| !**f)
-        .map(|(c, _)| c.rect(parent).1 + c.tall)
-        .fold(0., f32::max);
-    ((content_bottom + FOOTER_GAP - footer_top).max(0.), footer)
-}
-
-/// Controls a VGUI `Frame` creates for itself (`frame_caption`, `frame_close`, resize grips):
-/// the dialog frame draws its own title bar and close button.
-fn is_frame_chrome(control: &Control) -> bool {
-    control
-        .name
-        .get(..6)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("frame_"))
 }
 
 fn layout_widgets<'a>(
@@ -1274,8 +1159,8 @@ impl OptionsDialog {
                         .map(|(i, _)| Target::Control(i))
                 })
         });
-        self.armed = hit;
-        let armed_target = hit.filter(|target| match target {
+        self.armed = self.parent_focused.then_some(hit).flatten();
+        let armed_target = self.armed.filter(|target| match target {
             Target::Control(i) => widgets.get(*i).is_some_and(|w| w.enabled),
             _ => true,
         });
@@ -1318,7 +1203,10 @@ impl OptionsDialog {
             .tracker
             .update(hit, input.held, input.click, input.released);
         self.pressed = self.tracker.pressed();
-        self.armed = self.tracker.armable(hit);
+        self.armed = self
+            .parent_focused
+            .then(|| self.tracker.armable(hit))
+            .flatten();
         activated
     }
 
@@ -2118,10 +2006,9 @@ impl OptionsDialog {
         let parent_focused = parent_focused.unwrap_or(self.parent_focused) && !modal;
         let options_theme = if self.sub_theme.is_some() || self.confirm_theme.is_some() {
             base.theme.clone()
-        } else if modal {
-            base.theme.focus_faded(0.0, false)
         } else {
-            base.theme.focus_faded(1.0, true)
+            base.theme
+                .focus_faded(if modal { 0.0 } else { 1.0 }, !modal)
         };
         let p = Painter {
             canvas: base.canvas,
@@ -2132,11 +2019,10 @@ impl OptionsDialog {
         };
         // Sub-dialogs and confirmation boxes adapt their focus theme based on which is topmost.
         let sub_theme = self.sub_theme.clone().unwrap_or_else(|| {
-            if self.confirm.is_some() {
-                base.theme.focus_faded(0.0, false)
-            } else {
-                base.theme.focus_faded(1.0, true)
-            }
+            base.theme.focus_faded(
+                if self.confirm.is_some() { 0.0 } else { 1.0 },
+                self.confirm.is_none(),
+            )
         });
         let confirm_theme = self
             .confirm_theme
@@ -2144,10 +2030,9 @@ impl OptionsDialog {
             .unwrap_or_else(|| base.theme.focus_faded(1.0, true));
         let loc = &self.res.localization;
         let env = self.env();
-        let modal = self.sub.is_some() || self.confirm.is_some();
         let state = |target: Target| {
             (
-                !modal && self.armed == Some(target),
+                parent_focused && self.armed == Some(target),
                 !modal
                     && (self.pressed == Some(target) || self.key_press.pressed() == Some(target)),
             )
@@ -2159,23 +2044,18 @@ impl OptionsDialog {
         let sub_to_draw = self.sub.or(self.closing_sub);
         let sub_bounds = sub_to_draw.map(|sub| {
             let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
-            let origin = self.sub_placement.place(&sub_frame(canvas, size)).origin;
-            Rect::new(origin.x, origin.y, size.x * scale, size.y * scale)
+            let o = self.sub_placement.place(&sub_frame(canvas, size)).origin;
+            Rect::new(o.x, o.y, size.x * scale, size.y * scale)
         });
 
         let confirm_to_draw = self.confirm.as_ref().or(self.closing_confirm.as_ref());
         let confirm_bounds = confirm_to_draw.as_ref().map(|confirm| {
             let layout = confirm.layout(|t| p.text_width(t, false));
-            let origin = self
+            let o = self
                 .confirm_placement
                 .place(&confirm_frame(canvas, layout.size))
                 .origin;
-            Rect::new(
-                origin.x,
-                origin.y,
-                layout.size.x * scale,
-                layout.size.y * scale,
-            )
+            Rect::new(o.x, o.y, layout.size.x * scale, layout.size.y * scale)
         });
 
         // 1. Draw Options frame background (unclipped).
@@ -2185,8 +2065,8 @@ impl OptionsDialog {
 
         // 2. Push occluders for Options content: any subdialog, confirmation, or external window on top.
         let occluders = self.dialog_occluders(sub_bounds, confirm_bounds, external_occluders);
-        for &bounds in &occluders {
-            base.canvas.push_occluder(bounds);
+        for &b in &occluders {
+            base.canvas.push_occluder(b);
         }
 
         // 3. Draw Options foreground (title, close button) and content.
@@ -2281,7 +2161,9 @@ impl OptionsDialog {
             };
             let sub_modal = self.confirm.is_some() || self.closing_confirm.is_some();
             let is_closing = self.sub.is_none();
-            let sub_close_armed = !sub_modal && !is_closing && self.armed == Some(Target::Close);
+            let sub_parent_focused = self.parent_focused && self.confirm.is_none() && !is_closing;
+            let sub_close_armed =
+                sub_parent_focused && !sub_modal && self.armed == Some(Target::Close);
             let sub_close_pressed = !sub_modal
                 && !is_closing
                 && (self.pressed == Some(Target::Close) || self.escape_held);
@@ -2313,10 +2195,9 @@ impl OptionsDialog {
             } else {
                 let area = Rect::new(0., 0., size.x, size.y);
                 let list = layout_widgets(&self.res, sub.panel(), area, &self.draft, &self.applied);
-                let sub_parent_focused = self.confirm.is_none();
                 for (i, widget) in list.iter().enumerate() {
                     let target = Some(Target::Control(i));
-                    let armed = !sub_modal && !is_closing && self.armed == target;
+                    let armed = sub_parent_focused && !sub_modal && self.armed == target;
                     let pressed = !sub_modal
                         && !is_closing
                         && (self.pressed == target || self.key_press.pressed() == target);

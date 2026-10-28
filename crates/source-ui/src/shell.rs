@@ -173,6 +173,7 @@ fn windows_input<H: Host>(host: &mut H, input: &Input) -> Vec<H::Effect> {
                 || window == H::Window::CONSOLE && completion.is_some_and(|r| r.contains(at))
         });
     host.focus_changed();
+    let activating_click = host.shell().windows.activating_click();
     let focus = host.shell().windows.focus();
     let mut effects = Vec::new();
     let windows: Vec<H::Window> = host.shell().windows.order().collect();
@@ -181,7 +182,13 @@ fn windows_input<H: Host>(host: &mut H, input: &Input) -> Vec<H::Effect> {
             continue;
         }
         let layer = Layer::Window(window);
-        let share = input.share(owner == Some(layer), focus == layer);
+        let owns = owner == Some(layer);
+        let mut share = input.share(owns, focus == layer);
+        if activating_click && owns {
+            share.click = false;
+            share.held = false;
+            share.released = false;
+        }
         effects.extend(host.window_input(&frame, window, &share, input));
         if host.input_blocked() {
             return effects;
@@ -445,7 +452,7 @@ mod tests {
             share: &Input,
             _: &Input,
         ) -> Vec<String> {
-            if self.blocks == Some(window) {
+            if self.blocks == Some(window) && share.click {
                 self.blocked = true;
             }
             vec![format!(
@@ -707,9 +714,22 @@ mod tests {
         };
         input(&mut app, &release);
         app.take_log();
-        // A press on the dialog raises it and gives it the keys too.
+        // An activating press on the unfocused dialog raises it and focuses it without a click.
         let mut press = click(20.);
         press.keys.insert(Key::Enter);
+        let effects = input(&mut app, &press);
+        assert_eq!(
+            effects,
+            [
+                "Console click false keys {}",
+                "Dialog click false keys {Enter}",
+                "base click false owns false keys {}"
+            ]
+        );
+        assert_eq!(app.shell.windows.top(), Some(Window::Dialog));
+        input(&mut app, &release);
+        app.take_log();
+        // The next click on the now-focused dialog hits the control.
         let effects = input(&mut app, &press);
         assert_eq!(
             effects,
@@ -719,7 +739,6 @@ mod tests {
                 "base click false owns false keys {}"
             ]
         );
-        assert_eq!(app.shell.windows.top(), Some(Window::Dialog));
         input(&mut app, &release);
         app.take_log();
         let effects = input(&mut app, &click(400.));
@@ -743,10 +762,25 @@ mod tests {
             effects[..2],
             ["Dialog click false keys {}", "Modal click true keys {}"]
         );
-        // A window whose input opens a modal layer ends the frame there: the press raised the
-        // dialog over the console, and the base gets nothing.
+        // A window whose input opens a modal layer ends the frame there: the first press raises
+        // the dialog over the console, and the next click hits it to open the modal layer.
         let mut app = App::with(&[Window::Dialog, Window::Console]);
         app.blocks = Some(Window::Dialog);
+        assert_eq!(
+            input(&mut app, &click(10.)),
+            [
+                "Console click false keys {}",
+                "Dialog click false keys {}",
+                "base click false owns false keys {}"
+            ]
+        );
+        let release = Input {
+            pointer: Some(vec2(10., 50.)),
+            released: true,
+            ..Default::default()
+        };
+        input(&mut app, &release);
+        app.take_log();
         assert_eq!(
             input(&mut app, &click(10.)),
             ["Console click false keys {}", "Dialog click true keys {}"]

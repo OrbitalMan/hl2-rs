@@ -126,7 +126,10 @@ impl Console {
         } else {
             None
         };
-        self.options.parent_focused = self.shell.windows.focus() == Layer::Window(Window::Options);
+        self.options.parent_focused = matches!(
+            self.shell.windows.focus(),
+            Layer::Window(Window::Options | Window::SubDialog)
+        );
 
         self.sync_mode();
     }
@@ -426,6 +429,10 @@ impl Host for Console {
 
     fn focus_changed(&mut self) {
         self.sync_mode();
+        self.options.parent_focused = matches!(
+            self.shell.windows.focus(),
+            Layer::Window(Window::Options | Window::SubDialog)
+        );
     }
 
     fn window_input(

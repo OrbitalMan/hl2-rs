@@ -732,10 +732,10 @@ impl ConsolePanel {
         self.copied.take()
     }
 
-    fn button_state(&self, button: ConsoleButton, closing: bool) -> ButtonState {
+    fn button_state(&self, button: ConsoleButton, closing: bool, focused: bool) -> ButtonState {
         let hovered = self.hover == Some(button);
         ButtonState {
-            armed: self.buttons.armable(self.hover) == Some(button),
+            armed: focused && self.buttons.armable(self.hover) == Some(button),
             pressed: (hovered && self.buttons.is_pressed(button))
                 || (button == ConsoleButton::Close && closing),
             enabled: true,
@@ -802,7 +802,7 @@ impl ConsolePanel {
         // Frame foreground (title, close button):
         painter.frame_foreground(
             &spec,
-            Some(self.button_state(ConsoleButton::Close, look.closing)),
+            Some(self.button_state(ConsoleButton::Close, look.closing, look.focused)),
         );
 
         // History (`RichText`, `DepressedButtonBorder`): filtered, wrapped, scrolled, one color
@@ -890,7 +890,7 @@ impl ConsolePanel {
         painter.button(
             layout.submit,
             look.submit,
-            self.button_state(ConsoleButton::Submit, look.closing),
+            self.button_state(ConsoleButton::Submit, look.closing, look.focused),
         );
         self.draw_completion(
             canvas,
