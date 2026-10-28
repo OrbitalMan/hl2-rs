@@ -75,6 +75,11 @@ pub struct Ragdolls {
     pub last_missed_shot: Option<(Vec3, Vec3)>,
     pub blast_pushes: u32,
     pub pins: u32,
+    /// Crossbow BoltImpacts that found no ragdoll solid after their retry, and the last
+    /// one's ray (diagnostics).
+    pub bolt_misses: u32,
+    pub last_missed_bolt: Option<(Vec3, Vec3)>,
+    pub missed_bolt_bodies: Vec<Vec3>,
     /// Every NPC's origin at the previous tick (its root velocity at death).
     last_origins: BTreeMap<usize, Vec3>,
 }
@@ -362,7 +367,17 @@ impl Ragdolls {
                     let Some((body, point, _)) =
                         physics.ragdoll_ray(origin, origin - direction * 128.)
                     else {
-                        if !retried {
+                        if retried {
+                            self.bolt_misses += 1;
+                            self.last_missed_bolt = Some((origin, origin - direction * 128.));
+                            self.missed_bolt_bodies = self
+                                .active
+                                .values()
+                                .flat_map(|r| r.bodies.iter())
+                                .filter_map(|h| physics.ragdoll_body_center(*h))
+                                .map(|(center, _)| center)
+                                .collect();
+                        } else {
                             retry.push(Impact::Bolt {
                                 origin,
                                 direction,

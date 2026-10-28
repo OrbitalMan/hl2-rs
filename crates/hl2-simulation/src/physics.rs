@@ -2165,7 +2165,9 @@ impl Physics {
     }
     /// The first ragdoll solid along `start` -> `end` (the client's ClipRayToEntity
     /// against ragdolls; their solids stand in for the ragdoll-driven hitboxes): the
-    /// body, the hit point and the fraction of the segment.
+    /// body, the hit point and the fraction of the segment. Each ragdoll solid is tested
+    /// directly (at most 8 ragdolls): a ragdoll built this tick is not in the query tree
+    /// until the next step, and the client's effects already see it.
     pub fn ragdoll_ray(&self, start: Vec3, end: Vec3) -> Option<(RigidBodyHandle, Vec3, f32)> {
         let delta = end - start;
         let length = delta.length();
@@ -2177,25 +2179,22 @@ impl Physics {
             Point::from(vector(start)),
             vector![direction.x, direction.y, direction.z],
         );
-        let filter = QueryFilter::default()
-            .groups(InteractionGroups::new(RAGDOLL_GROUP, RAGDOLL_GROUP))
-            .exclude_sensors();
-        let (collider, toi) = self.query.cast_ray(
-            &self.bodies,
-            &self.colliders,
-            &ray,
-            length * SCALE,
-            true,
-            filter,
-        )?;
-        let body = self.colliders.get(collider)?.parent()?;
-        self.world_sides
+        let (body, toi) = self
+            .world_sides
             .ragdoll_bodies
-            .contains_key(&body)
-            .then(|| {
-                let distance = toi / SCALE;
-                (body, start + delta / length * distance, distance / length)
+            .keys()
+            .filter_map(|handle| self.bodies.get(*handle).map(|b| (*handle, b)))
+            .flat_map(|(handle, body)| body.colliders().iter().map(move |c| (handle, *c)))
+            .filter_map(|(handle, collider)| {
+                let collider = self.colliders.get(collider)?;
+                collider
+                    .shape()
+                    .cast_ray(collider.position(), &ray, length * SCALE, true)
+                    .map(|toi| (handle, toi))
             })
+            .min_by(|a, b| a.1.total_cmp(&b.1))?;
+        let distance = toi / SCALE;
+        Some((body, start + direction * distance, distance / length))
     }
     /// IPhysicsObject::ApplyForceOffset (kg in/s at a world point, Source units).
     pub fn ragdoll_impulse_at(&mut self, handle: RigidBodyHandle, impulse: Vec3, point: Vec3) {
@@ -3075,6 +3074,17 @@ impl Physics {
         end: Vec3,
         keep: &dyn Fn(usize) -> bool,
     ) -> Option<RayHit> {
+        self.masked_ray(start, end, 0x0200_400b, keep)
+    }
+    /// `filtered_ray` with a contents mask for world brushes (MASK_BLOCKLOS is 0x4041:
+    /// world windows and grates do not block it).
+    pub fn masked_ray(
+        &self,
+        start: Vec3,
+        end: Vec3,
+        mask: u32,
+        keep: &dyn Fn(usize) -> bool,
+    ) -> Option<RayHit> {
         let delta = end - start;
         let length = delta.length();
         if !length.is_finite() || length <= 1e-5 {
@@ -3088,7 +3098,7 @@ impl Physics {
                 && self
                     .world_brush_contents
                     .get(&handle)
-                    .is_none_or(|contents| contents & 0x0200_400b != 0)
+                    .is_none_or(|contents| contents & mask != 0)
         };
         let (handle, hit) = self.query.cast_ray_and_get_normal(
             &self.bodies,
@@ -4920,6 +4930,10 @@ mod tests {
             (Vec3::new(0., 0., 20.), Quat::IDENTITY),
         ];
         let handles = physics.spawn_ragdoll(&world, &model, &poses, Vec3::ZERO, 1);
+        // A crossbow pin on the ragdoll's spawn tick finds it before any physics step.
+        assert!(physics
+            .ragdoll_ray(Vec3::new(-100., 0., 20.), Vec3::new(100., 0., 20.))
+            .is_some_and(|(body, ..)| body == handles[1]));
         physics.tick(0.015);
         // The client's ray against ragdolls finds the child cube's face.
         let (body, point, fraction) = physics
