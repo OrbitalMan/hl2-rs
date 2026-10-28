@@ -1,5 +1,20 @@
 # STATUS
 
+## Background debug quick game background swaps and chapter background rotation (2026-10-29)
+
+Background debug mode has been expanded with quick game background swaps and chapter background cycling:
+- Quick background swaps (1-4): keys `1` (Half-Life 2), `2` (Episode One), `3` (Episode Two), and `4` (Lost Coast) immediately
+  swap to the initial background map for each game, resolving targets via existing `GameUiResources` methods (`category_game`
+  and `background_map_for`) without altering menu button categories.
+- Chapter background rotation ([/]): `[` and `]` cycle through all unique chapter background maps in sequence across all installed
+  games (`scripts/chapterbackgrounds.txt`), rotating from the final chapter background back to the initial Half-Life 2 background
+  and vice versa.
+- FOV reset on key 0: pressing `0` (or `Numpad0`) resets camera FOV override to the authored default.
+- Opacity controls cleanup: bracket keys no longer alter opacity; 0% and 100% blur opacity toggles are exclusively triggered
+  via `ArrowLeft` and `ArrowRight`.
+- Overlay updates: FOV overlay line displays `fov: X.XX°  (D/U  0: reset)` and an additional row notes `1-4: hl2/ep1/ep2/lc    [/]: prev/next chapter bg`.
+Verified with full validation suite (`validate.sh`), Windows cross-target check (`check_windows.sh`), and Bevy release build.
+
 ## Background debug FOV unification, menu focus, arrow opacity toggles, and dev overlay ordering (2026-10-28)
 
 Background debug mode has been updated:

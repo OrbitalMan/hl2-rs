@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-29 Feature: background debug quick game background swaps and chapter background rotation
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:**
+- In `crates/hl2-ui/src/console/background_debug.rs`: add `all_chapter_backgrounds` collecting all ordered `(game, map)` background targets from installed chapter scripts and background definitions across games; add `game_and_initial_background_for_slot` mapping slots 1-4 to initial backgrounds for Half-Life 2, Episode One, Episode Two, and Lost Coast using existing `GameUiResources` game and background resolution methods (`category_game` and `background_map_for`); add `swap_background` to initiate background transitions and persist the background map without modifying menu button categories; update `current_background_target` to return the active background map.
+- In `crates/hl2-ui/src/console/background_debug_tests.rs`: add unit test `all_chapter_backgrounds_and_swap_background` verifying slot mappings, chapter background list construction, and background transition effects.
+- In `crates/hl2-bevy/src/background_debug.rs`: update debug overlay lines with `(D/U  0: reset)` on FOV and add row `1-4: hl2/ep1/ep2/lc    [/]: prev/next chapter bg`; update unit test expectations.
+- In `crates/hl2-bevy/src/ui_system.rs`: suppress keys `','`, `'.' `, `'['`, `']'`, and `'0'`..=`'4'` in `prepare_ui_input` while background debug mode is active to prevent unwanted text entry.
+- In `crates/hl2-bevy/src/input.rs`: remove old bracket key opacity toggles; map `Digit1`..=`Digit4` and numpad equivalents to quick game background swaps; map `BracketLeft` and `BracketRight` to cycle previous/next chapter backgrounds across all games with wrap-around; map `Digit0` and `Numpad0` to reset background FOV override to default; update key adjustment tests.
+**Why:**
+- Fulfill user request for background visual debug mode:
+  1. Quick background swaps on keys 1 (Half-Life 2), 2 (Episode One), 3 (Episode Two), and 4 (Lost Coast).
+  2. Sequential chapter background rotation on `[` and `]` across all installed games, wrapping from the last game's last chapter back to the initial Half-Life 2 background and vice versa.
+  3. Reset FOV override on key `0`.
+  4. Complete removal of bracket keys from blur opacity toggles (opacity toggles now solely on left/right arrows).
+  5. Avoid code duplication by reusing existing `GameUiResources` resolution methods (`category_game`, `background_map_for`, and `chapters`) without manipulating menu button categories.
+**Tested how:**
+- Validation suite (`scripts/checks/validate.sh`: architecture guardrails, Python tests, cargo test across all workspace crates with 184 tests in `hl2-bevy` and 340 tests in `hl2-ui`, strict Clippy, format check, repository isolation, AGENTS.md budget).
+- Windows cross-target check (`scripts/checks/check_windows.sh`).
+- Bevy release binary compilation (`scripts/build-bevy.sh`).
+**Result:**
+- Quick background swaps for slots 1-4 and chapter background cycling via `[` and `]` operate smoothly and wrap around; key `0` resets FOV override; bracket keys no longer alter opacity; all tests and checks pass.
+**Still broken or not tested:**
+- Interactive window dragging and resizing during live gameplay.
+**Next:**
+- Await owner feedback or next UI task.
+
 ## 2026-10-28 Refactor: background debug FOV unification, menu focus on enable, arrow opacity toggles, and dev overlay ordering
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

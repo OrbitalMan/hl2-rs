@@ -573,18 +573,18 @@ fn process_background_debug_keys(
         );
         sim.background_debug.adjust_opacity_step(&opacity_fired);
 
-        if input.keys.just_pressed(KeyCode::ArrowLeft)
-            || input.keys.just_pressed(KeyCode::BracketLeft)
-        {
+        if input.keys.just_pressed(KeyCode::ArrowLeft) {
             sim.background_debug.toggle_zero_opacity();
         }
-        if input.keys.just_pressed(KeyCode::ArrowRight)
-            || input.keys.just_pressed(KeyCode::BracketRight)
-        {
+        if input.keys.just_pressed(KeyCode::ArrowRight) {
             sim.background_debug.toggle_full_opacity();
+        }
+        if input.keys.just_pressed(KeyCode::Digit0) || input.keys.just_pressed(KeyCode::Numpad0) {
+            sim.background_debug.fov = None;
         }
         if let Some(ref mut ui) = ui {
             ui.source.background_blur_opacity = sim.background_debug.blur_opacity;
+            handle_background_swap_keys(sim, ui, input.keys);
         }
     } else {
         *fov_repeat = KeyAdjustRepeat::default();
@@ -596,6 +596,87 @@ fn process_background_debug_keys(
         sim.background_debug
             .check_aspect_change(input.aspect, label, &mut ui.source);
     }
+}
+
+fn handle_background_swap_keys(
+    sim: &mut crate::simulation::Simulation,
+    ui: &mut crate::ui_host::Console,
+    keys: &ButtonInput<KeyCode>,
+) {
+    let slot = if keys.just_pressed(KeyCode::Digit1) || keys.just_pressed(KeyCode::Numpad1) {
+        Some(1)
+    } else if keys.just_pressed(KeyCode::Digit2) || keys.just_pressed(KeyCode::Numpad2) {
+        Some(2)
+    } else if keys.just_pressed(KeyCode::Digit3) || keys.just_pressed(KeyCode::Numpad3) {
+        Some(3)
+    } else if keys.just_pressed(KeyCode::Digit4) || keys.just_pressed(KeyCode::Numpad4) {
+        Some(4)
+    } else {
+        None
+    };
+
+    if let Some(s) = slot {
+        let target = ui.source.game_and_initial_background_for_slot(s);
+        if let Some((game, map)) = target {
+            swap_background_map(sim, ui, &game, &map);
+        }
+    } else if keys.just_pressed(KeyCode::BracketLeft) {
+        cycle_chapter_background(sim, ui, false);
+    } else if keys.just_pressed(KeyCode::BracketRight) {
+        cycle_chapter_background(sim, ui, true);
+    }
+}
+
+fn cycle_chapter_background(
+    sim: &mut crate::simulation::Simulation,
+    ui: &mut crate::ui_host::Console,
+    next: bool,
+) {
+    let list = ui.source.all_chapter_backgrounds();
+    if list.is_empty() {
+        return;
+    }
+    let (cur_game, cur_map) = ui.source.current_background_target();
+    let pos = list
+        .iter()
+        .position(|(g, m)| g == &cur_game && m == &cur_map);
+    let target_idx = match pos {
+        Some(i) => {
+            if next {
+                (i + 1) % list.len()
+            } else if i == 0 {
+                list.len() - 1
+            } else {
+                i - 1
+            }
+        }
+        None => {
+            if next {
+                0
+            } else {
+                list.len() - 1
+            }
+        }
+    };
+    let (game, map) = &list[target_idx];
+    swap_background_map(sim, ui, game, map);
+}
+
+fn swap_background_map(
+    sim: &mut crate::simulation::Simulation,
+    ui: &mut crate::ui_host::Console,
+    game: &str,
+    map: &str,
+) {
+    ui.source.swap_background(game, map);
+    let is_wide = ui.source.is_widescreen();
+    let blur_name = ui.source.blur_texture_name(map, is_wide);
+    sim.background_debug.map_name = map.to_owned();
+    sim.background_debug.blur_texture_name = blur_name;
+    ui.map_request = Some(map.to_owned());
+    ui.map_request_game = Some(game.to_owned());
+    ui.background_request = true;
+    sim.loading = true;
 }
 
 /// Zero FOV and position offsets for the selected weapon's current aspect profile.
@@ -934,7 +1015,57 @@ mod tests {
         assert_eq!(sim.background_debug.blur_opacity, 51);
         assert_eq!(ui.source.background_blur_opacity, 51);
 
-        // 2. BracketLeft sets opacity to 0
+        // 2. Quick background swaps: Digit2 (ep1), Digit3 (ep2), Digit4 (lostcoast), Digit1 (hl2)
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Digit2);
+        let tuning_input = DebugTuningInput {
+            keys: &keys,
+            time: Some(0.0),
+            aspect: 16.0 / 9.0,
+        };
+        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
+        assert_eq!(ui.map_request.as_deref(), Some("ep1_background01"));
+        assert_eq!(ui.map_request_game.as_deref(), Some("episodic"));
+        assert_eq!(sim.background_debug.map_name, "ep1_background01");
+
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Digit3);
+        let tuning_input = DebugTuningInput {
+            keys: &keys,
+            time: Some(0.0),
+            aspect: 16.0 / 9.0,
+        };
+        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
+        assert_eq!(ui.map_request.as_deref(), Some("ep2_background01"));
+        assert_eq!(ui.map_request_game.as_deref(), Some("ep2"));
+        assert_eq!(sim.background_debug.map_name, "ep2_background01");
+
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Digit4);
+        let tuning_input = DebugTuningInput {
+            keys: &keys,
+            time: Some(0.0),
+            aspect: 16.0 / 9.0,
+        };
+        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
+        assert_eq!(ui.map_request.as_deref(), Some("background01"));
+        assert_eq!(ui.map_request_game.as_deref(), Some("lostcoast"));
+        assert_eq!(sim.background_debug.map_name, "background01");
+
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Digit1);
+        let tuning_input = DebugTuningInput {
+            keys: &keys,
+            time: Some(0.0),
+            aspect: 16.0 / 9.0,
+        };
+        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
+        assert_eq!(ui.map_request.as_deref(), Some("background01"));
+        assert_eq!(ui.map_request_game.as_deref(), Some("hl2"));
+        assert_eq!(sim.background_debug.map_name, "background01");
+
+        // 3. BracketLeft and BracketRight rotate through chapter backgrounds
+        // From index 0 (hl2), BracketLeft wraps around to last game's last chapter background (lostcoast)
         let mut keys = ButtonInput::default();
         keys.press(KeyCode::BracketLeft);
         let tuning_input = DebugTuningInput {
@@ -943,22 +1074,10 @@ mod tests {
             aspect: 16.0 / 9.0,
         };
         process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
-        assert_eq!(sim.background_debug.blur_opacity, 0);
-        assert_eq!(ui.source.background_blur_opacity, 0);
+        assert_eq!(ui.map_request.as_deref(), Some("background01"));
+        assert_eq!(ui.map_request_game.as_deref(), Some("lostcoast"));
 
-        // 3. BracketLeft toggles back to base opacity (51)
-        let mut keys = ButtonInput::default();
-        keys.press(KeyCode::BracketLeft);
-        let tuning_input = DebugTuningInput {
-            keys: &keys,
-            time: Some(0.0),
-            aspect: 16.0 / 9.0,
-        };
-        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
-        assert_eq!(sim.background_debug.blur_opacity, 51);
-        assert_eq!(ui.source.background_blur_opacity, 51);
-
-        // 4. BracketRight sets opacity to 100, then toggles back to base opacity (51)
+        // From lostcoast, BracketRight wraps back to hl2 initial background
         let mut keys = ButtonInput::default();
         keys.press(KeyCode::BracketRight);
         let tuning_input = DebugTuningInput {
@@ -967,19 +1086,11 @@ mod tests {
             aspect: 16.0 / 9.0,
         };
         process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
-        assert_eq!(sim.background_debug.blur_opacity, 100);
-        assert_eq!(ui.source.background_blur_opacity, 100);
+        assert_eq!(ui.map_request.as_deref(), Some("background01"));
+        assert_eq!(ui.map_request_game.as_deref(), Some("hl2"));
 
-        let mut keys = ButtonInput::default();
-        keys.press(KeyCode::BracketRight);
-        let tuning_input = DebugTuningInput {
-            keys: &keys,
-            time: Some(0.0),
-            aspect: 16.0 / 9.0,
-        };
-        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
+        // 4. Bracket keys do NOT alter opacity
         assert_eq!(sim.background_debug.blur_opacity, 51);
-        assert_eq!(ui.source.background_blur_opacity, 51);
 
         // 5. Comma decreases opacity by 1%
         let mut keys = ButtonInput::default();
@@ -1034,7 +1145,7 @@ mod tests {
         process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
         assert_eq!(sim.background_debug.blur_opacity, 50);
 
-        // 7. ArrowUp and ArrowDown adjust FOV
+        // 7. ArrowUp and ArrowDown adjust FOV, Digit0 resets FOV
         let mut keys = ButtonInput::default();
         keys.press(KeyCode::ArrowUp);
         let tuning_input = DebugTuningInput {
@@ -1055,6 +1166,16 @@ mod tests {
         process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
         let fov2 = sim.background_debug.fov.unwrap();
         assert!(fov2 < fov1);
+
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Digit0);
+        let tuning_input = DebugTuningInput {
+            keys: &keys,
+            time: Some(0.0),
+            aspect: 16.0 / 9.0,
+        };
+        process_debug_tuning_keys(&mut sim, None, Some(&mut ui), tuning_input, &mut repeats);
+        assert_eq!(sim.background_debug.fov, None);
 
         // 8. When console is open, keys do not adjust opacity or FOV
         ui.source.set_mode(hl2_ui::console::Mode::Console);

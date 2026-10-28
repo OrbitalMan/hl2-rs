@@ -78,7 +78,8 @@ impl BackgroundDebug {
                 "blur_opacity: {}%  (left: 0  right: 100  ,: -1%  .: +1%)",
                 self.blur_opacity
             ),
-            format!("fov: {:.2}°  (D/U)", fov),
+            format!("fov: {:.2}°  (D/U  0: reset)", fov),
+            "1-4: hl2/ep1/ep2/lc    [/]: prev/next chapter bg".to_owned(),
             "Shift = 1.0  Alt = 0.01    hold to repeat    background_debug_mode 0".to_owned(),
         ]
     }
@@ -223,7 +224,7 @@ mod tests {
             ..Default::default()
         };
         let lines = debug.lines(16. / 9.);
-        assert_eq!(lines.len(), 5);
+        assert_eq!(lines.len(), 6);
         assert!(lines[0].contains("state: Ready"));
         assert!(lines[0].contains("map: background01"));
         assert!(lines[1].contains("blur_texture: background01_widescreen"));
@@ -232,6 +233,9 @@ mod tests {
             "blur_opacity: 50%  (left: 0  right: 100  ,: -1%  .: +1%)"
         );
         assert!(lines[3].contains("fov: "));
+        assert!(lines[3].contains("0: reset"));
+        assert!(lines[4].contains("1-4:"));
+        assert!(lines[4].contains("[/]"));
     }
 
     #[test]

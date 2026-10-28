@@ -409,7 +409,7 @@ fn prepare_ui_input(ctx: UiInputContext) -> source_ui::input::Input {
     } else if ctx.bg_debug {
         ctx.text
             .chars()
-            .filter(|&c| !matches!(c, ',' | '.' | '[' | ']'))
+            .filter(|&c| !matches!(c, ',' | '.' | '[' | ']' | '0'..='4'))
             .collect()
     } else {
         ctx.text
