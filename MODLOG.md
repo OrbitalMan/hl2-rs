@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-28 Fix: enable background debug key actions during menu simulation pause
+
+**Agent/model:** Antigravity; exact identifier not exposed. No subagents.
+**Changed:** In `crates/hl2-bevy/src/input.rs`, remove `adjusting = !sim.paused() && !sim.transition` gate
+from `process_background_debug_keys`, which had prevented arrow FOV adjustment and opacity key controls
+(`,`, `.`, `[`, `]`) from firing because the main menu state is always paused (`ui.source.paused()` returns
+true for all non-gameplay modes). Gate background debug mode deactivation in `process_debug_tuning_keys` on
+`!sim.background_level && !sim.loading() && !ui.source.can_enable_background_debug()`, preserving debug mode
+in the main menu. Add unit test `background_debug_keys_adjust_fov_and_opacity_in_paused_main_menu`. In
+`crates/hl2-bevy/src/simulation.rs`, allow enabling background debug mode whenever
+`self.background_level || self.loading || ui.source.can_enable_background_debug()`.
+**Why:** In the main menu, `ui.source.paused()` evaluates to `mode != Mode::Gameplay` (true), setting
+`sim.paused = true`. A guard copied from viewmodel debug mode checked `!sim.paused()`, causing `adjusting`
+to evaluate to false every frame in the main menu, rendering all background debug keys completely unresponsive.
+**Tested how:** Validation suite (`validate.sh`: architecture guardrails, Python tests, cargo test across all
+workspace crates with 184 tests passing in `hl2-bevy`, strict Clippy, format check, repository isolation,
+AGENTS.md budget); Windows cross-target check (`check_windows.sh`); Bevy release build (`build-bevy.sh`); unit test
+verifying key handling in paused main menu state.
+**Result:** Background debug keys (arrow keys for FOV, `,`/`.` for 1% opacity step, `[`/`]` for 0%/100% toggles)
+respond immediately in the main menu while keeping keys suppressed when the developer console is open.
+**Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
+**Next:** None in this batch; verified responsive and functioning in the main menu.
+
+
 ## 2026-10-28 Feature: background debug mode controls refinement and blur opacity key actions
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

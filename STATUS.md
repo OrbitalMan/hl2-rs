@@ -1,5 +1,15 @@
 # STATUS
 
+## Background debug key responsiveness in menu pause state resolved (2026-10-28)
+
+Background debug mode keys (arrow keys for camera horizontal/vertical FOV, `,`/`.` for 1% opacity adjustment, and `[`/`]`
+for 0%/100% opacity toggles) now respond correctly in the main menu. Previously, an `adjusting = !sim.paused() && !sim.transition`
+guard inherited from viewmodel debug mode blocked all key updates because the main menu is always considered paused
+(`ui.source.paused()` returns `mode != Mode::Gameplay`). Background debug key handling now activates whenever the developer
+console is not open, and mode retention in `process_debug_tuning_keys` checks `can_enable_background_debug()` to prevent
+premature deactivation. Verified with automated unit testing and full validation suite (`validate.sh`).
+
+
 ## Background debug mode navigation isolation, raw names, and blur opacity controls (2026-10-28)
 
 Background debug mode has been refined to address navigation overlap and add granular visual opacity controls:

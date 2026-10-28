@@ -352,25 +352,30 @@ impl Simulation {
                     self.background_debug.fov_vertical = None;
                     ui.source.background_debug_mode = false;
                     ui.source.log("background_debug_mode 0");
-                } else if !self.background_level && !self.loading {
-                    ui.source.log(
-                        "background_debug_mode needs a background map or loading blur; start or return to the main menu.",
-                    );
                 } else {
-                    self.viewmodel_debug = ViewmodelDebug::default();
-                    self.background_debug.enabled = true;
-                    ui.source.background_debug_mode = true;
-                    let is_wide = ui.source.is_widescreen();
-                    if let Some((_, map)) = ui.source.current_background() {
-                        self.background_debug.map_name = map.to_owned();
-                        self.background_debug.blur_texture_name =
-                            ui.source.blur_texture_name(map, is_wide);
-                    } else if let Some(bg) = ui.source.background() {
-                        self.background_debug.map_name = bg.map.clone();
-                        self.background_debug.blur_texture_name =
-                            ui.source.blur_texture_name(&bg.map, is_wide);
+                    let can_enable = self.background_level
+                        || self.loading
+                        || ui.source.can_enable_background_debug();
+                    if !can_enable {
+                        ui.source.log(
+                            "background_debug_mode needs a background map or loading blur; start or return to the main menu.",
+                        );
+                    } else {
+                        self.viewmodel_debug = ViewmodelDebug::default();
+                        self.background_debug.enabled = true;
+                        ui.source.background_debug_mode = true;
+                        let is_wide = ui.source.is_widescreen();
+                        if let Some((_, map)) = ui.source.current_background() {
+                            self.background_debug.map_name = map.to_owned();
+                            self.background_debug.blur_texture_name =
+                                ui.source.blur_texture_name(map, is_wide);
+                        } else if let Some(bg) = ui.source.background() {
+                            self.background_debug.map_name = bg.map.clone();
+                            self.background_debug.blur_texture_name =
+                                ui.source.blur_texture_name(&bg.map, is_wide);
+                        }
+                        ui.source.log("background_debug_mode 1");
                     }
-                    ui.source.log("background_debug_mode 1");
                 }
             }
             Effect::BackgroundBlurOpacity(opacity) => {
