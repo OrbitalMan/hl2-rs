@@ -174,12 +174,15 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         let exposure = sample.xy * data.params.y;
         let distance = length(offset * data.params.zw);
         let reach = length(exposure * data.params.zw) * 0.5;
-        if sample.z == 0.0 || reach < distance { continue; }
-        // Reject motion perpendicular to this gather ray, including unrelated hand detail.
+        if sample.z == 0.0 { continue; }
+        // Different weapon surfaces may move in different directions or remain still.
+        // Reject their motion/color, not their opaque coverage over the current surface.
         let alignment = abs(dot(normalize(exposure+vec2(1e-12)),normalize(vector)));
-        let weight = sample.z * smoothstep(0.5,0.9,alignment);
-        sum += textureSampleLevel(frame,linear_sampler,uv,0.0).rgb * weight;
-        coverage += weight;
+        let accepted = select(0.0,smoothstep(0.5,0.9,alignment),reach >= distance);
+        let weight = sample.z * accepted;
+        let retained = sample.z * (1.0-accepted) * own.z;
+        sum += textureSampleLevel(frame,linear_sampler,uv,0.0).rgb * weight + base.rgb * retained;
+        coverage += weight + retained;
     }
     // Offscreen taps are unknown, not transparent background. Normalize both color
     // and coverage by available samples so clipped guns do not fade at screen edges.

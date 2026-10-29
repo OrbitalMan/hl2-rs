@@ -1,5 +1,22 @@
 # MODLOG
 
+## 2026-10-29 Preserve opaque weapon interiors during Advanced blur
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed:** Rejected samples from other weapon surfaces retain foreground coverage and use the current surface color. Genuine background samples still shape blurred silhouettes. Added a packaged SMG opacity check with a failing private coverage-rejection control at no AA and 4x AA.
+
+**Why:** Motion ownership rejection was counted as transparent space even inside fully covered weapon footprints, mixing the world through the firing SMG.
+
+**Tested how / Result:** Original-shader GPU probes detected 32,629 / 25,216 translucent interior pixels in the first no-AA / 4x frames. The candidate reports zero across both nine-frame bursts. `NO_BUILD=1 python3 scripts/checks/check_weapon_opacity.py`: both AA modes pass; both private negative controls detect the defect. `NO_BUILD=1 python3 scripts/checks/check_weapon_blur.py`: pistol, switch, reload and SMG pass at both AA modes with no borrowed motion or missing coverage. Eight targeted packaged replay groups pass, including silhouette trails and blur option lifecycle. Workspace validation and strict Windows checks pass.
+
+**Performance:** Three alternating old/new 1024x768, 4x AA Advanced SMG pairs: mean ms 8.839 -> 8.966, 10.571 -> 9.815, 10.788 -> 9.480 (median 10.571 -> 9.480). Compilation overlapped part of this exploratory batch; it establishes no speedup or sustained FPS guarantee. No consistent extra cost observed. No new pass, attachment, texture fetch, taps or off-mode work. Detailed bounds in docs/performance.md.
+
+**Still broken or not tested:** Native image parity, Windows GPU runtime and sustained thermally controlled performance not tested.
+
+**Next:** Record final UI evidence and retain the packaged artifacts for review.
+
+
 ## 2026-10-29 Caption style-boundary regression and console draw allocation
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

@@ -1,5 +1,27 @@
 # Performance measurements - 2026-10-05
 
+## SMG opacity repair: bounded timing smoke (2026-10-29)
+
+The weapon gather retains opaque coverage when rejecting another weapon surface's motion,
+using the current surface color for that rejected contribution. It adds arithmetic inside
+existing taps; it adds no pass, attachment, texture fetch, tap count, worker or off-mode work.
+
+Three alternating old/new packaged SMG runs at 1024x768, 4x AA, HDR None, Advanced,
+uncapped headless Metal, after 120 warmup frames:
+
+| Pair | Before mean ms | After mean ms | Before p95 upper bound ms | After p95 upper bound ms |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 8.839 | 8.966 | 12 | 12 |
+| 2 | 10.571 | 9.815 | 24 | 18 |
+| 3 | 10.788 | 9.480 | 27 | 12 |
+
+Median means: 10.571 -> 9.480 ms. These are exploratory smoke measurements: compilation
+was active during part of the batch, workloads are short, and resource/thermal controls
+were not collected. They do not establish a speedup or sustained FPS guarantee. No
+consistent extra frame-time cost is observed. Raw per-frame-window reports and the
+rejected original shader control are retained in ignored artifacts.
+
+
 ## Final tier interpretation and native idle checkpoint (2026-10-27)
 
 The owner split legacy Advanced into Advanced (retail camera + strong weapon animation)
