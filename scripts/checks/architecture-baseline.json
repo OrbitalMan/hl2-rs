@@ -7,9 +7,9 @@
    "too_many_arguments allowances": 7
   },
   "hl2-simulation": {
-   "glob imports": 12,
+   "glob imports": 13,
    "mutable statics": 2,
-   "too_many_arguments allowances": 32
+   "too_many_arguments allowances": 33
   },
   "hl2-ui": {
    "glob imports": 4,
@@ -43,8 +43,11 @@
   "2271ba803239",
   "22c0bd364003",
   "23430b1bd1e5",
+  "242143c071e6",
+  "24708fc0342e",
+  "273e2e2bc42f",
   "2774b81da3f9",
-  "2d5c03478c7c",
+  "27f249af6a7e",
   "2de384e8fb76",
   "3045f2198287",
   "315d624c061b",
@@ -55,7 +58,10 @@
   "36d1c3a53164",
   "38e26440c724",
   "393fa9579c7a",
+  "3a2cd52dae7e",
+  "3d34c27267f6",
   "3e923f2e08e9",
+  "3fa421ec2839",
   "441823ff37f1",
   "442c96193fbf",
   "4485b755ca4c",
@@ -66,6 +72,8 @@
   "4b79d0c2102e",
   "4b968de7b6ef",
   "4c111500605a",
+  "4ec30d257a41",
+  "4f2d346988a7",
   "5035ab2c721c",
   "51a0b37e8e88",
   "53136e999d91",
@@ -87,14 +95,18 @@
   "6cee0326dac3",
   "6d261199e5c0",
   "6f24dcef9990",
+  "71b8d291cdce",
+  "727cddc72bd6",
   "72c3be5e0f16",
   "72fb7531e9ea",
+  "73d6f0923d0a",
   "749241c12a17",
   "74e26e982e06",
   "76516891ea51",
   "78c292436aaf",
   "7c74c483b8f8",
   "7d3a1164b59c",
+  "7ea2cb73e991",
   "7fe4cad39c12",
   "806fd710fde5",
   "88310e6efd27",
@@ -105,13 +117,14 @@
   "8d00c63721c0",
   "91da6daa7a2a",
   "93546c5975fe",
+  "962d31220e18",
   "993d94d596d0",
   "9b232cd1417f",
-  "9c3662dd353b",
   "9d080727a538",
   "9ec8a216cb40",
   "9f0ef0916d4c",
   "a4c21639b055",
+  "a8263c39f066",
   "a9113a641cb5",
   "aa8e8d1e0bf9",
   "ab26a1c4ce2b",
@@ -122,19 +135,26 @@
   "b2794ce5c815",
   "b2c3866220b9",
   "b37979a42461",
+  "b37b712db267",
   "b49ec7f1774a",
   "b5d102b845ac",
   "b834caf3ed6c",
+  "b84cbf617ca9",
   "ba26c28f42a7",
   "ba5494309285",
   "bd75b3a27c29",
   "be013b86b5e5",
+  "bf75c7a3beec",
+  "bf77384b7f66",
   "bfab1442c9f0",
   "c028c18b77f0",
+  "c2895edca4e3",
   "c38b3fd31dd7",
   "c598e4b6274f",
+  "c5dba2c36fc2",
   "c775201a664b",
   "ccba164609c7",
+  "cd1bfc8c9e45",
   "ce0f6e21b531",
   "ce408197dc4f",
   "ce439e7b222c",
@@ -149,39 +169,39 @@
   "dcf92467b908",
   "dd48df98201b",
   "ddcbe13d013d",
-  "e0e19226a738",
   "e3d96d75b6b0",
   "e8ca7eca78c4",
   "e9e17810ab69",
   "eafac703ec4e",
   "f59070197c8c",
   "fc1edf5f2624",
-  "fc72ef3719ed",
   "fd5835bbe06e",
+  "fe098fa81821",
+  "fe47f0b4abe9",
   "fed629d3999b"
  ],
  "files": {
   "crates/hl2-bevy/src/assets.rs": 1107,
   "crates/hl2-bevy/src/audio.rs": 1174,
   "crates/hl2-bevy/src/effects.rs": 1092,
-  "crates/hl2-bevy/src/gameplay.rs": 1643,
-  "crates/hl2-bevy/src/main.rs": 1055,
-  "crates/hl2-bevy/src/rendering.rs": 1509,
+  "crates/hl2-bevy/src/gameplay.rs": 1671,
+  "crates/hl2-bevy/src/main.rs": 1061,
+  "crates/hl2-bevy/src/rendering.rs": 1534,
   "crates/hl2-bevy/src/video.rs": 1187,
   "crates/hl2-simulation/src/ai/default_schedules.rs": 1247,
-  "crates/hl2-simulation/src/ai/runtime.rs": 2621,
-  "crates/hl2-simulation/src/ai/schedule.rs": 1039,
-  "crates/hl2-simulation/src/ai/spawn.rs": 1396,
+  "crates/hl2-simulation/src/ai/runtime.rs": 2642,
+  "crates/hl2-simulation/src/ai/schedule.rs": 1132,
+  "crates/hl2-simulation/src/ai/spawn.rs": 1409,
   "crates/hl2-simulation/src/entities/choreography.rs": 1324,
-  "crates/hl2-simulation/src/gameplay.rs": 2655,
-  "crates/hl2-simulation/src/npc.rs": 1525,
-  "crates/hl2-simulation/src/physics.rs": 3222,
-  "crates/hl2-simulation/src/projectiles.rs": 1219,
+  "crates/hl2-simulation/src/gameplay.rs": 2909,
+  "crates/hl2-simulation/src/npc.rs": 1671,
+  "crates/hl2-simulation/src/physics.rs": 3657,
+  "crates/hl2-simulation/src/projectiles.rs": 1286,
   "crates/hl2-simulation/src/sounds.rs": 1208,
   "crates/hl2-ui/src/closecaption.rs": 1182,
   "crates/hl2-ui/src/gameui/options.rs": 2547,
   "crates/hl2-ui/src/hud.rs": 1827,
-  "crates/source-assets/src/models.rs": 1426,
+  "crates/source-assets/src/models.rs": 1465,
   "crates/source-ui/src/console/panel.rs": 1091,
   "crates/source-ui/src/widgets.rs": 2203
  },
@@ -205,7 +225,7 @@
    144
   ],
   "crates/hl2-bevy/src/canvas_renderer.rs::present": [
-   156
+   157
   ],
   "crates/hl2-bevy/src/effects.rs::install": [
    142
@@ -217,22 +237,25 @@
    219
   ],
   "crates/hl2-bevy/src/eyes.rs::present": [
-   272
+   273
+  ],
+  "crates/hl2-bevy/src/gameplay.rs::drop_weapons": [
+   104
   ],
   "crates/hl2-bevy/src/gameplay.rs::player_outcome": [
    101
   ],
   "crates/hl2-bevy/src/gameplay.rs::tick": [
-   808
+   818
   ],
   "crates/hl2-bevy/src/input.rs::controls": [
    116
   ],
   "crates/hl2-bevy/src/main.rs::main": [
-   311
+   315
   ],
   "crates/hl2-bevy/src/main.rs::monitor": [
-   145
+   146
   ],
   "crates/hl2-bevy/src/main.rs::parse_from": [
    203
@@ -247,7 +270,7 @@
    139
   ],
   "crates/hl2-bevy/src/rendering.rs::present_entities": [
-   165
+   168
   ],
   "crates/hl2-bevy/src/rendering.rs::spawn_map_filtered": [
    578
@@ -273,6 +296,9 @@
   "crates/hl2-simulation/src/ai/ally_speech.rs::speak": [
    119
   ],
+  "crates/hl2-simulation/src/ai/enemy_choice.rs::best_enemy": [
+   103
+  ],
   "crates/hl2-simulation/src/ai/humanoid.rs::start_task": [
    108
   ],
@@ -283,7 +309,7 @@
    200
   ],
   "crates/hl2-simulation/src/ai/runtime.rs::think": [
-   1225
+   1246
   ],
   "crates/hl2-simulation/src/ai/runtime.rs::tick": [
    322
@@ -304,13 +330,13 @@
    113
   ],
   "crates/hl2-simulation/src/ai/schedule.rs::start_generic_task": [
-   260
+   264
   ],
   "crates/hl2-simulation/src/ai/spawn.rs::key": [
-   122
+   123
   ],
   "crates/hl2-simulation/src/ai/spawn.rs::panel": [
-   135
+   142
   ],
   "crates/hl2-simulation/src/ai/spawn.rs::parse": [
    101
@@ -321,11 +347,14 @@
   "crates/hl2-simulation/src/entities.rs::tick": [
    204
   ],
+  "crates/hl2-simulation/src/entities.rs::with_campaign": [
+   102
+  ],
   "crates/hl2-simulation/src/entities/choreography.rs::tick_choreography": [
    376
   ],
   "crates/hl2-simulation/src/entities/io.rs::deliver": [
-   188
+   202
   ],
   "crates/hl2-simulation/src/explosion_particles.rs::draw": [
    120
@@ -334,19 +363,22 @@
    147
   ],
   "crates/hl2-simulation/src/gameplay.rs::apply_hit": [
-   108
+   128
   ],
   "crates/hl2-simulation/src/gameplay.rs::apply_projectile_damage": [
-   268
+   316
   ],
   "crates/hl2-simulation/src/gameplay.rs::attack": [
-   166
+   185
   ],
   "crates/hl2-simulation/src/gameplay.rs::definitions": [
    122
   ],
   "crates/hl2-simulation/src/gameplay.rs::frag_tick": [
    103
+  ],
+  "crates/hl2-simulation/src/gameplay.rs::npc_fire_bullets": [
+   105
   ],
   "crates/hl2-simulation/src/gameplay.rs::tick": [
    164
@@ -357,20 +389,26 @@
   "crates/hl2-simulation/src/npc.rs::advance": [
    142
   ],
+  "crates/hl2-simulation/src/npc.rs::plan": [
+   109
+  ],
   "crates/hl2-simulation/src/npc.rs::request": [
-   101
+   114
+  ],
+  "crates/hl2-simulation/src/npc.rs::tick": [
+   120
   ],
   "crates/hl2-simulation/src/npc_weapons.rs::fire_spec": [
    106
   ],
   "crates/hl2-simulation/src/pcf_runtime.rs::initialize": [
-   195
+   221
   ],
   "crates/hl2-simulation/src/pcf_runtime.rs::simulate_instance": [
-   192
+   235
   ],
   "crates/hl2-simulation/src/physics.rs::add_constraints": [
-   172
+   173
   ],
   "crates/hl2-simulation/src/physics.rs::add_model_instance": [
    246
@@ -384,23 +422,35 @@
   "crates/hl2-simulation/src/physics.rs::npc_trace_hull": [
    214
   ],
+  "crates/hl2-simulation/src/physics.rs::spawn_ragdoll": [
+   138
+  ],
   "crates/hl2-simulation/src/physics.rs::tick_inner": [
    128
   ],
   "crates/hl2-simulation/src/physics.rs::trace_hull": [
-   138
+   143
   ],
   "crates/hl2-simulation/src/physics.rs::update_player_shadow": [
-   241
+   242
   ],
   "crates/hl2-simulation/src/projectile_visuals.rs::frame": [
    207
+  ],
+  "crates/hl2-simulation/src/projectiles.rs::grenade_explosion": [
+   104
   ],
   "crates/hl2-simulation/src/projectiles.rs::spawn": [
    114
   ],
   "crates/hl2-simulation/src/projectiles.rs::tick": [
-   390
+   403
+  ],
+  "crates/hl2-simulation/src/ragdolls.rs::impacts": [
+   126
+  ],
+  "crates/hl2-simulation/src/ragdolls.rs::spawn": [
+   124
   ],
   "crates/hl2-simulation/src/sounds.rs::ms_adpcm_header": [
    105
@@ -409,10 +459,10 @@
    123
   ],
   "crates/hl2-simulation/src/weapon_crossbow.rs::bolt_tick": [
-   102
+   123
   ],
   "crates/hl2-simulation/src/weapon_physcannon.rs::cannon_primary": [
-   106
+   107
   ],
   "crates/hl2-ui/src/closecaption.rs::paint": [
    194
@@ -478,7 +528,7 @@
    112
   ],
   "crates/source-assets/src/models.rs::append_models_lod": [
-   374
+   388
   ],
   "crates/source-assets/src/models.rs::resolve_prop_data": [
    103

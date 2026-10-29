@@ -41,6 +41,7 @@ pub fn despawn_killed_runtime_draws(
         .copied()
         .filter(|id| {
             game.scene.states.get(*id).is_some_and(|s| s.killed)
+                && !game.scene.ragdoll_matrices.contains_key(id)
                 && !game.despawned_draws.contains(id)
         })
         .collect();

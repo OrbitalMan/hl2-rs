@@ -8,7 +8,7 @@
 use crate::{
     entities::Scene,
     physics::PhysicsCollision,
-    projectiles::{Damage, DamageTarget},
+    projectiles::{Attacker, Damage, DamageTarget},
 };
 use glam::Vec3;
 use modkit_core::World;
@@ -144,6 +144,14 @@ pub fn queue_npc_damage(
                 },
             );
             if damage > 0. {
+                // The object that hit, or the player within 1 s of picking it up or
+                // dropping it (HasPhysicsAttacker(1.0), retail FUN_100f58e0).
+                let attacker = event.entities[other].map_or(Attacker::None, |prop| {
+                    match scene.physics_attacker(prop, 1.) {
+                        Attacker::None => Attacker::Entity(prop),
+                        player => player,
+                    }
+                });
                 scene.entity_damage.push(Damage {
                     target: DamageTarget::Entity(npc),
                     amount: damage,
@@ -151,6 +159,7 @@ pub fn queue_npc_damage(
                     dissolve: false,
                     direction: event.pre_velocities[other].normalize_or_zero(),
                     origin: event.origins[other],
+                    attacker,
                 });
             }
         }
@@ -342,6 +351,8 @@ pub fn queue_prop_damage(
                     dissolve: false,
                     direction: event.pre_velocities[index].normalize_or_zero(),
                     origin: event.origins[index],
+                    // CTakeDamageInfo(pHitEntity, pHitEntity): what the prop hit.
+                    attacker: event.entities[other].map_or(Attacker::None, Attacker::Entity),
                 });
             }
         }

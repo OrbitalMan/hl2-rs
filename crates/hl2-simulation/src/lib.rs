@@ -28,6 +28,7 @@ pub mod phys_explosion;
 pub mod player_damage;
 pub mod player_pickup;
 pub mod projectiles;
+pub mod ragdolls;
 pub mod selection;
 pub mod skill;
 pub mod sounds;

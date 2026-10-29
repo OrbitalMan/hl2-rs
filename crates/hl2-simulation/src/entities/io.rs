@@ -179,6 +179,7 @@ impl Scene {
         if !class.starts_with("prop_physics") && class != "func_physbox" {
             return;
         }
+        self.physics_attackers.insert(id, self.time);
         self.fire(id, "OnPhysGunPickup", usize::MAX);
         match reason {
             PhysGunPickup::Cannon => self.fire(id, "OnPhysGunOnlyPickup", usize::MAX),
@@ -194,7 +195,17 @@ impl Scene {
     pub fn prop_physgun_drop(&mut self, world: &World, id: usize) {
         let class = world.entities.get(id).map_or("", |e| e.class());
         if class.starts_with("prop_physics") || class == "func_physbox" {
+            self.physics_attackers.insert(id, self.time);
             self.fire(id, "OnPhysGunDrop", usize::MAX);
+        }
+    }
+
+    /// CBreakableProp::HasPhysicsAttacker(dt): the player while the last physgun/+USE
+    /// pickup or drop is at most `window` seconds old.
+    pub fn physics_attacker(&self, id: usize, window: f64) -> crate::projectiles::Attacker {
+        match self.physics_attackers.get(&id) {
+            Some(at) if self.time - window <= *at => crate::projectiles::Attacker::Player,
+            _ => crate::projectiles::Attacker::None,
         }
     }
 
@@ -375,6 +386,20 @@ impl Scene {
             "lock" => self.states[id].locked = true,
             "unlock" => self.states[id].locked = false,
             "firetimer" => self.fire(id, "OnTimer", p.activator),
+            // InputSetHealth lowers health through TakeDamage(DMG_GENERIC): to zero or
+            // below, the NPC dies like any other damage (Event_Killed, ragdoll).
+            "sethealth" if class.starts_with("npc_") && value <= 0. => {
+                let origin = self.states[id].origin;
+                self.entity_damage.push(crate::projectiles::Damage {
+                    target: crate::projectiles::DamageTarget::Entity(id),
+                    amount: 1e9,
+                    kind: 0,
+                    dissolve: false,
+                    direction: Vec3::ZERO,
+                    origin,
+                    attacker: crate::projectiles::Attacker::None,
+                });
+            }
             "sethealth" if class.starts_with("npc_") => self.states[id].value = value,
             "setdefaultanimation" if class.starts_with("prop_dynamic") => {
                 // CDynamicProp stores the name without restarting or validating the active clip.

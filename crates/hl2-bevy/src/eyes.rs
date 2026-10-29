@@ -98,7 +98,7 @@ fn collect_actor_poses<'a>(
         .into_iter()
         .filter_map(|(id, key)| {
             let state = game.scene.states.get(id)?;
-            if state.killed || !state.visible {
+            if (state.killed || !state.visible) && !game.scene.ragdoll_matrices.contains_key(&id) {
                 return None;
             }
             let rig = game.world.rigs.get(key)?;
@@ -134,9 +134,12 @@ pub fn present(
     let mut origins = Vec::new();
     let mut attachment_actors = 0;
     for (&id, actor) in &eyes.actors {
-        let Some(state) = game.scene.states.get(id).filter(|s| s.visible && !s.killed) else {
+        let Some(state) = game.scene.states.get(id) else {
             continue;
         };
+        if (!state.visible || state.killed) && !game.scene.ragdoll_matrices.contains_key(&id) {
+            continue;
+        }
         let attached = actor.gaze.attachment.as_ref().and_then(|attachment| {
             bone_pose(&game, &actor.key, id, attachment.bone, &poses)
                 .map(|bone| (bone * attachment.local, attachment.world_align))
@@ -182,14 +185,12 @@ pub fn present(
     }
     let mut actor_targets = BTreeMap::<usize, Option<Selected>>::new();
     for (owner, mesh_eye, handle, skinned) in &draws {
-        let Some(state) = game
-            .scene
-            .states
-            .get(owner.0)
-            .filter(|s| s.visible && !s.killed)
-        else {
+        let Some(state) = game.scene.states.get(owner.0) else {
             continue;
         };
+        if (!state.visible || state.killed) && !game.scene.ragdoll_matrices.contains_key(&owner.0) {
+            continue;
+        }
         let Some(bone) = bone_pose(&game, &mesh_eye.key, owner.0, mesh_eye.eye.bone, &poses) else {
             continue;
         };

@@ -332,8 +332,8 @@ pub struct Scene {
     /// Props broken this tick (CBreakableProp::Break), for the gib spawner.
     pub prop_breaks: Vec<crate::gibs::PropBreak>,
     /// Explosive props broken this tick (CBreakableProp::Break -> ExplosionCreate):
-    /// world-space center, integer magnitude and radius.
-    pub prop_explosions: Vec<(Vec3, f32, f32, bool)>,
+    /// world-space center, integer magnitude and radius, PropaneTank.Burst, attacker.
+    pub prop_explosions: Vec<(Vec3, f32, f32, bool, crate::projectiles::Attacker)>,
     /// env_physexplosion entities whose Explode input arrived (phys_explosion).
     pub phys_explosions: Vec<usize>,
     /// env_physimpact entities whose Impact input arrived (phys_explosion).
@@ -389,6 +389,34 @@ pub struct Scene {
     /// NPCs killed by damage this tick (CBaseCombatCharacter::Event_Killed, not removal
     /// by Kill inputs): the host drops their active weapons (DESIGN 14r part B).
     pub npc_deaths: Vec<usize>,
+    /// The killing damage's force (kg in/s) per NPC killed this tick (CTakeDamageInfo
+    /// damage force; the ragdoll's nudge) and the point whose nearest solid takes it
+    /// (m_nForceBone; None: the root solid, the server's default force bone 0).
+    pub npc_death_forces: BTreeMap<usize, (Vec3, Option<Vec3>)>,
+    /// The latest trace attack's position per NPC (CAI_BaseNPC::TraceAttack keeps the
+    /// hit hitbox's physics bone in m_nForceBone): later deaths without a trace (blasts)
+    /// push that solid.
+    pub npc_force_points: BTreeMap<usize, Vec3>,
+    /// CBaseCombatCharacter m_LastHitGroup: the hitgroup of each NPC's last trace attack
+    /// (the death pose frame).
+    pub npc_hit_groups: BTreeMap<usize, i32>,
+    /// Damage forces of projectile hits applied through the entity damage list this tick
+    /// (crossbow bolts: CalculateMeleeDamageForce x 0.7), with the hit position, by NPC.
+    pub npc_hit_forces: BTreeMap<usize, (Vec3, Vec3)>,
+    /// Client ragdoll effects requested this tick (FX_AffectRagdolls for every bullet
+    /// and club impact, C_TEExplosion::AffectRagdolls, the BoltImpact effect).
+    pub ragdoll_impacts: Vec<crate::ragdolls::Impact>,
+    /// Debug option (ours, F4 overlay): the player's hits hurt friendly-immune NPCs.
+    pub player_hurts_friendlies: bool,
+    /// CBreakableProp m_hLastAttacker: the last player or NPC whose damage a prop took.
+    pub prop_attackers: BTreeMap<usize, crate::projectiles::Attacker>,
+    /// CBreakableProp::SetPhysicsAttacker: when the player last picked up or dropped a
+    /// prop (+USE, gravity gun pickup/drop/launch/punt; m_flLastPhysicsInfluenceTime).
+    pub physics_attackers: BTreeMap<usize, f64>,
+    /// Ragdolled NPCs' bone matrices (model space), replacing their animation pose.
+    pub ragdoll_matrices: BTreeMap<usize, Vec<glam::Mat4>>,
+    /// Advances every ragdoll update (render pose cache key).
+    pub ragdoll_frame: u64,
     /// NPCs whose AI has the player as enemy or in enemy memory (CAI_BaseHumanoid
     /// sneak attacks exclude them); refreshed by the host after each AI tick.
     pub npc_knows_player: std::collections::BTreeSet<usize>,
@@ -622,6 +650,16 @@ impl Scene {
             last_npc_hit: None,
             npc_damage: Vec::new(),
             npc_deaths: Vec::new(),
+            npc_death_forces: BTreeMap::new(),
+            npc_force_points: BTreeMap::new(),
+            npc_hit_groups: BTreeMap::new(),
+            npc_hit_forces: BTreeMap::new(),
+            ragdoll_impacts: Vec::new(),
+            player_hurts_friendlies: false,
+            prop_attackers: BTreeMap::new(),
+            physics_attackers: BTreeMap::new(),
+            ragdoll_matrices: BTreeMap::new(),
+            ragdoll_frame: 0,
             npc_knows_player: Default::default(),
             ai_sequence_end: BTreeMap::new(),
             look_targets: Default::default(),

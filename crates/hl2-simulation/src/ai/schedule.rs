@@ -407,7 +407,24 @@ pub struct AiNpc {
     /// repath (UpdateEnemyPos).
     pub enemy_goal: Option<Vec3>,
     enemy_repath_at: f64,
+    /// m_UnreachableEnts: entities a path request failed to reach, until the expiry or
+    /// until they move more than 120 units from where they were.
+    pub unreachable: Vec<Unreachable>,
+    /// ForceChooseNewEnemy (RememberUnreachable of the enemy): ChooseEnemy runs again.
+    pub force_choose_enemy: bool,
 }
+
+/// UnreachableEnt_t.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct Unreachable {
+    pub entity: usize,
+    pub expires: f64,
+    pub location: Vec3,
+}
+/// RememberUnreachable's default duration (NPC_UNREACHABLE_TIMEOUT).
+pub const UNREACHABLE_TIME: f64 = 3.;
+/// IsUnreachable: an entity that moved this far is tested again.
+const UNREACHABLE_DIST_TOLERANCE: f32 = 120.;
 
 /// WorldSpaceCenter to the enemy's WorldSpaceCenter (both standing 72-unit hulls: the
 /// centers sit 36 units above the origins, so the offsets cancel).
@@ -435,6 +452,78 @@ impl AiNpc {
             .and_then(|e| self.enemies.find(Some(e)))
             .map(|m| m.last_known)
             .or(ctx.enemy.map(|e| e.1))
+    }
+    /// CAI_BaseNPC::RememberUnreachable(entity, duration -1): 3 s from now, at its
+    /// current position; the enemy itself also forces a new ChooseEnemy.
+    pub fn remember_unreachable(&mut self, entity: usize, position: Vec3, now: f64) {
+        if self.enemy == Some(entity) {
+            self.force_choose_enemy = true;
+        }
+        let expires = now + UNREACHABLE_TIME;
+        match self.unreachable.iter_mut().find(|u| u.entity == entity) {
+            Some(u) => {
+                u.expires = expires;
+                u.location = position;
+            }
+            None => self.unreachable.push(Unreachable {
+                entity,
+                expires,
+                location: position,
+            }),
+        }
+    }
+    /// CAI_BaseNPC::IsUnreachable: remembered, not expired and within 120 units of where
+    /// it was (an expired or moved record is dropped).
+    pub fn is_unreachable(&mut self, entity: usize, position: Vec3, now: f64) -> bool {
+        let Some(index) = self.unreachable.iter().position(|u| u.entity == entity) else {
+            return false;
+        };
+        let u = self.unreachable[index];
+        if now > u.expires || position.distance(u.location) > UNREACHABLE_DIST_TOLERANCE {
+            self.unreachable.swap_remove(index);
+            return false;
+        }
+        true
+    }
+    /// The read-only IsUnreachable (BestEnemy's reachability), without dropping records.
+    pub fn unreachable_now(&self, entity: usize, position: Vec3, now: f64) -> bool {
+        self.unreachable.iter().any(|u| {
+            u.entity == entity
+                && now <= u.expires
+                && position.distance(u.location) <= UNREACHABLE_DIST_TOLERANCE
+        })
+    }
+    /// TASK_GET_PATH_TO_ENEMY: unreachable fails at once; a failed path request
+    /// remembers the enemy as unreachable (RememberUnreachable).
+    fn path_to_enemy(&mut self, ctx: &Context, motor: &mut dyn Motor) -> TaskStatus {
+        let Some((enemy, position)) = ctx.enemy else {
+            return TaskStatus::Failed;
+        };
+        if self.is_unreachable(enemy, position, ctx.now) {
+            return TaskStatus::Failed;
+        }
+        if motor.path_to(position, true) {
+            self.enemy_goal = Some(position);
+            TaskStatus::Complete
+        } else {
+            self.remember_unreachable(enemy, position, ctx.now);
+            TaskStatus::Failed
+        }
+    }
+    /// TASK_GET_PATH_TO_ENEMY_LKP: the same to the enemy's last known position.
+    fn path_to_enemy_lkp(&mut self, ctx: &Context, motor: &mut dyn Motor) -> TaskStatus {
+        let Some((enemy, position)) = ctx.enemy else {
+            return TaskStatus::Failed;
+        };
+        if self.is_unreachable(enemy, position, ctx.now) {
+            return TaskStatus::Failed;
+        }
+        if motor.path_to(ctx.enemy_lkp.unwrap_or(position), true) {
+            TaskStatus::Complete
+        } else {
+            self.remember_unreachable(enemy, position, ctx.now);
+            TaskStatus::Failed
+        }
     }
     /// SetSchedule from outside the selection (scripted schedules).
     pub fn force_schedule(&mut self, name: &str) {
@@ -769,13 +858,20 @@ impl AiNpc {
                     Failed
                 }
             }
-            "TASK_GET_CHASE_PATH_TO_ENEMY" => match ctx.enemy {
-                Some((_, p)) if motor.path_to(p, true) => {
-                    self.enemy_goal = Some(p);
-                    Complete
+            "TASK_GET_CHASE_PATH_TO_ENEMY" => {
+                // The enemy itself when it is within flTaskData of its last known
+                // position (chained TASK_GET_PATH_TO_ENEMY), else the LKP.
+                let Some((_, p)) = ctx.enemy else {
+                    return Failed;
+                };
+                let lkp = ctx.enemy_lkp.unwrap_or(p);
+                if p.distance_squared(lkp) < arg.number().powi(2) {
+                    self.path_to_enemy(ctx, motor)
+                } else {
+                    self.path_to_enemy_lkp(ctx, motor)
                 }
-                _ => Failed,
-            },
+            }
+            "TASK_GET_PATH_TO_ENEMY" => self.path_to_enemy(ctx, motor),
             "TASK_GET_PATH_TO_RANGE_ENEMY_LKP_LOS" => match ctx.enemy {
                 Some((_, p)) if motor.path_to(p, true) => Complete,
                 _ => Failed,
@@ -804,10 +900,7 @@ impl AiNpc {
                     _ => Failed,
                 }
             }
-            "TASK_GET_PATH_TO_ENEMY_LKP" => match ctx.enemy_lkp.or(ctx.enemy.map(|e| e.1)) {
-                Some(p) if motor.path_to(p, true) => Complete,
-                _ => Failed,
-            },
+            "TASK_GET_PATH_TO_ENEMY_LKP" => self.path_to_enemy_lkp(ctx, motor),
             "TASK_FIND_COVER_FROM_ENEMY" | "TASK_FIND_COVER_FROM_ORIGIN" => {
                 // FindCoverFromEnemy -> FindCoverPos(enemy origin, enemy eye, 0,
                 // CoverRadius 1024) (self when there is no enemy; FROM_ORIGIN: from the
@@ -1050,6 +1143,9 @@ pub(crate) mod tests {
         pub path: Option<Vec3>,
         pub status: Option<MoveStatus>,
         pub activities: Vec<String>,
+        /// path_to fails (no route) and counts the requests.
+        pub no_route: bool,
+        pub path_requests: u32,
     }
     impl Motor for FakeMotor {
         fn set_activity(&mut self, activity: &str) {
@@ -1067,6 +1163,10 @@ pub(crate) mod tests {
             self.facing_ticks >= 3
         }
         fn path_to(&mut self, goal: Vec3, _run: bool) -> bool {
+            self.path_requests += 1;
+            if self.no_route {
+                return false;
+            }
             self.path = Some(goal);
             true
         }
@@ -1076,6 +1176,69 @@ pub(crate) mod tests {
     }
     struct Base;
     impl Behavior for Base {}
+
+    #[test]
+    fn unreachable_enemies_skip_path_requests_until_they_expire_or_move() {
+        // TASK_GET_CHASE_PATH_TO_ENEMY 300 against an enemy no route reaches.
+        let mut npc = AiNpc::new(1);
+        npc.enemy = Some(7);
+        let mut motor = FakeMotor {
+            no_route: true,
+            ..Default::default()
+        };
+        let arg = TaskArg::parse("300");
+        let ctx = |now: f64, enemy: Vec3| Context {
+            now,
+            enemy: Some((7, enemy)),
+            enemy_lkp: Some(enemy),
+            ..Default::default()
+        };
+        let chase = |npc: &mut AiNpc, motor: &mut FakeMotor, c: &Context| {
+            npc.start_task(&mut Base, "TASK_GET_CHASE_PATH_TO_ENEMY", &arg, c, motor)
+        };
+        let at = Vec3::new(500., 0., 200.);
+        assert_eq!(
+            chase(&mut npc, &mut motor, &ctx(1., at)),
+            TaskStatus::Failed
+        );
+        assert_eq!(motor.path_requests, 1);
+        // RememberUnreachable(GetEnemy()): ForceChooseNewEnemy, 3 s at that position.
+        assert!(npc.force_choose_enemy);
+        assert!(npc.unreachable_now(7, at, 3.9));
+        // Within the 3 s and 120 units: fails without another path request.
+        let near = at + Vec3::X * 100.;
+        assert_eq!(
+            chase(&mut npc, &mut motor, &ctx(2., near)),
+            TaskStatus::Failed
+        );
+        assert_eq!(motor.path_requests, 1);
+        // Moved more than 120 units: tested (and remembered) again.
+        let moved = at + Vec3::X * 130.;
+        assert_eq!(
+            chase(&mut npc, &mut motor, &ctx(2.5, moved)),
+            TaskStatus::Failed
+        );
+        assert_eq!(motor.path_requests, 2);
+        // Expired: tested again; a route now completes and drops nothing else.
+        motor.no_route = false;
+        assert_eq!(
+            chase(&mut npc, &mut motor, &ctx(6., moved)),
+            TaskStatus::Complete
+        );
+        assert_eq!(motor.path_requests, 3);
+        assert!(npc.unreachable.is_empty());
+        // The enemy within 300 of its LKP: the enemy itself (GOALTYPE_ENEMY).
+        assert_eq!(npc.enemy_goal, Some(moved));
+        // Farther from its LKP: the LKP, without the enemy goal.
+        npc.enemy_goal = None;
+        let lkp_ctx = Context {
+            enemy_lkp: Some(Vec3::ZERO),
+            ..ctx(7., moved)
+        };
+        assert_eq!(chase(&mut npc, &mut motor, &lkp_ctx), TaskStatus::Complete);
+        assert_eq!(motor.path, Some(Vec3::ZERO));
+        assert_eq!(npc.enemy_goal, None);
+    }
 
     #[test]
     fn chase_paths_follow_the_moving_enemy() {

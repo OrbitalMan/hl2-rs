@@ -437,8 +437,10 @@ pub(crate) fn draw_hidden(
     let Some(s) = game.scene.states.get(id) else {
         return true;
     };
-    !s.visible
-        || s.killed
+    // A ragdolled NPC stays drawn (its bone-merged weapon does not).
+    let ragdoll = game.scene.ragdoll_matrices.contains_key(&id);
+    (!s.visible || s.killed) && !(ragdoll && weapon.is_none())
+        || ragdoll && weapon.is_some()
         || weapon.is_some_and(|w| {
             game.ai
                 .weapon_world_model(id)
@@ -507,9 +509,12 @@ pub fn present_entities(
             eyes.as_deref(),
         );
         let (clip, key) = if let Some(id) = animation.entity {
-            let Some(state) = game.scene.states.get(id).filter(|s| s.visible && !s.killed) else {
+            let Some(state) = game.scene.states.get(id) else {
                 continue;
             };
+            if (!state.visible || state.killed) && !game.scene.ragdoll_matrices.contains_key(&id) {
+                continue;
+            }
             let clip = state.animation.as_str();
             let time = game.scene.animation_time(id);
             let Some(definition) = rig.clips.get(clip) else {
@@ -674,7 +679,27 @@ fn apply_facial_flexes(
         animation.sampled = None;
     }
 }
-
+/// C_ClientRagdoll::FadeOut: a retired ragdoll's model blends out (kRenderTransAlpha).
+pub fn present_ragdoll_fades(
+    game: Res<crate::gameplay::Gameplay>,
+    draws: Query<(&ModelLit, &MeshMaterial3d<SourceMaterial>)>,
+    mut materials: ResMut<Assets<SourceMaterial>>,
+) {
+    if game.ragdolls.fading() == 0 {
+        return;
+    }
+    for (lit, material) in &draws {
+        let Some(alpha) = lit.entity.and_then(|id| game.ragdolls.fade_alpha(id)) else {
+            continue;
+        };
+        if let Some(mut m) = materials.get_mut(&material.0)
+            && m.tint.w != alpha
+        {
+            m.tint.w = alpha;
+            m.alpha = AlphaMode::Blend;
+        }
+    }
+}
 /// Rotate a bind normal by the weighted bone matrices (CPU skinning path).
 fn skin_normal(
     normal: glam::Vec3,

@@ -299,6 +299,77 @@ pub fn read_solids(data: &[u8], mdl_checksum: u32) -> Result<Vec<Phy>> {
     Ok(solids)
 }
 
+/// The ragdoll of a model: its PHY ragdoll section with every solid's pieces (bone
+/// space) bound to the studio bone of the same name (Studio_BoneIndexByName), and each
+/// constraint's child-in-parent bone transform from the reference pose. `bones` are the
+/// studio bones' names and reference (bind) model-space matrices. None for a prop PHY.
+pub fn ragdoll_model(
+    data: &[u8],
+    mdl_checksum: u32,
+    bones: &[(String, glam::Mat4)],
+) -> Result<Option<modkit_core::RagdollModel>> {
+    let entries = read_keyvalues(data)?;
+    let Some(ragdoll) = ragdoll(&entries) else {
+        return Ok(None);
+    };
+    let solids = read_solids(data, mdl_checksum)?;
+    let mut bodies = Vec::with_capacity(ragdoll.solids.len());
+    for (i, solid) in ragdoll.solids.iter().enumerate() {
+        if solid.index != i as i32 {
+            bail!("ragdoll solid {} out of order", solid.index);
+        }
+        let phy = solids
+            .get(i)
+            .with_context(|| format!("ragdoll solid {i} missing"))?;
+        let bone = bones
+            .iter()
+            .position(|(name, _)| name.eq_ignore_ascii_case(&solid.name))
+            .with_context(|| format!("ragdoll bone {} not in the model", solid.name))?;
+        bodies.push(modkit_core::RagdollBody {
+            bone,
+            pieces: phy.pieces.clone(),
+            mass: solid.mass,
+            inertia: solid.inertia,
+            damping: solid.damping,
+            rotdamping: solid.rotdamping,
+            surfaceprop: solid.surfaceprop.clone(),
+            compact_inertia: Some((phy.mass_center, phy.rotation_inertia)),
+        });
+    }
+    let count = bodies.len() as i32;
+    let mut joints = Vec::new();
+    for c in &ragdoll.constraints {
+        // RagdollAddConstraint drops self constraints and unknown solids.
+        if c.parent == c.child || !(0..count).contains(&c.parent) || !(0..count).contains(&c.child)
+        {
+            continue;
+        }
+        let (parent, child) = (c.parent as usize, c.child as usize);
+        let relative = bones[bodies[parent].bone].1.inverse() * bones[bodies[child].bone].1;
+        let (_, rotation, translation) = relative.to_scale_rotation_translation();
+        joints.push(modkit_core::RagdollJoint {
+            parent,
+            child,
+            limits: c.axes.map(|(min, max, _)| (min, max)),
+            friction: c.axes.map(|(_, _, friction)| friction),
+            child_in_parent: (translation, rotation),
+        });
+    }
+    let index = |v: i32| usize::try_from(v).ok().filter(|&v| v < bodies.len());
+    let collision_pairs = ragdoll
+        .collision_pairs
+        .iter()
+        .filter_map(|&(a, b)| Some((index(a)?, index(b)?)))
+        .collect();
+    Ok(Some(modkit_core::RagdollModel {
+        bodies,
+        joints,
+        self_collisions: ragdoll.self_collisions,
+        collision_pairs,
+        animated_friction: ragdoll.animated_friction,
+    }))
+}
+
 /// One ragdoll solid (a bone's physics body) from a multi-solid PHY.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RagdollSolid {
@@ -494,6 +565,17 @@ pub fn first_solid(entries: &[keyvalues::Entry]) -> Option<modkit_core::PhysicsS
     solids(entries).into_iter().next()
 }
 
+/// The studiohdr_t checksum a VPhysics prop's single-solid .phy repeats. PhysModelCreate
+/// creates the solid as stored at the entity's origin and angles, so its vertices are in
+/// entity space: the space of the model's sequence-0 pose, whatever its root bones' bind
+/// transforms (owned check: the w_stunbaton/w_pistol/w_irifle solids match their idle
+/// pose, not their bind mesh, which is turned 90 degrees).
+pub fn studio_checksum(mdl: &[u8]) -> Result<u32> {
+    if bytes(mdl, 0, 4)? != b"IDST" || !(44..=49).contains(&u32le(mdl, 4)?) {
+        bail!("PHY adapter requires an MDL 44-49 header");
+    }
+    u32le(mdl, 8)
+}
 /// Narrow adapter guard: only a version-44 MDL with one identity root has
 /// a proved PHY-to-model transform. Do not silently apply this to ragdolls/doors.
 pub fn identity_root_checksum(mdl: &[u8]) -> Result<u32> {
@@ -589,6 +671,56 @@ mod ragdoll_tests {
             .unwrap()
             .unwrap();
         assert!(ragdoll(&read_keyvalues(&barrel).unwrap()).is_none());
+    }
+    #[test]
+    #[ignore = "reads the installed game (HL2_ROOT)"]
+    fn installed_ragdoll_solids_sit_on_their_bones_in_the_reference_pose() {
+        // The solids are in bone space: placed at their bones' reference matrices
+        // (RagdollAddSolid's SetPositionMatrix), each hull reaches its bone origin.
+        let game = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&game).unwrap();
+        for model in [
+            "models/police.mdl",
+            "models/combine_soldier.mdl",
+            "models/humans/group01/male_07.mdl",
+            "models/zombie/classic.mdl",
+        ] {
+            let rig = crate::animation::load(&vfs, model, &BTreeSet::new()).unwrap();
+            let r = crate::models::read_ragdoll(&vfs, model, &rig)
+                .unwrap()
+                .unwrap();
+            assert_eq!(r.joints.len(), r.bodies.len() - 1, "{model}");
+            let mut worst = 0f32;
+            for body in &r.bodies {
+                let bind = rig.bones[body.bone].inverse_bind.inverse();
+                let points: Vec<Vec3> = body
+                    .pieces
+                    .iter()
+                    .flat_map(|p| p.vertices.iter().map(|v| bind.transform_point3(*v)))
+                    .collect();
+                let lo = points.iter().fold(Vec3::splat(f32::MAX), |a, p| a.min(*p));
+                let hi = points.iter().fold(Vec3::splat(f32::MIN), |a, p| a.max(*p));
+                let origin = bind.w_axis.truncate();
+                let gap = (lo - origin).max(origin - hi).max(Vec3::ZERO).length();
+                worst = worst.max(gap);
+            }
+            let mass: f32 = r.bodies.iter().map(|b| b.mass).sum();
+            println!(
+                "{model}: {} bodies, {mass:.1} kg, worst bone gap {worst:.2}",
+                r.bodies.len()
+            );
+            assert!(
+                worst < 4.,
+                "{model}: a solid is {worst} units from its bone"
+            );
+            // Joint frames: the child bone's reference position in its parent's space.
+            for j in &r.joints {
+                let parent = rig.bones[r.bodies[j.parent].bone].inverse_bind.inverse();
+                let child = rig.bones[r.bodies[j.child].bone].inverse_bind.inverse();
+                let at = parent.transform_point3(j.child_in_parent.0);
+                assert!(at.distance(child.w_axis.truncate()) < 0.01, "{model}");
+            }
+        }
     }
 }
 

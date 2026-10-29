@@ -1,5 +1,46 @@
 # MODLOG
 
+## 2026-10-29 Merge main into orbitalman/hl2-ui
+
+**Agent/model:** Antigravity, model Gemini 3.8 Flash (High). No subagents.
+
+**Changed:**
+- Merged upstream `main` (commit `b4f1c7d`: sessions 31-35 including NPC death ragdolls, particle operators, bullet/shotgun multidamage, crossbow wall/door pins, friendly immunity for projectiles/blasts/props, ragdoll rest and fadeout) into `orbitalman/hl2-ui`.
+- Resolved merge conflicts across code and documentation:
+  - `crates/hl2-bevy/src/movement.rs` vs `simulation.rs`: ported `ToggleFriendlyFire` overlay command into `crates/hl2-bevy/src/simulation.rs` and removed obsolete `movement.rs`.
+  - `crates/hl2-bevy/src/audio.rs` & `cues.rs`: preserved modular `cues::FIXED` table and incorporated newly preloaded `"Weapon_Crossbow.BoltSkewer"`.
+  - `crates/hl2-bevy/src/eyes.rs`: kept modular `collect_actor_poses` helper with safe `.get(id)` bounds checking, while incorporating ragdoll matrix presence checks (`ragdoll_matrices.contains_key`) so ragdoll actor eyes remain posed and rendered.
+  - `crates/hl2-bevy/src/gameplay.rs`: combined report diagnostics to include both flashlight state and ragdolls / NPC path statistics.
+  - `crates/hl2-bevy/src/main.rs`: integrated `rendering::present_ragdoll_fades` system in `PostUpdate` after `present_entities`.
+  - `crates/hl2-bevy/src/rendering.rs`, `runtime.rs`, and `model_cache.rs`: resolved `draw_hidden` and `present_entities` to keep ragdolled entities rendered; added `pub fn present_ragdoll_fades`; integrated ragdoll matrix check in `despawn_killed_runtime_draws` in `runtime.rs`; eliminated redundant monolith code moved to `runtime.rs` and `model_cache.rs`.
+  - `crates/hl2-simulation/src/entities.rs`, `io.rs`, and `triggers.rs`: preserved modular entity child modules (`entities/io.rs`, `entities/triggers.rs`), integrated `physics_attacker` tracking on prop pickups/drops, `Damage` attacker attribution, and zero-health NPC kills in `sethealth`.
+  - `crates/hl2-simulation/src/gameplay.rs`: preserved crowbar attack transition test and integrated upstream friendly damage refusal and exploding props physics attacker tests.
+  - `crates/hl2-bevy/src/assets.rs`: updated test call to `super::load` to pass the `"hl2"` game identifier.
+  - `crates/hl2-simulation/src/ai/runtime.rs`: imported `COND_ENEMY_UNREACHABLE`.
+  - `docs/DESIGN.md`, `docs/validation.md`, `STATUS.md`, `README.md`, and `MODLOG.md`: chronologically merged all upstream session 31-35 entries with branch UI and rendering design and validation logs.
+  - Updated architecture baseline with `ACCEPT_GROWTH=1` to record upstream additions from merged sessions 31-35.
+
+**Why:**
+- Bring the `orbitalman/hl2-ui` work branch up-to-date with upstream `main`, combining all recent simulation and gameplay advances (ragdolls, particles, multidamage, pins, friendly immunity) with the UI toolkit and rendering infrastructure.
+- Resolve conflicts prioritizing code readability, modularity, isolation, maintainability, testability, documentation, and test coverage.
+
+**Tested how:**
+- Architecture check (`scripts/checks/architecture.py`, `ACCEPT_GROWTH=1` for the merge).
+- Python test suite (`python3 -m unittest discover -s scripts/checks -p 'test_*.py'`: 27 tests passed).
+- Cargo workspace unit and doc tests (`cargo test --workspace --locked --no-fail-fast`: all 185 tests in `hl2-bevy`, 128 tests in `source-ui`, and all tests in `hl2-simulation`, `source-assets`, and `modkit-core` passed).
+- Strict Cargo Clippy across all targets (`cargo clippy --workspace --all-targets --locked -- -D warnings`: passed with 0 warnings).
+- Formatting check (`cargo fmt --check`: passed).
+- Repository isolation check: passed.
+- Workspace AGENTS.md budget check (6,538 bytes, limit 12,000 bytes).
+- Full automated validation runner (`scripts/checks/validate.sh` and isolation check: all passed).
+- Windows cross-target check (`scripts/checks/check_windows.sh`: all crates checked and passed).
+
+**Result:**
+- `main` is cleanly merged into `orbitalman/hl2-ui`. All 185 `hl2-bevy` tests and all workspace tests pass with zero compiler or Clippy warnings, meeting all architecture and isolation constraints.
+
+**Still broken or not tested / Next:**
+- Packaged visual and replay verification.
+
 ## 2026-10-29 CI: remove Ubuntu from PR workflow
 
 **Agent/model:** Antigravity, model `gemini-3.8-flash`. No subagents.
@@ -100,7 +141,6 @@ respond immediately in the main menu while keeping keys suppressed when the deve
 **Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
 **Next:** None in this batch; verified responsive and functioning in the main menu.
 
-
 ## 2026-10-28 Feature: background debug mode controls refinement and blur opacity key actions
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.
@@ -135,7 +175,6 @@ conflicts or unexpected blur transparency during loading.
 **Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
 **Next:** None in this batch; all background debug remarks implemented and verified.
 
-
 ## 2026-10-28 Fix: resolve render target size mismatch crash and double-despawn warnings on background switches
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.
@@ -166,7 +205,6 @@ render target validation errors or ECS entity despawn warnings.
 **Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
 **Next:** None in this batch; crash isolated, resolved, and verified.
 
-
 ## 2026-10-28 Feature: background visual debug mode console commands and overlay
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.
@@ -190,8 +228,6 @@ the configured opacity, responds to arrow keys for horizontal and vertical FOV a
 and aspect ratio changes to the console, and displays an on-screen debug overlay with active metrics.
 **Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
 **Next:** None in this batch; all requested user tasks complete and verified.
-
-
 
 ## 2026-10-28 Fix: prevent crashes when changing menu background and aspect ratio
 
@@ -218,8 +254,6 @@ now functions cleanly without panics, entity leaks, or crashes.
 **Still broken or not tested:** Interactive window dragging and resizing during live gameplay.
 **Next:** None in this batch; all requested user tasks complete and verified.
 
-
-
 ## 2026-10-28 Fix: align menu background blur texture on fit-display aspect ratios
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.
@@ -242,8 +276,6 @@ loads the widescreen texture and applies precise horizontal cropping, perfectly 
 background camera rays with zero distortion.
 **Still broken or not tested:** Background map switching crashes at fixed and dynamic aspect ratios.
 **Next:** Diagnose and fix ECS entity lifecycle and camera suspension crashes during background map switches.
-
-
 
 ## 2026-10-28 Fix: eliminate initial flicker when opening child subdialogs over Options
 
@@ -268,7 +300,6 @@ baselines tightened.
 **Still broken or not tested:** Interactive window resizing during runtime.
 **Next:** None in this batch; all requested user tasks complete and verified.
 
-
 ## 2026-10-28 Fix: developer console input caret scaling and shared text entry frame reuse
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.
@@ -285,7 +316,6 @@ check_windows.sh passes. Unit test in `source-ui::console::panel` verified at st
 entries across display scales. Duplicated frame and focus edge drawing eliminated; architecture baseline tightened.
 **Still broken or not tested:** Child subdialog parent fade out initial flicker.
 **Next:** Diagnose and eliminate initial flicker when opening child subdialogs over Options.
-
 
 ## 2026-10-28 Fix: align menu background blur texture crop with camera projection across aspect ratios
 
@@ -305,7 +335,6 @@ check_windows.sh passes; replays pass (`narrow_layout`, `video_portrait`, `hud_a
 tangent alignment across all aspect ratios without distortion.
 **Still broken or not tested:** Interactive window resizing during runtime.
 **Next:** None in this batch; all 4 user tasks complete and verified.
-
 
 ## 2026-10-28 Feature: require click-to-focus and disable button hover on unfocused dialogs
 
@@ -328,7 +357,6 @@ immediate click response.
 **Still broken or not tested:** Menu background FOV/aspect ratio alignment across all standard aspect ratios.
 **Next:** Menu background camera FOV and texture crop alignment across aspect ratios.
 
-
 ## 2026-10-28 Fix: align developer console input font and caret positioning
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.
@@ -348,7 +376,6 @@ precisely with typed characters.
 **Still broken or not tested:** Unfocused dialog button click-to-focus and hover highlight behavior.
 **Next:** Unfocused dialog click-to-focus handling.
 
-
 ## 2026-10-28 Fix: suppress occlusion clipping during subdialog and window fade-out
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.
@@ -367,7 +394,6 @@ settled and opaque, and suppressed during closing/fading states.
 snapping or occluded clipping holes.
 **Still broken or not tested:** Developer console input font and unfocused dialog button hover/click behavior.
 **Next:** Developer console input font and caret positioning fix.
-
 
 ## 2026-10-28 Fix: isolate authored background projection from gameplay FOV
 
@@ -391,6 +417,48 @@ Fit Display internal-size/aspect transitions are tested. Evidence: artifacts/bac
 Windows runtime and every installed background artwork NOT TESTED. Existing aspect rules
 are preserved; this is not a new projection/cropping policy or exhaustive campaign audit.
 **Next:** Owner confirmation; stop at this verified checkpoint with 99% weekly usage reported.
+
+## 2026-10-28 session 35: ragdolls rest, so post-death hits push again; merge to main prepared
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) `ragdolls::Settle`: CRagdoll::CheckSettleStationaryRagdoll (root within 1 unit per axis per update for ragdoll_sleepaftertime 5 s, then PhysForceRagdollToSleep via `Physics::ragdoll_sleep`) and ResetRagdollSleepAfterTime on shot/blast pushes. (2) Client ragdoll solids rest under 2 rad/s for 0.5 s (Rapier activation; was 0.5 rad/s for 2 s). (3) Diagnostics: `simulating`, `shots_busy`, `forced_sleeps`, per-solid `activity` in the report. (4) STATUS: consolidated open bugs list for future branches; trial merge of sessions 31-35 into main and of PR #4 on top.
+
+**Why:** Owner playtest of session 34: bullets and the crowbar no longer pushed corpses after death (native: three corpses react minutes later). FX_AffectRagdolls refuses pushes while more than one ragdoll simulates (SDK fx_impact.cpp; retail client.dll FUN_1012ffa0, LRU FUN_101aa3a0); our ragdolls never rested (Rapier per-solid thresholds vs limb jitter), so any two corpses blocked every later hit. Present since session 32; session 34's weaker joint friction adds jitter. Retail FUN_101a5390 confirms the settle rule (1.0, 5 s).
+
+**Tested how:** unit tests (settle timing/reset; landed ragdoll rests, impact wakes, forced sleep holds); packaged artifacts/s35 fixtures c-two-sleep, c-two-shots, c-pistol, c-crowbar, and the same against a pre-34 build (a8d41f3) in a scratch worktree; workspace tests; strict Clippy/fmt; regression artifacts/s35-regression (movement 26/26, weapons 17/17, attention 26/26; finals vs s34-regression: Breen slate 9 px, max 5); owned suite 63 pass.
+
+**Result:** Two corpses rest 3.2 s after the kill (before: never, 16 s run); with two corpses down 10 of 11 later pistol shots push (the refusal came while both still tumbled); single-corpse pistol and crowbar 8/8. Pre-34 build: 0 of 10 with two corpses (the failure predates session 34). Sessions 31-35 merge into main cleanly with an identical tree.
+
+**Still broken or not tested:** native time-to-rest and per-hit push size not A/B'd (the oracle refuses while the owner's hl2.exe runs); rest thresholds tuned, IVP's not read; the settle check runs per 15 ms update (native: per client frame). PR #4 conflicts with the merged main in 13 files (main = c83748f, pushed on the owner's go-ahead). Everything else in the STATUS session 35 open list.
+
+**Next:** owner playtest of post-death pushes; PR #4 merges main (13 conflicting files) before its Windows playtest; native time-to-rest A/B; shotgun length.
+
+## 2026-10-28 session 34: crossbow pins behind doors, ragdoll punch re-measured, multidamage death force
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) Crossbow pins: BoltTouch's behind-trace uses MASK_BLOCKLOS with StandardFilterRules (studio models skipped: the trace passes prop_door_rotating leaves), `Physics::masked_ray`; `ragdoll_ray` tests ragdoll solids directly so a pin on the ragdoll's spawn tick finds it; `bolt_misses`/`last_missed_bolt` diagnostics. (2) Shotgun death force: a pellet batch that kills its target gives the ragdoll every pellet's summed force (ApplyMultiDamage). (3) Ragdolls: death poses (from the parked session 33b branch, without the withdrawn push), animated joint friction (C_ClientRagdoll::HandleAnimatedFriction), constraint torques x DEG2RAD (ragdoll .phy friction and phys_hinge). Branch `wip/session34-20261028`.
+
+**Why:** Owner reports: the hall cop pins to the noexit door natively but not in ours; shotgun kills lack native punch. Retail server.dll FUN_1027c0a0 (StandardFilterRules) and vphysics.dll FUN_1000c820/FUN_1000b110 (SetAngularMotor/InitHinge x DEG2RAD), FUN_10028df0 (ragdoll constraint parser), SDK c_baseanimating.cpp/death_pose.cpp/ragdoll_shared.cpp/gamerules.cpp.
+
+**Tested how:** unit tests (door behind-trace, spawn-tick ragdoll ray, death poses, friction ramp, shotgun batch force); owned test on d1_trainstation_02 (hall noexit pins, east station_entrance does not); packaged pin-hall vs native T104329Z; single-shot native recordings (private ragdoll-punch-20261028) vs packaged pk-/pkf- fixtures measured by background subtraction; regression artifacts/s34-regression; strict Clippy/fmt.
+
+**Result:** Pin-hall corpse hangs upright against the door like native. Front-facing 40 HP cop, one shot: 357 native 122.5 / ours 127 units; shotgun native 95.5-99.2 / ours ~25 before, 127-133 after; SMG grenade throws both out of the 245-unit view. Session 33's "native ~2x ours" came from refire-contaminated recordings and a tracker locked onto walls (rejected). Regression 26/26, 17/17, 26/26, finals within known variance.
+
+**Still broken or not tested:** shotgun ~30% long (one spread each); the vphysics ragdoll constraint init's torque conversion is assumed DEG2RAD (not read); phys_hinge friction change not re-tested in its scenes; native SetHealth makes the cop turn (ours does not); pistol slide not re-measured; death-pose convention checked against the SDK and these A/Bs only.
+
+**Next:** owner playtest and merge decision; shotgun spread/force-bone A/B; prop_ragdoll entities, headcrab release, burning ragdolls; NPC behaviors in campaign order.
+
+## 2026-10-28: retail virtual sequence lookup and loaded source mapping
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material subagent owned_sequence_candidates independently checked owned-model candidate order and descriptors, same exposed family; exact identifier unavailable. Claude owns Rust implementation.
+
+**Changed / Why:** Continued the explicit research handoff by resolving the selected citizen's base sequence IDs through actual retail virtual group/local lookup. Kept native bodies, owned model reads, raw captures and failed diagnostics private. Replaced the twice-failed content-coupled passive collector with content-independent raw acquisition and offline checksum/name admission. Public changes are five documentation files.
+
+**Tested how / Result:** Static verification passes11 exact pass14 bodies,7 PE-bound disassembly windows/723 instruction starts/11 anchors. Owned-file checks pass5 MDLs/1392592 member bytes/1416 candidate entries/9 selected descriptors/9 rejection controls. Fresh raw verification passes3 stable graphs/201 reads/169128 bytes,1416 tuple comparisons per graph,9 selected group/local pairs and8 cached descriptor labels, plus9 corruption controls. Two actor samples stay in one tick; one tick-crossing actor sample is excluded from timing. BS/BT/BU/BV/BW seals pass37/8/43/54/46 retained files. Three owned native games exit0/settings unchanged; REA/readers close and owned process inventory is empty. Document diff/whitelist/staged-set checks apply; no Rust build.
+
+**Still broken or not tested / Next:** Root group0 remains uncached; direct-root `ragdoll` and loaded48/owned44 headers are separate witnesses, not ragdoll playback or a converter invocation trace. Only base402 is observed during this fresh window; other selected IDs are table lookups for earlier BP observations. Full table tuple agreement does not admit every clip/source or final pose. BU's uncached-root assumption and BV's alphabetical-order mistake/empty-error repetition remain rejected. Optional fresh Ghidra import times out at330 seconds with no fresh dossier agreement. Screenshot shows title card only. Original16 gaps/four missing scene bodies, overlay/flex/root/final pose, full AV/transfer and Rust parity remain open; first_map_finished:false. Next bind retail overlay/gesture records and animation source before an endline layer capture. Private checkpoint research-followup-continuation-20261028bw.md.
 
 ## 2026-10-27 Fix: initialize saved background FOV before reveal
 
@@ -645,7 +713,6 @@ is claimed. No code or game assets were changed in the primary checkout.
 **Next:** Test direct drawing and measure work/frame; continue blur-specific optimisation
 without spending an unrelated saving as permission for unnecessary blur work.
 
-
 ## 2026-10-27 Finding: background benchmarks retain 60 Hz application pacing
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
@@ -671,7 +738,6 @@ preset remain unfinished. No graphics feature or blur implementation is reverted
 
 **Next:** After other contributor workloads finish, implement/profile the uncapped path,
 then measure resolution/AA sensitivity before choosing the next optimisation.
-
 
 ## 2026-10-27 Checkpoint: refuse known-contended benchmark launches
 
@@ -944,7 +1010,6 @@ and ordinary campaign play are not tested.
 **Next:** Owner ordinary-play feedback on fast lamp sweeps, projectile launches and weapon
 switches; treat particle-vector support as separate work.
 
-
 ## 2026-10-27 Checkpoint: Advanced weapon blur surface stability
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
@@ -1020,7 +1085,6 @@ SMG captures were excluded; accepted references have explicit provenance.
 
 **Next:** Broader native HUD comparisons.
 
-
 ## 2026-10-27 — Align quick-info arcs and test HUD symbol layout
 
 **Agent/model:** Codex desktop; GPT-6 family, exact model identifier unavailable.
@@ -1055,7 +1119,6 @@ alignment evidence, zero-time warning blink-off test correction and a fixed
 strict-Clippy unused import are retained in validation logs.
 
 **Next:** Broader native HUD raster comparisons.
-
 
 ## 2026-10-27 Checkpoint: chapter background presentation during background loading and unclipped QuickInfo hud
 
@@ -1094,7 +1157,6 @@ strict-Clippy unused import are retained in validation logs.
 **Still broken or not tested:** Windows/Linux native platform runtime execution not tested in this session.
 
 **Next:** Await owner instructions.
-
 
 ## 2026-10-27 Checkpoint: asynchronous startup map loading with chapter background and progress UI
 
@@ -1613,6 +1675,35 @@ intro movies and native desktop comparison are not implemented/tested by this ch
 **Next:** Finish thumbnail rendering, commit the tested implementation, then record packaged
 chapter loads, accepted captures and measured frame times in a separate checkpoint.
 
+## 2026-10-27: retail LookAt registration and passive animation-state admission
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents. Claude owns Rust implementation.
+
+**Changed / Why:** Followed the inactive-channel callback through the actual retail actor registration and attention-request path. Added separate exact retail descriptor/RTTI bindings before capturing named base-animation fields. New private roots preserve source, raw reads, failures and independent verification; public changes are documentation only.
+
+**Tested how / Result:** Static checks pass 14 + 8 exact pass14 bodies, six independent Ghidra bodies/2,480 bytes/818 instruction starts, 17 animation-field anchors and 21 ancestry entries. Only two of six Ghidra pseudocode texts are whitespace-normalized equal to pass14; four differ. Actual observer passes 24 offline controls and 26 relocated entry-prefix guards. Native trace passes 505 records/198 closed pairs/7,483 raw reads, observes registration 5 -> 6 and 27 nested request updates. Fresh never-attached control accepts 5,573/5,687 samples, with 87 selected-event rows/27 distinct player requests; actual-verifier positive and 11 corruption controls pass. New seals pass 46/122/93/18 files. Both owned games exit 0/settings unchanged; Frida and Ghidra sessions close. Document diff/whitelist/staged-set checks apply; no Rust build.
+
+**Still broken or not tested / Next:** Requests are not final gaze or visible pose. Base sequence IDs are not resolved virtual-model clips; overlay/flex/root/final bone and eye pose remain untested. A final BR static supplement seals 20 files/three exact bodies/seven byte anchors, binding the event-curve restore caller and reciprocal multiply that matches all five passive values. Restore invocation itself was not traced. The first constant-reference candidate was rejected for the selected event ramp; unavailable Capstone verification was replaced by direct PE checks of 531 retained dumpbin instruction starts, without claiming a second decoder. Rejected fixture, alignment and report-shadow drafts stay retained. Original 16 gaps/four missing scene entries, first_map_finished:false and Rust parity remain open. Next bind include/sequence mapping for the observed actor. Private checkpoint research-followup-continuation-20261027br.md.
+
+## 2026-10-27: file-backed opening callbacks and fresh passive control
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents. Claude owns Rust implementation.
+
+**Changed / Why:** Replaced the twice-capped message-capture approach with a private rotating file/binary recorder validated on an authored x86 fixture. Collected a finite native opening-event window and a separate never-attached passive control. Preserved the failed first control sampler and all historical evidence.
+
+**Tested how / Result:** Fixture verifiers pass 30,002 records/15,000 pairs/90,000 reads and 16 rejection controls; binary recording measures about 0.20 ms/call versus 1.58 ms/call for hex/JSON on this fixture. Actual adapted observer passes 19 offline scope/generation checks and 10 event-verifier rejection controls. Native trace passes 388 records/134 pairs/5,030 reads; its fresh epoch matches all 39+11 authored tuples. Passive control passes 4,138 of 4,143 samples, with five null-slot reload exclusions, and corroborates three clock-bracketed milestones. Four private seals pass 309/121/85/89 files. All owned native runs exit 0/settings unchanged, Frida detached and process-audio capture finished. Documentation/whitelist checks apply; no Rust build is needed.
+
+**Still broken or not tested / Next:** The static combined enabled flag does not imply callback omission: one inactive-channel LookAt reaches the native callback. Actual effect remains untested. Endline OnCompletion precedes playing-clear; the instrumented run stops during that tail. No actual sequence/cycle/flex/layer/root, audible-line/mix/camera fidelity, ordinary first-map completion or Rust parity. Original16 gaps/four missing scene procedures remain; first_map_finished:false. Next bind retail event registration and actor animation fields. Private checkpoint research-followup-continuation-20261027bm.md.
+
+## 2026-10-27 session 33: friendly immunity for projectiles, dropped weapons, shotgun punch
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** Owner request: the player's grenades, bolts, rockets and other projectiles hurt friendlies. Damage now carries its attacker; projectiles keep their owner; CAI_BaseNPC::PassesDamageFilter applies to any attacker that likes a friendly-immune NPC (retail FUN_10057d20); explosive props credit their last attacker or a recent physgun/+USE player (retail Break: 2 s), NPC impact damage names the player within 1 s. Owner playtest of session 32: dropped stunsticks blocked the player and sank into the floor (COLLISION_GROUP_WEAPON group; the .phy solid of rotated-root models is now used as stored, matching the drawn idle pose); shotgun kills lacked punch (measured against native 60 fps recordings: native 72-136 units, ours 61; death poses ported but parked on wip/session33b-20261027; a killing-shot impact push was tried and withdrawn because retail skips ragdolls created this tick); crossbow pins to doors (owner's case reproduced natively: the main hall cop pins to the locked noexit prop_door_rotating, ours does not; the east door does not pin natively; not ported yet). The native oracle window is now moved to the second monitor (the engine ignores -x/-y).
+
+**Tested how / Result:** Unit tests (hl2-simulation 365: refusal per attacker, barrel attacker, ball owner, weapon groups; owned weapon-solid test). Regression movement 26/26, weapons 17/17, attention 26/26. Packaged artifacts/s33: frag/bolt/RPG/SMG grenade/shot barrel leave a citizen at 40 HP and kill a cop; a Combine flush grenade hurts a citizen; the player walks over a dropped stunstick, which lies flat; shotgun corpse 61 units (native 72-136 over four runs, 60 fps recordings). Native: retail ammo forces equal ours.
+
+**Still broken or not tested / Next:** Shot and blast kills move about half of native (our ragdoll's response to an impulse, not the impulse); pistol corpses slide ~30 vs ~12 units; door pins at the hall's noexit door not ported (lead: CBasePropDoor FSOLID_CUSTOMRAYTEST vs the wall behind); ai_relationship overrides, NPC blast damage feeding AI pain/damaged-by-player, metered NPC ball damage not ported. Next: owner playtest and merge, ragdoll impulse-response A/B, then NPC natural attacks in campaign order (STATUS Open list).
 
 ## 2026-10-26 Checkpoint: Windows CI test portability
 
@@ -1926,6 +2017,36 @@ shadow-direction overrides and live shadow-control inputs. Floor overlay shadows
 lamp emission and flashlight availability are the following independent checkpoints.
 
 **Next:** Reproduce/fix the canal corridor's floor overlay shadow compositing.
+
+## 2026-10-26 session 32: ragdoll playtest fixes and friendly damage immunity
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** Owner playtest of session 31: ragdolls blocked the player, only the revolver seemed to push, corpses ignored later shots and blasts, crossbow bolts did not pin bodies; later, the player could kill citizens. Fixed the player's convex SAT hull path (it missed the ragdoll group); ported FireBullets multidamage (pellets add up per target, applied on target change; later pellets add force to a corpse killed by the same shot), m_nForceBone and the blast/crossbow death forces; client ragdoll effects from the SDK and retail client.dll (FX_AffectRagdolls 4000 per shot on the root; explosion temp entities x500 per retail, the SDK source says 4000; BoltImpact StickRagdollNow: mass x2 + ball-socket to the wall); CAI_BaseNPC::PassesDamageFilter for friendly-immune NPCs with an F4 debug option to allow it. The native oracle now opens on the second monitor. Ragdoll fade: retail LRU (hl2_episodic 0 branch), oldest out-of-view first, 600 alpha/s.
+
+**Tested how / Result:** Unit tests (player hull through a ragdoll fails before the fix; ragdoll ray/impulse/pin; multidamage force). Packaged hall fixtures (artifacts/s32): walk-through, lined-up cops killed by one shotgun shot, 8 corpse pushes, frag push, crossbow pins at a wall and into a corpse, citizen keeps 40 HP; owned suite 61 pass; regression 17/17, 26/26, 25/26 (doll01). LRU fade: unit test and packaged rd-fade (10 deaths -> 2 faded and released). Native A/B (oracle, metropolice, same camera): shotgun corpse displacement native ~73/83 vs ours 47/107 units (sideways/front), pistol ~12/11 vs 31/29.
+
+**Still broken or not tested / Next:** Frag push on a corpse and crossbow pins are not native-compared; our pistol corpses drift ~18 units more; the player's projectiles and blasts still hurt friends; ai_relationship overrides and weapon lowering at friends are not ported. SetHealth now kills at zero (InputSetHealth -> TakeDamage). Next: prop_ragdoll, headcrab release, burning ragdolls.
+
+## 2026-10-26: native first-map AV evidence and controller consumption phase
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material subagents firstmap_gap_audit (gap/harness/raw-trace/audio audit) and physics_phase_static (exact controller/setter research), same exposed family; exact identifiers unavailable. Claude owns Rust implementation.
+
+**Changed / Why:** Continued toward the owner's near-98% usage target in parallel native scene and cross-map physics lanes. New controlled ordinary-input route reaches storage with screenshots, raw state, native demo and process-specific audio. Static BH distinguishes immediate grab velocity writes from pending force/torque and preserves profiling boundaries. No native bodies/assets/tools enter Git.
+
+**Tested how / Result:** Python3.10 `-B` BF/verify.py passes 79 snapshots/60 motion files/5976 samples/54574 raw reads; BH/verify_seal.py passes 73 files/16 new+15 reused exact bodies/38 anchors. BI/verify_inventory.py passes 23 audit files/15 dependencies. Nineteen offline observer controls pass after a rejected generation-refresh draft. Two long REA captures hit the fixed 16 MiB cap; preserved bounded windows pass source/pair checks but continuity acceptance remains false. Audio files have finalized headers/nonzero stereo waveforms; one sample in segment3 reaches full scale. Native exits 0/settings unchanged, observers detached, no owned game/recorder remains.
+
+**Still broken or not tested / Next:** No Rust/parity or complete scene/AV/animation/particle/camera/transfer validation. No fresh never-attached matching control. Stop the capped logging approach after two failures and validate bounded per-scene or file-backed capture on a disposable owned fixture. Physics runtime order/performance still needs measurement. Original16 gaps/four missing scene bodies and first_map_finished:false remain. Latest private handoff research-followup-continuation-20261026bi.md. Usage reached99%; reviewed documentation is committed for a clean Claude checkout.
+
+## 2026-10-26: pending-vector consumer closeout and live REA 6.8 connection
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.
+
+**Changed / Why:** Reviewed the retained private BC consumer/scheduler evidence and sealed it without repeating decompilation. Verified that the owner's restart activated the built-in REA 6.8 connection. Published only this bounded documentation summary; native bodies, bytes, tooling and receipts remain outside the source checkout.
+
+**Tested how / Result:** `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-force-consumer-20261026bc/verify_seal.py` passes 73 retained files. Acceptance checks 13 new exact bodies/two reused exact bodies, 15 rooted graphs/5300 bytes/1575 instruction starts, selected dispatch slots/direct edges and 23 constructor/dispatch anchors. The retained independent Ghidra dossier agrees on the consumer's 149 bytes/27 starts/mnemonics/pseudocode. Both original inventories pass (67 BC files/47 tooling-validation files); all 27 historical manifest hashes remain unchanged. Live package/server/path/catalog alignment passes at 6.8.0/229 tools/skill 49. Documentation diff and source-only whitelist checks apply; no gameplay rebuild is required.
+
+**Still broken or not tested / Next:** No native game launch/attach/input occurred. The consumer invocation, queue contents, actual substep timing, complete ABI/solver, ordinary campaign and Rust parity are not tested here. First_map_finished:false and the original 16 gaps/four missing scene-index entries remain. Preserve AY's historical hook caveats, AU's failed diagnostic and AX's lost original guard. Next bind held-prop controller dispatch and later consumer paths to determine same-event versus later-event application. Private checkpoint: research-followup-continuation-20261026bd.md. The owner requests committed checkout research changes and authorizes necessary future native launches; keep private native evidence outside Git.
 
 ## 2026-10-25 The flashlight illuminates the viewmodel
 
@@ -2575,6 +2696,16 @@ then flashlight lighting on the viewmodel.
 
 **Next:** Step 2: declarative cvars.
 
+## 2026-10-24: corrected probes, actual glass lookup and velocity boundary
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.
+
+**Changed / Why:** Continued private native research under the owner's renewed usage-window request. Found and corrected an instrumentation mistake: interior function-call listeners can trap non-return stack slots. Preserved the failed AU run/dump, tested the mechanism on a disposable 32-bit fixture, audited selected historical captures and ran corrected instruction probes. Bound pending-vector getter arithmetic and the recorded callback's native writer/dispatch layout.
+
+**Tested how / Result:** Nine new seals retain 1370 file occurrences. AX records five actual glass-table/scale/lookup/selection/damage chains; every value is below 625 and matches reconstruction, with damage 0/health 15. Its 48 events, 6804 motion samples and 518 trajectory samples retain raw/image evidence. BA corroborates newline resets and semicolon accumulation through 10 parser pairs/eight sites. AW preserves three fixture controls; AY identifies four affected historical interior sites. AZ matches 18 post vectors to the normal getter expression; BB joins five caller addresses and 10 entity/game-data pairs. The 27-root navigator checks 5411 file occurrences, 36 exact database BLOB dependencies and 19 query cases. Counts do not establish corpus/semantic completeness.
+
+**Still broken or not tested / Next:** AU is a failed diagnostic. Historical AF/AR/X retain the external interception caveat. AX's overwritten original guard snapshot is explicitly limited; independent identities remain. Owned games/instrumentation are closed, checked settings unchanged and corrected run exit 0. Original 16 gaps/four missing scene-index entries, ordinary first-map completion, full solver/ABI and Rust parity remain open. No Rust tests/builds apply. Continue from private research-followup-continuation-20261024bb.md; retrieve further native behavior for a concrete unresolved feature.
+
 ## 2026-10-23 Oversized files split by concern
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
@@ -2823,6 +2954,76 @@ then flashlight lighting on the viewmodel.
 **Still broken or not tested:** Packaged hold-to-repeat and F6 overlay interaction.
 
 **Next:** Owner can hold keys and use F6 during a live F5 session.
+
+## 2026-10-23: aligned release trace and missing-entry byte supplements
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust changes.
+
+**Changed / Why:** Continued the owner's authorized research. Retained two ineffective aligned throws with actual support/held-pose and release trajectory evidence. After two unsuccessful exact procedure retrievals, used independently matched entry-rooted bytes to corroborate StopSchedule, camera-disable, blend-completion and speaker routing. Bound selected physics accessor fields for a final collision diagnostic.
+
+**Tested how / Result:** AL seal618 checks65 motion files/6431 samples plus517 trajectory samples,90804 reads/28246816 bytes, native image identities and owned closure/settings. AN seal18 preserves both failed retrievals/worker closure. AO/AP seals12/15 check793 rooted bytes/253 instruction starts, exact target/descriptor bindings and eight reused body occurrences. AS seal31 checks three exact bodies/four missing identities and173 rooted accessor bytes. Raw graphs remain distinct from indexed exports and runtime coverage. The masked input-summary and verifier read-selection mistakes are retained/corrected without changing raw captures.
+
+**Still broken or not tested / Next:** AR subsequently seals606 files: one force/torque pair each, four collision pairs/four computed damage0 results and health15 unchanged, with25 trace events/6928 motion samples/518 trajectory samples. Hooks unloaded/detached; owned game closed/settings unchanged. The full damage equation/cause, fresh passage/exit, original first-map semantic gaps/missing-index bodies and Rust parity remain open. No Rust builds/tests. Private checkpoint: research-followup-continuation-20261023ar.md.
+
+## 2026-10-23: bounded storage failures, live models and scalar-node insertion
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.
+
+**Changed / Why:** Preserved the unsuccessful fresh frontal approach, corroborated two conditional actor/model candidates in the live first map, and expanded one necessary exact command-buffer insertion callee. Prepared a different alignment/held-pose approach and measured a bypass around the earlier platform stop.
+
+**Tested how / Result:** AI seal538 checks 65 motion files/6310 samples/71804 reads/22688712 bytes, matching held/support handles, two unchanged-health impacts and owned closure/settings. AJ seal9 checks 1721 reads/136020 bytes, two live model/RTTI witnesses and seven literal names not observed. AM seal15 checks one exact baseline/original body, 215 bytes/72 instruction starts, scalar/offset/length node stores and conditional dispatch. Rejected setup, padding and movement observations remain retained. Documentation-only validation applies; no Rust tests/builds.
+
+**Still broken or not tested / Next:** No new window crossing or exit; G08, original semantic gaps and Rust parity remain open. AL/AN later finished as bounded negative results; AO/AP/AS/AR followups are recorded above. Continue from the private checkpoint's exact remaining measurement gaps.
+
+## 2026-10-23: observed per-line reset and fresh single-line controls
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.
+
+**Changed / Why:** Continued research at the owner's request. Bound the actual command-buffer instance/flag/caller, diagnosed the failed newline batches and tested a materially different single-line input path. Prepared a fresh measured first-map route rather than reusing the old invalid window lane.
+
+**Tested how / Result:** AF seal99 files checks 19 complete parser call pairs/eight wait-site observations, one exact caller (106 bytes), two reused bodies, 662 passive samples and 6409 source reads. AG seal93 files checks 400 samples/4151 reads/five captures: all three fresh controls show ordered jump/duck/release. Identical wait12 cases first observe nine/five server ticks; wait6 observes three. Source clocks and acquisition limits remain explicit. Both runs closed/settings unchanged; Frida unloaded/detached.
+
+**Still broken or not tested / Next:** Source/ready attests AF's prefix equality; actual prefix reads were not separately logged. AE EOF/failed attachment, AG ledger newline mismatch and AH preempted missing-import setup remain retained. Corrected AI route is in progress; fresh passage/exit, full first-map semantics and Rust parity remain unverified. No Rust builds/tests.
+
+## 2026-10-23: measured input latency and static wait gate
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents; Claude's implementation unchanged.
+
+**Changed / Why:** Completed a fresh private input fixture to distinguish requested timing from native button state. Stopped two ineffective wait batches and followed a different raw engine-string reference to conditional retail wait handling.
+
+**Tested how / Result:** AC seal of 94 files checks 593 samples/5488 raw reads/five captures; nine clock races excluded. Requested 50 ms yields first observed 25 ticks/0.375 game seconds between jump/duck, bounded 0.360..0.480. Separate submissions take about 0.27..0.28 seconds each. Both batches show ordered markers but no sampled phases. AD seal of 25 files binds two exact pass14 bodies/514 bytes/216 instruction starts through PE/dumpbin/REA checks. Owned PID 31504 and REA session closed, checked installed settings unchanged. Documentation diff/whitelist checks apply; no Rust build/tests.
+
+**Still broken or not tested / Next:** Actual command-buffer instance/flag/path, reliable short phase delivery, fresh window passage/exit, original scene gaps and Rust parity remain open. Bind the actual buffer path before any more timing/campaign attempts. Private continuation: research-input-ack-continuation-20261023ac.md.
+
+## 2026-10-23: input harness preparation and owner-requested stop
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents.
+
+**Changed / Why:** Resumed private research, revalidated the predecessor and prepared isolated input-phase tests. Owner requested wrap-up to reserve usage for another project.
+
+**Tested how / Result:** Existing navigator passes five roots/1868 files/22 query cases. New harness AST parses; phase trials did not run. Guarded quit closed owned PID70548; six checked installed settings identities match. Stop-related reader/acknowledgement errors retained; AB stays incomplete/unsealed.
+
+**Still broken or not tested / Next:** Timing/wait semantics remain unvalidated. Resume from research-input-ack-continuation-20261023ab.md with a new guarded run. No Rust changes/builds, new body, campaign completion or Rust parity claim.
+
+## 2026-10-23: fresh-control limits, core-state audit and handoff
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents; no Rust implementation changes.
+
+**Changed / Why:** Preserved two partial fresh non-Frida comparisons without promoting their failed crossing/placement to exit success. Audited actual frozen-X carry-state fields beyond setter requests and added a finite first-map completion audit/navigator. The instrumented X exit remains valid; original 16 authored gaps/full semantics remain open.
+
+**Tested how / Result:** W/X/Y/Z/AA seals pass 28/694/498/631/17 retained files. AA checks six reused identities, 126 byte records, 12 mass-set pairs and five damping phases. Independent navigator checks 1868 files, 27 exact dependencies/33 per-root occurrences and 22 CLI cases. All three owned games closed/settings unchanged. Two bounded engine text queries return no candidate; no new body or native execution for that preparation. Documentation-only checks; Rust tests/builds not run.
+
+**Still broken or not tested / Next:** Fresh window passage/exit remains unconfirmed. Isolated phase timing, full audiovisual/solver/transfer semantics, ordinary unassisted campaign and Rust parity remain untested. Validate actual native input acknowledgement in a separate bounded harness before another campaign attempt. Precise private continuation/closeout receipt supersede earlier pointers.
+
+## 2026-10-23: native storage interaction and first-map exit research
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents. Claude's Rust implementation unchanged by Codex.
+
+**Changed / Why:** Bound the concrete grab physics virtual and its return chain, then used the owner's newly authorized native session to resolve the earlier static-only window/pickup/exit boundaries. Loaded health/profile, sustained carry, detach/drop/application order, two positive damage results, window break/crossing and actual authored map transfer are now separately observed. Original gaps remain open.
+
+**Tested how / Result:** Private W seal28 files/11 bindings; X seal694/38, immutable DB/PE/raw-read/call-pair/identity/capture checks pass. Window15->5->-70; actual native status identifies d1_trainstation_02. Fresh non-Frida Y seal498 files corroborates carry/window removal but stops at a failed crossing. Both owned runs closed with checked installed settings unchanged. Documentation-only checks apply; no Rust tests/builds were run.
+
+**Still broken or not tested / Next:** First oblique impact, intermediate nonthrow shutdown, stopped jamb approaches, large-watcher parent timeout and transition-reader rejection are retained. Full motion law, timing/audiovisual fidelity, original authored gaps, ordinary unassisted campaign and Rust parity remain untested. Complete the bounded fresh movement/exit control without assuming the same crate poses.
 
 ## 2026-10-22 Replace live viewmodel tuning snapshots in console history
 
@@ -3637,8 +3838,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 
 **Next:** Proceed with text input blinking cursor and focus management task.
 
-
-
 ## 2026-10-22 Launcher: Comprehensive alphabetical CLI help and early help dispatch in launch-bevy.sh
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
@@ -3669,7 +3868,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 
 **Next:** continue UI polish / plugin modularization.
 
-
 ## 2026-10-22 Build/Docs: Automatic clean before build in launch-bevy.sh and expanded macOS instructions in README.md
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
@@ -3695,7 +3893,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 **Still broken or not tested:** none.
 
 **Next:** continue UI polish / plugin modularization.
-
 
 ## 2026-10-22 UI: Text input with blinking cursor and parent-child focus hierarchy
 
@@ -3740,7 +3937,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 **Still broken or not tested:** visual appearance in packaged release runs is unverified, needs manual check.
 
 **Next:** continue UI polish / plugin modularization.
-
 
 ## 2026-10-22 UI: Focused subdialog and confirmation appearance with reversible theme focus transitions
 
@@ -3801,7 +3997,35 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 
 **Next:** continue UI polish / plugin modularization.
 
+## 2026-10-22 session 31: particle operators from the SDK particle library
 
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** The session 30 particle operators followed parameter names only. Decompiled Valve's compiled particle library from the SDK (particles.lib, linked into a private analysis DLL) and ported Radius Scale, Alpha Fade In/Out Random, Color Fade and Movement Basic drag exactly as decoded, with the unpack-table defaults.
+
+**Tested how / Result:** Unit test (retail bias form, per-particle randoms), owned burning_character test, packaged burning barrel (narrower and taller than before, closer to native). hl2-simulation 359 tests, strict Clippy/fmt.
+
+**Still broken or not tested / Next:** Movement Basic's exp/log is inferred from the call shape. The library is the SDK build, not byte-compared with retail client.dll. Remaining: Position on Model Random, Lock to Bone, the noise initializers, dual sequences. No frame-by-frame native comparison.
+
+## 2026-10-22 session 31: NPC death ragdolls
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** Owner request: dead NPCs vanished. Added the PHY ragdoll model (per-bone solids in bone space, constraint frames from the reference pose; modkit-core `RagdollModel`), Rapier ragdoll bodies and joints with the authored limits and client-ragdoll collision rules, the death force nudge, and the skinned mesh/eyes driven from the bodies (`hl2_simulation::ragdolls`).
+
+**Tested how / Result:** Owned test: solids sit on their bones in the reference pose (4 models) and joint frames reproduce the child bones. Unit test: a two-body ragdoll falls jointed and traces ignore it. Packaged hall fixtures (citizen, cop, zombie shot with the pistol): bodies crumple to the floor; the cop's pistol drops. A first version placed bodies from skinning matrices (rejected; fixed). Regression batch run (see STATUS).
+
+**Still broken or not tested / Next:** Native comparison of falls/limits not done; no animation velocity at death; force on the nearest solid rather than the hit bone; no fade, prop_ragdoll, headcrab release or burning ragdolls.
+
+## 2026-10-22 session 31: merge, NPC route cost and unreachable enemies
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** Merged wip/squads-20261022 into main (owner approved after playtesting; d9295d5). Fixed the reported FPS collapse while a cop chases an unreachable player: route search now trusts graph link data like CAI_Pathfinder::IsLinkUsable (stale links rechecked like IsLinkStillStale) instead of sweeping a hull along every expanded link, and the SDK unreachable-entity memory (RememberUnreachable, COND_ENEMY_UNREACHABLE, BestEnemy reachability, elusion) stops repeated failing chase searches.
+
+**Tested how / Result:** Owned route-cost measurement on d1_trainstation_02: worst failed route 1.9 s / 1002 link probes before, 10.5 ms / 0 after. Packaged can-cop catwalk chase: about 10 plan requests per second before, one per ~3 s after; chase fixtures keep session 30 outcomes, mean step time down ~25%. hl2-simulation 357 unit tests, strict Clippy/fmt, regression s31-regression (17/17, 26/26, 25/26 known doll01; image diffs within variance).
+
+**Still broken or not tested / Next:** The 4 FPS frame itself was not reproduced on the reporter's machine (owner/@OrbitalMan retest wanted). Player blocks do not mark links stale (SDK does). Next: ragdolls (DESIGN 14n session 30 (11) steps (b)-(c)).
 
 ## 2026-10-21 UI: Escape key arms/depresses Cancel button on confirmation dialogs
 
@@ -3833,7 +4057,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 
 **Next:** continue UI polish / plugin modularization.
 
-
 ## 2026-10-21 UI: Escape key highlights focused subdialog close button on press
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
@@ -3862,7 +4085,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 **Still broken or not tested:** visual appearance in packaged release runs is unverified, needs manual check.
 
 **Next:** continue UI polish / plugin modularization.
-
 
 ## 2026-10-21 UI: fix Options sub-dialog clicks, Keyboard Use Defaults confirmation, and menu title translucency
 
@@ -3898,7 +4120,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 
 **Next:** continue UI polish / plugin modularization.
 
-
 ## 2026-10-21 UI: mid-gameplay dev console opens main menu and restores focus on close
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
@@ -3929,7 +4150,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 **Still broken or not tested:** visual pause menu backdrop in packaged release runs is unverified, needs manual check.
 
 **Next:** Task 5 (extract non-vanilla features into a modular Bevy plugin).
-
 
 ## 2026-10-21 UI: context-aware background dim overlay (menu background vs. mid-gameplay)
 
@@ -3962,7 +4182,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 **Still broken or not tested:** visual contrast in live gameplay is unverified, needs manual check.
 
 **Next:** Task 4 (tilde dev console mid-gameplay opens main menu).
-
 
 ## 2026-10-21 UI: shared fade-in/out animations and focus transitions across dialogs and menus
 
@@ -4002,7 +4221,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 
 **Next:** Task 3 (context-aware background dim overlay: menu background vs. mid-gameplay).
 
-
 ## 2026-10-21 UI: unified single-focus state for menus, dialogs, and sub-dialogs
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
@@ -4038,7 +4256,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 
 **Next:** Task 2 (shared fade-in/out and focus-transition animations for dialogs).
 
-
 ## 2026-10-21 Build & target maintenance: automated target cleaner and launch-bevy build validation
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
@@ -4068,7 +4285,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 **Still broken or not tested:** none.
 
 **Next:** Task 1 of UI pass (unified single-focus state).
-
 
 ## 2026-10-20 Viewmodel: smooth sequence transitions into idle (fix crowbar swing twitch/hop)
 
@@ -4110,7 +4326,6 @@ The mock strings were temporarily inserted in commit 77743f2 after removing `Gam
 **Still broken or not tested:** physical ultrawide monitors exceeding 32:9 not physically tested.
 
 **Next:** owner review.
-
 
 ## 2026-10-20 Video: dynamic aspect ratio "Fit Display", universal aspect math and auto-resolution display
 
@@ -6522,6 +6737,7 @@ Also fixed: the check scripts' watchdog `sleep` outlived its subshell and kept t
 - `cargo fmt --check`: passed cleanly.
 
 **Result:** `movement.rs` is solely focused on player movement. UI and canvas logic is isolated in `ui.rs`. Button hit-testing matches visual positions 1:1 in letterbox/pillarbox viewports.
+
 ## 2026-10-09 Viewport Renderer Output Resolution and Letterboxing/Pillarboxing
 
 **Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session, Gemini 3.8 Flash).
@@ -6554,6 +6770,7 @@ Also fixed: the check scripts' watchdog `sleep` outlived its subshell and kept t
 - `target/debug/hl2-bevy --map d1_trainstation_02 --frames 30 --capture artifacts/test_res.png --no-focus`: completed 30 frames and capture with 0 errors.
 
 **Result:** Clean letterboxed and pillarboxed viewport rendering with solid black stripes preserving aspect ratio without distortion.
+
 ## 2026-10-09 Video Resolution Scaling and Display Metrics Architecture
 
 **Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session).
@@ -6574,6 +6791,7 @@ Also fixed: the check scripts' watchdog `sleep` outlived its subshell and kept t
 - `target/debug/hl2-bevy --frames 60 --no-focus`: verified 60 frames on Apple M1 Pro (Metal backend) loading `d1_trainstation_02` with 0 validation errors.
 
 **Result:** Clean resolution scaling and crash-free display mode and resolution switching.
+
 ## 2026-10-22 Codex offline research handoff
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list and queued_damage are credited in their milestone entries; all worker tasks completed.

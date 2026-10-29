@@ -771,8 +771,8 @@ pub fn append_models_lod(world: &mut World, vfs: &Vfs, root_lod: usize) -> Model
                 }
             }
         }
-        // VPhysics props (CPhysicsProp::CreateVPhysics): authored solid parameters and,
-        // when the identity-root adapter applies, the authored convex pieces.
+        // VPhysics props (CPhysicsProp::CreateVPhysics): authored solid parameters and
+        // the authored convex pieces as stored (PhysModelCreate: entity space, any root).
         if instance.kind.starts_with("prop_physics")
             && !world.model_physics.contains_key(&instance.asset_key())
         {
@@ -863,6 +863,20 @@ pub fn append_models_lod(world: &mut World, vfs: &Vfs, root_lod: usize) -> Model
                     report
                         .animation_warnings
                         .extend(rig.warnings.iter().cloned());
+                    // NPC deaths become ragdolls (C_BaseAnimating::BecomeRagdollOnClient).
+                    if instance.kind.starts_with("npc_") {
+                        match read_ragdoll(vfs, &instance.model, &rig) {
+                            Ok(Some(ragdoll)) => {
+                                world
+                                    .model_ragdolls
+                                    .insert(instance.asset_key(), std::sync::Arc::new(ragdoll));
+                            }
+                            Ok(None) => {}
+                            Err(e) => report
+                                .animation_warnings
+                                .push(format!("{} ragdoll: {e:#}", instance.model)),
+                        }
+                    }
                     world.rigs.insert(instance.asset_key(), rig);
                 }
                 Err(e) => report
@@ -1123,6 +1137,11 @@ pub const NPC_BASE_AI_ACTIVITIES: &[&str] = &[
     "ACT_DIEBACKWARD",
     "ACT_DIEFORWARD",
     "ACT_DIEVIOLENT",
+    // CAI_BaseNPC::SelectDeathPose (the client ragdoll's initial bone velocities).
+    "ACT_DIE_FRONTSIDE",
+    "ACT_DIE_BACKSIDE",
+    "ACT_DIE_LEFTSIDE",
+    "ACT_DIE_RIGHTSIDE",
     "ACT_JUMP",
     "ACT_GLIDE",
     "ACT_LAND",
@@ -1425,13 +1444,33 @@ pub fn read_physics(
     let mut solid = crate::phy::first_solid(&entries).context("PHY has no solid block")?;
     let pieces = (|| {
         let mdl = vfs.read(model)?.context("PHY companion MDL missing")?;
-        let checksum = crate::phy::identity_root_checksum(&mdl)?;
+        let checksum = crate::phy::studio_checksum(&mdl)?;
         let read = crate::phy::read(&phy, checksum)?;
         solid.compact_inertia = Some((read.mass_center, read.rotation_inertia));
         solid.drag_fractions = Some(read.drag_fractions);
         Ok(read.pieces)
     })();
     Ok(Some((solid, pieces)))
+}
+/// The model's ragdoll (`phy::ragdoll_model`) against its loaded rig's bones.
+pub fn read_ragdoll(
+    vfs: &Vfs,
+    model: &str,
+    rig: &modkit_core::animation::Rig,
+) -> Result<Option<modkit_core::RagdollModel>> {
+    let stem = model.trim_end_matches(".mdl");
+    let Some(phy) = vfs.read(&format!("{stem}.phy"))? else {
+        return Ok(None);
+    };
+    let mdl = vfs.read(model)?.context("PHY companion MDL missing")?;
+    // studiohdr_t checksum (the PHY header repeats it); ragdolls have many root bones.
+    let checksum = crate::u32le(&mdl, 8)?;
+    let bones: Vec<_> = rig
+        .bones
+        .iter()
+        .map(|b| (b.name.clone(), b.inverse_bind.inverse()))
+        .collect();
+    crate::phy::ragdoll_model(&phy, checksum, &bones)
 }
 pub fn read_collision(vfs: &Vfs, model: &str) -> Result<Option<Vec<modkit_core::ConvexPiece>>> {
     let stem = model.trim_end_matches(".mdl");
@@ -1445,6 +1484,44 @@ pub fn read_collision(vfs: &Vfs, model: &str) -> Result<Option<Vec<modkit_core::
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "reads the installed game (HL2_ROOT)"]
+    fn weapon_solids_match_their_idle_pose_not_the_bind_mesh() {
+        // Dropped NPC weapons: rotated root bones; the solid is used as stored.
+        let game = crate::install::discover().unwrap();
+        let vfs = Vfs::mount(&game).unwrap();
+        let bounds = |points: &mut dyn Iterator<Item = Vec3>| {
+            points.fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)))
+        };
+        for model in [
+            "models/weapons/w_stunbaton.mdl",
+            "models/weapons/w_pistol.mdl",
+            "models/weapons/w_irifle.mdl",
+        ] {
+            let (_, pieces) = read_physics(&vfs, model).unwrap().unwrap();
+            let pieces = pieces.unwrap();
+            let solid = bounds(&mut pieces.iter().flat_map(|p| p.vertices.iter().copied()));
+            let rig = crate::animation::load(&vfs, model, &["idle".into(), "idle1".into()].into())
+                .unwrap();
+            let clip = rig.clips.keys().next().unwrap().clone();
+            let skin = rig.matrices(&clip, 0.);
+            let surfaces = read_model(&vfs, model, 0).unwrap();
+            let vertices = || surfaces.iter().flat_map(|s| s.vertices.iter());
+            let idle = bounds(&mut vertices().map(|v| {
+                let bone = v.skin.as_ref().map_or(0, |w| usize::from(w.bones[0]));
+                skin[bone].transform_point3(v.position)
+            }));
+            let bind = bounds(&mut vertices().map(|v| v.position));
+            let error = |(lo, hi): (Vec3, Vec3)| {
+                (lo - solid.0)
+                    .abs()
+                    .max_element()
+                    .max((hi - solid.1).abs().max_element())
+            };
+            assert!(error(idle) < 1., "{model}: idle {idle:?} solid {solid:?}");
+            assert!(error(bind) > 5., "{model}: bind {bind:?} solid {solid:?}");
+        }
+    }
     fn movement_model() -> Vec<u8> {
         let mut data = vec![0; 1024];
         data[..4].copy_from_slice(b"IDST");

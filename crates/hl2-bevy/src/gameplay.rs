@@ -137,6 +137,8 @@ pub struct Gameplay {
     pub projectiles: Projectiles,
     /// Gibs of broken props (runtime prop bodies until DESIGN 14r entities).
     pub gibs: hl2_simulation::gibs::Gibs,
+    /// NPC death ragdolls (client-side in Source).
+    pub ragdolls: hl2_simulation::ragdolls::Ragdolls,
     pub phys_explosions: hl2_simulation::phys_explosion::PhysExplosions,
     pub impacts: hl2_simulation::impacts::Impacts,
     pub primary: bool,
@@ -410,6 +412,7 @@ impl Gameplay {
             npcs: Controller::new(None, Default::default()),
             projectiles: Projectiles::default(),
             gibs: Default::default(),
+            ragdolls: Default::default(),
             phys_explosions: Default::default(),
             impacts: Default::default(),
             primary: false,
@@ -507,6 +510,7 @@ impl Gameplay {
             npcs,
             projectiles: Projectiles::default(),
             gibs: Default::default(),
+            ragdolls: Default::default(),
             phys_explosions: Default::default(),
             primary: false,
             secondary: false,
@@ -641,7 +645,19 @@ impl Gameplay {
     /// side yet) and thrown 64-128 u/s along the body (the SDK branch without a death
     /// force) with AngularImpulse(200, 200, 200). SF_NPC_NO_WEAPON_DROP removes it.
     fn drop_weapons(&mut self, physics: &mut Physics) {
-        for npc in std::mem::take(&mut self.scene.npc_deaths) {
+        let deaths = std::mem::take(&mut self.scene.npc_deaths);
+        // Event_Killed -> BecomeRagdollOnClient before the weapon leaves the hand.
+        for &npc in &deaths {
+            let world = self.world.clone();
+            self.ragdolls
+                .spawn(&world, &mut self.scene, physics, npc, TICK);
+        }
+        // This tick's client ragdoll effects (shots, explosions, crossbow pins).
+        self.ragdolls.impacts(&mut self.scene, physics);
+        self.ragdolls.track(&self.world, &self.scene);
+        self.scene.npc_death_forces.clear();
+        self.scene.npc_hit_forces.clear();
+        for npc in deaths {
             let Some(class) = self.ai.weapon_class(npc) else {
                 continue;
             };
@@ -721,6 +737,8 @@ impl Gameplay {
             let Ok(id) = self.insert_entity(entity, Some(instance), physics) else {
                 continue;
             };
+            // FallInit: COLLISION_GROUP_WEAPON (the player and NPCs pass over it).
+            physics.set_weapon_group(id);
             let speed = 64. + (npc.wrapping_mul(2_654_435_761) % 65) as f32;
             if let Some(handle) = physics.entity_body(id) {
                 physics.set_body_velocity(handle, body * speed, Vec3::splat(200.));
@@ -1174,7 +1192,10 @@ impl Gameplay {
         self.projectiles.laser_dot = self.inventory.rpg.dot;
         // NPC missiles seek their owner's dot while it guides (TASK_CIT_RPG_AUGER).
         for missile in &mut self.projectiles.active {
-            if let Some(owner) = missile.npc_owner {
+            if missile.kind != hl2_simulation::projectiles::ProjectileKind::RpgMissile {
+                continue;
+            }
+            if let Some(owner) = missile.npc_owner() {
                 missile.npc_dot = self.ai.npc_laser(owner).map(|(position, shoot)| {
                     hl2_simulation::weapon_rpg::LaserDot::npc(position, shoot)
                 });
@@ -1208,12 +1229,13 @@ impl Gameplay {
             }
             // ViewPunch needs the punch-angle path of the arsenal branch (not here).
         }
-        // Combine grenade tosses: Fraggrenade_Create (NPC damage, 3.5 s fuse).
-        for (_thrower, position, velocity, spin) in std::mem::take(&mut self.ai.grenade_tosses) {
+        // Combine grenade tosses: Fraggrenade_Create (NPC damage, 3.5 s fuse; the soldier
+        // is the thrower and the blast's attacker).
+        for (thrower, position, velocity, spin) in std::mem::take(&mut self.ai.grenade_tosses) {
             let damage = self.scene.skill.get("sk_npc_dmg_fraggrenade", 75.);
             let radius = self.scene.skill.get("sk_fraggrenade_radius", 250.);
             let at = self.scene.time;
-            self.projectiles.spawn(
+            self.projectiles.spawn_npc(
                 hl2_simulation::projectiles::ProjectileSpawn {
                     angles: Some(glam::Vec3::ZERO),
                     kind: hl2_simulation::projectiles::ProjectileKind::FragGrenade,
@@ -1226,6 +1248,7 @@ impl Gameplay {
                     mass: 0.,
                     lifetime: 3.5,
                 },
+                thrower,
                 &mut self.scene,
             );
         }
@@ -1249,6 +1272,7 @@ impl Gameplay {
                 true,
                 hl2_simulation::gameplay::HitSource {
                     player: false,
+                    npc: Some(melee.attacker),
                     origin,
                 },
                 &mut || self.ai.uniform(),
@@ -1524,6 +1548,7 @@ impl Gameplay {
             self.scene.time,
         );
         physics.tick(TICK);
+        self.ragdolls.update(&mut self.scene, physics);
         // VPhysicsShadowCollision impact damage to NPCs (queued for the next tick).
         let held = |id: usize| {
             self.inventory.physcannon.held == Some(id)
@@ -1571,6 +1596,9 @@ impl Gameplay {
         // Gib poses and SUB_FadeOut (not while seen or held).
         self.gibs
             .tick(physics, self.scene.time, TICK, eye, direction, held);
+        // The ragdoll LRU retires the oldest beyond g_ragdoll_maxcount by fading them.
+        self.ragdolls
+            .retire(&mut self.scene, physics, eye, direction, TICK);
         // NPCs killed this tick drop their weapons.
         self.drop_weapons(physics);
         // VPhysics impact sounds of props and thrown frags (PhysCollisionSound).
@@ -1683,10 +1711,11 @@ impl Gameplay {
                     .then(|| (id, errors.iter().map(|e| format!("{e:?}")).collect()))
             })
             .collect();
+        let ragdolls = serde_json::json!({"active":self.ragdolls.active.len(),"spawned":self.ragdolls.spawned,"skipped":self.ragdolls.skipped,"removed":self.ragdolls.removed,"shot_pushes":self.ragdolls.shot_pushes,"blast_pushes":self.ragdolls.blast_pushes,"pins":self.ragdolls.pins,"death_poses":self.ragdolls.death_poses,"bolt_misses":self.ragdolls.bolt_misses,"last_missed_bolt":self.ragdolls.last_missed_bolt.map(|(a,b)| [a.to_array(),b.to_array()]),"missed_bolt_bodies":self.ragdolls.missed_bolt_bodies.iter().map(|v| v.to_array()).collect::<Vec<_>>(),"fading":self.ragdolls.fading(),"shots_seen":self.ragdolls.shots_seen,"shots_busy":self.ragdolls.shots_busy,"simulating":self.ragdolls.simulating(physics),"forced_sleeps":self.ragdolls.forced_sleeps,"activity":self.ragdolls.activity(physics),"last_missed_shot":self.ragdolls.last_missed_shot.map(|(a,b)| [a.to_array(),b.to_array()]),"origins":self.ragdolls.active.keys().map(|id| (id.to_string(), self.scene.states[*id].origin.to_array())).collect::<std::collections::BTreeMap<_,_>>()});
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"flashlight":self.scene.flashlight.state(),"carrying":self.inventory.carrying(),"player_damage":self.player_damage,"viewmodel":{"animation":self.inventory.animation,"at":self.inventory.animation_at,"frag":self.inventory.frag},"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
-            "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"random_look_targets":self.scene.look_targets.random_report(),"heads":self.scene.heads.iter().map(|(id,h)| (id.to_string(), h.goal.to_array())).collect::<std::collections::BTreeMap<_,_>>(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
-            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"runtime_entities":{"despawned_draws":self.despawned_draws.len(),"created":self.runtime_entities.len(),"live":self.runtime_entities.iter().filter(|id| !self.scene.states[**id].killed).count(),"world_copies":self.world_copies},"spawn_overlay":self.spawn_overlay,"npc_makers":{"diagnostics":self.scene.makers.diagnostics,"live":self.scene.makers.makers.values().map(|m| (m.id.to_string(), m.live.clone())).collect::<std::collections::BTreeMap<_,_>>()},"last_npc_hit":self.scene.last_npc_hit,"npc_health":self.world.entities.iter().enumerate().filter(|(id,e)| e.class().starts_with("npc_") && self.scene.states[*id].value != 0.).map(|(id,_)| (id.to_string(), self.scene.states[id].value)).collect::<std::collections::BTreeMap<_,_>>(),"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
+            "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"random_look_targets":self.scene.look_targets.random_report(),"heads":self.scene.heads.iter().map(|(id,h)| (id.to_string(), h.goal.to_array())).collect::<std::collections::BTreeMap<_,_>>(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),"npc_paths":self.npcs.path_stats(),
+            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"runtime_entities":{"despawned_draws":self.despawned_draws.len(),"created":self.runtime_entities.len(),"live":self.runtime_entities.iter().filter(|id| !self.scene.states[**id].killed).count(),"world_copies":self.world_copies},"spawn_overlay":self.spawn_overlay,"npc_makers":{"diagnostics":self.scene.makers.diagnostics,"live":self.scene.makers.makers.values().map(|m| (m.id.to_string(), m.live.clone())).collect::<std::collections::BTreeMap<_,_>>()},"last_npc_hit":self.scene.last_npc_hit,"npc_health":self.world.entities.iter().enumerate().filter(|(id,e)| e.class().starts_with("npc_") && self.scene.states[*id].value != 0.).map(|(id,_)| (id.to_string(), self.scene.states[id].value)).collect::<std::collections::BTreeMap<_,_>>(),"phys_explosions":self.phys_explosions,"ragdolls":ragdolls,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

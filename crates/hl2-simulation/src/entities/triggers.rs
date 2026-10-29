@@ -100,6 +100,7 @@ impl Scene {
                 dissolve: false,
                 direction: Vec3::ZERO,
                 origin: self.states[id].origin,
+                attacker: crate::projectiles::Attacker::None,
             });
             self.fire(id, "OnHurt", target);
         }

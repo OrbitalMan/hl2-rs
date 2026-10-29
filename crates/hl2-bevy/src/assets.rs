@@ -1722,3 +1722,93 @@ mod owned_frag_replay {
         println!("TOTAL {total:.1}");
     }
 }
+#[cfg(test)]
+/// Route planning cost on d1_trainstation_02 (performance report: a cop chasing an
+/// unreachable player): routes from the can cop's post to every graph node. Timing is
+/// machine dependent; the bound is loose.
+mod owned_route_cost {
+    use glam::Vec3;
+    use hl2_simulation::{
+        npc::{ActorPose, GoalKey, GoalState, MoveRequest, MoveStyle},
+        physics::Physics,
+    };
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_failed_routes_cost() {
+        let root = source_assets::install::discover().unwrap();
+        let mut loaded = super::load(&root, "hl2", "d1_trainstation_02").unwrap();
+        let world = loaded.world.clone();
+        let mut physics = Physics::new(&world);
+        physics.tick(0.015);
+        let cop = world
+            .entities
+            .iter()
+            .position(|e| e.get("targetname") == Some("cupcop"))
+            .unwrap();
+        let feet = Vec3::new(-3751., -921., 64.03);
+        let npcs = &mut loaded.gameplay.npcs;
+        let targets: Vec<Vec3> = npcs
+            .graph()
+            .unwrap()
+            .nodes
+            .iter()
+            .map(|n| n.origin)
+            .collect();
+        let (mut ok, mut failed, mut worst) = (0, 0, (0u64, 0u64, Vec3::ZERO));
+        for (i, target) in targets.iter().enumerate() {
+            let before = npcs.path_stats();
+            let key = GoalKey {
+                scene: usize::MAX,
+                event: i,
+                actor: cop,
+            };
+            let state = npcs.request(
+                key,
+                MoveRequest {
+                    target_entity: cop,
+                    target_feet: *target,
+                    style: MoveStyle::Run,
+                    event_distance: 0.,
+                    force_short: false,
+                },
+                ActorPose {
+                    entity: cop,
+                    feet,
+                    yaw_degrees: 0.,
+                    scripted_by: None,
+                },
+                &physics,
+                &[],
+            );
+            let after = npcs.path_stats();
+            npcs.cancel(key);
+            npcs.forget(key);
+            if matches!(state, GoalState::Blocked(_)) {
+                failed += 1;
+                let cost = (
+                    after.micros - before.micros,
+                    after.link_probes - before.link_probes,
+                );
+                if cost.0 > worst.0 {
+                    worst = (cost.0, cost.1, *target);
+                }
+            } else {
+                ok += 1;
+            }
+        }
+        let stats = npcs.path_stats();
+        println!(
+            "nodes {} ok {ok} failed {failed} total {:.1} ms probes {}; worst failure {:.1} ms {} probes to {:?}",
+            targets.len(),
+            stats.micros as f64 / 1000.,
+            stats.link_probes,
+            worst.0 as f64 / 1000.,
+            worst.1,
+            worst.2
+        );
+        // Session 31: graph-only link usability (was 1002 link sweeps and ~1.9 s for
+        // one failed route); a fresh controller has no stale links to recheck.
+        assert_eq!(stats.link_probes, 0);
+        assert!(worst.0 < 250_000, "worst failed route {} us", worst.0);
+    }
+}

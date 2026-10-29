@@ -1,5 +1,13 @@
 # STATUS
 
+## Merge main into orbitalman/hl2-ui (2026-10-29)
+
+- Merged upstream `main` (`b4f1c7d`: sessions 31-35 including NPC death ragdolls, particle operators, bullet/shotgun multidamage, crossbow wall/door pins, friendly immunity, ragdoll rest and fadeout) into `orbitalman/hl2-ui`.
+- Resolved merge conflicts preferring readability, maintainability, reusability, testability, isolation, documentation, and test coverage:
+  - Preserved modular architecture across crates (`cues::FIXED`, `simulation.rs`, `collect_actor_poses`, `runtime.rs`, `model_cache.rs`, `entities/io.rs`, `entities/triggers.rs`).
+  - Integrated upstream ragdoll eye posing, ragdoll fadeout presentation, prop physics attacker attribution, friendly immunity refusal, and zero-health kills.
+  - Verified with full validation suite (`scripts/checks/validate.sh`), strict Clippy, format check, isolation check, and Windows cross-target check (`scripts/checks/check_windows.sh`).
+
 ## Remove Ubuntu CI check (2026-10-29)
 
 - Removed Ubuntu 24.04 from GitHub Actions PR CI workflow (`.github/workflows/rust.yml`).
@@ -48,7 +56,6 @@ guard inherited from viewmodel debug mode blocked all key updates because the ma
 console is not open, and mode retention in `process_debug_tuning_keys` checks `can_enable_background_debug()` to prevent
 premature deactivation. Verified with automated unit testing and full validation suite (`validate.sh`).
 
-
 ## Background debug mode navigation isolation, raw names, and blur opacity controls (2026-10-28)
 
 Background debug mode has been refined to address navigation overlap and add granular visual opacity controls:
@@ -66,7 +73,6 @@ Background debug mode has been refined to address navigation overlap and add gra
   missing, or failed, ensuring blur opacity adjustments take effect visually only once the background map is ready.
 Verified with full validation suite (`validate.sh`), Windows cross-target check (`check_windows.sh`), and release build.
 
-
 ## Submenu and background switching wgpu crashes and despawn warnings resolved (2026-10-28)
 
 Switching main menu submenus and chapter background maps repeatedly across sessions no longer crashes with wgpu render
@@ -77,7 +83,6 @@ joint entities in `gpu_skinning.rs` no longer have redundant `MapOwned` tags tha
 despawning, and cleanup queries use `try_despawn()`. `resolve_asset_root` and `init_console_ui` helpers were extracted
 to keep `main.rs` functions and file line counts strictly within baseline limits. Verified with full validation checks,
 Windows cross-target check, and 10 consecutive 2,000-frame automated stress replays of `bevy-menu-submenus.json` (10/10 runs passing).
-
 
 ## Background visual debug mode and FOV tuning commands implemented (2026-10-28)
 
@@ -98,8 +103,6 @@ Background visual layout debug mode commands and controls are now implemented. C
   changes with horizontal/vertical FOV, and gameplay map loading start and finish.
 Full validation suite, architecture guardrails, and Windows cross-target checks pass.
 
-
-
 ## Background map switching and aspect ratio crashes resolved (2026-10-28)
 
 Switching menu background maps at any fixed aspect ratio or after changing aspect ratios no longer crashes.
@@ -112,8 +115,6 @@ use `commands.get_entity` to prevent entity-not-found panics when camera suspens
 `effects/gibs.rs`, `rendering/map_draw.rs`, and `rendering/runtime.rs` were extracted into submodules, and architecture
 baselines were tightened. Full test suite, architecture guardrails, and Windows checks pass.
 
-
-
 ## Menu background blur texture on fit-display aspect ratios aligned (2026-10-28)
 
 Pre-blurred chapter background textures on fit-display screens (such as MacBook Pro Retina panels at
@@ -125,8 +126,6 @@ texture uncropped across the canvas. Threshold was lowered to `aspect > 4. / 3. 
 exact ray parity across 11 aspect ratios including 1.5, 3024/1964, and 3456/2234. Full validation
 suite passes.
 
-
-
 ## Child subdialog parent fade-out initial flicker eliminated (2026-10-28)
 
 Opening a child subdialog over Options (such as Video > Advanced) now transitions the parent dialog's
@@ -136,7 +135,6 @@ establishing `sub_theme` in the same frame rather than deferring to the subseque
 `OptionsDialog::draw_with_occluders` preserves the host-provided window theme when `parent_focused` is
 provided, eliminating the premature 1-frame drop to 0.0. `overlay_bounds` was extracted into `options/hints.rs`,
 tightening production and test baselines for `options.rs` and `console/tests.rs`. Full validation and Windows checks pass.
-
 
 ## Developer console input caret scaling and shared text entry frame reused (2026-10-28)
 
@@ -148,7 +146,6 @@ drawing in `ConsolePanel::draw` is replaced with `painter.text_entry_frame`. Sub
 was extracted, tightening architecture baselines for both `widgets.rs` and `console/panel.rs`. Full validation
 and Windows checks pass.
 
-
 ## Menu background texture crop aligned with camera projection across aspect ratios (2026-10-28)
 
 `background_source` now aligns texture crop to the authored base aspect ratio (`4:3` for standard textures,
@@ -157,7 +154,6 @@ artwork and 16:10 for widescreen artwork) now crop horizontal margins rather tha
 eliminating aspect distortion against the 3D background camera. All 8 standard aspect ratios (`9:16`, `1:1`,
 `5:4`, `4:3`, `16:10`, `16:9`, `21:9`, `32:9`) are tested and match camera projection rays with exact
 tangent parity. Full validation and replay suite pass.
-
 
 ## Unfocused dialog click-to-focus and button hover suppression implemented (2026-10-28)
 
@@ -168,7 +164,6 @@ triggering the control beneath the cursor; subsequent clicks on focused controls
 The base main menu behind dialogs retains immediate click response per retail Source behavior.
 All tests, lint, Windows-target checks, and architecture guardrails pass with baseline tightening.
 
-
 ## Developer console input font and caret positioning aligned (2026-10-28)
 
 The developer console input entry field now renders with the shared monospace `ConsoleFont`
@@ -176,7 +171,6 @@ matching the log history and completion popup. Text metrics and cursor advances 
 directly from the console font face, eliminating horizontal caret displacement and font visual
 mismatches. Full validation (1,193 Rust / 100 ignored, 27 Python), Windows-target checks and
 architecture pass with panel baseline tightening.
-
 
 ## Subdialog and window fade-out occlusion snapping resolved (2026-10-28)
 
@@ -186,7 +180,6 @@ fade-out animations, underlying dialog content remains unclipped and visible thr
 overlays, eliminating premature occlusion holes and visual popping upon completion.
 Full validation (1,191 Rust / 100 ignored, 27 Python), Windows-target checks and architecture
 pass with baseline tightening.
-
 
 ## Background projection policy corrected (2026-10-28)
 
@@ -199,6 +192,22 @@ Full validation (1,190 Rust / 100 ignored, 27 Python), Windows-target checks and
 groups pass. At 4:3/16:9, changing gameplay FOV/vertical overrides changes only 521/9 pixels
 in animated details. Evidence: artifacts/background-projection. Interactive window resizing,
 native parity, Windows runtime and every background artwork NOT TESTED.
+
+## Retail virtual sequence mapping and fresh raw graph (2026-10-28)
+
+The selected citizen's nine retained base sequence IDs now have actual retail virtual group/local-index witnesses. A fresh never-attached passive capture admits eight cached descriptors and their labels against owned model files. The remaining ID0 maps to group0/local0, whose cache slot is empty; the independently read direct-root header contains local0 `ragdoll`. Do not turn the earlier initialization value0 into ragdoll playback or treat the direct-root read as a filled group-cache witness.
+
+Three stable raw graphs pass201 source reads/169128 bytes and1416 group/local tuple comparisons per graph. Two actor-state acquisitions remain within one tick; one tick-crossing actor sample is excluded from timing. Base sequence402 is observed in this run; other selected IDs come from the earlier BP capture and are table lookups here. Loaded root header version48 matches checksum/name of owned version44 bytes; converter invocation and complete conversion semantics are not traced. The retained screenshot is an opening title card, not pose evidence.
+
+Static lookup verification passes11 exact pass14 bodies,7 independent PE-bound dumpbin windows/723 instruction starts,11 anchors/two direct edges. Separate BT reads five owned MDLs and reconstructs1416 candidate entries with one duplicate-label decision. All nine selected group/local pairs agree with the fresh table; only eight selected cached descriptors are admitted. Nine actual-capture corruption controls pass. BS/BT/BU/BV/BW seals pass37/8/43/54/46 retained files; BU/BV remain rejected diagnostics below. All three owned native processes exit0/settings unchanged; readers and REA close, no owned game/Ghidra process remains. No Rust edits/builds or parity test.
+
+Private checkpoint: work/publishing/research-followup-continuation-20261028bw.md. Next bind actual retail overlay/gesture record layout and animation-source indices before a new endline layer/flex capture. Base selection is not layered animation or final pose. First_map_finished:false; original16 gaps/four missing scene bodies and full audiovisual/camera/transfer fidelity remain open.
+
+## Virtual sequence follow-up: rejected collector assumptions (2026-10-28)
+
+Two fresh passive diagnostic runs stop without an accepted mapping witness. BU rejects an empty root-group header-cache slot. BV separates that slot from the direct root header but then rejects a valid shared-model header because its verifier confuses an alphabetically sorted content list with virtual group order. A blank AssertionError string also bypasses the intended break and repeats 12 rejected snapshots within BV; none are accepted. Both owned games exit 0 with checked installed settings unchanged. Preserve both roots and stop this collector/verifier approach.
+
+The materially different BW approach subsequently passes by collecting the bounded raw virtual/header graph independently of content-list ordering, then verifying header checksum/name and group/local descriptors offline. Exact pass14 lookup bodies and independent PE byte checks remain valid. Optional fresh Ghidra import times out at330 seconds, with diagnostics retained and session closed; no fresh dossier agreement is claimed. No Rust edits/builds; first_map_finished:false.
 
 ## Background FOV handoff follow-up (2026-10-27)
 
@@ -349,7 +358,6 @@ requires superuser access here. No power saving is claimed from utilisation or F
 Evidence: artifacts/blur-performance-regression/uncapped-main-depth-native,
 uncapped-main-depth-720p-noaa and uncapped-main-depth-1080p-noaa. No GPU workloads overlap.
 
-
 ## Newly found benchmark pacing limit (2026-10-27)
 
 Source inspection finds background runs install ScheduleRunnerPlugin::run_loop at 1/60 s,
@@ -361,7 +369,6 @@ No runtime pacing change or new GPU run is made yet. Next: uncap background --pr
 retain ordinary replay timing and the two-marker queue bound, then repeat controlled low/high
 resolution and AA sweeps after the other contributor's work. Shader Detail, Water Detail and
 Multicore explicitly report unfinished/no-effect behavior in the current settings status.
-
 
 ## Main-depth candidate and benchmark deferral (2026-10-27)
 
@@ -414,7 +421,6 @@ and reuse notes. Seven are complete recorded snapshots; partial/reconstructed sh
 camera integrations are labelled. These archives are unqualified, and new archive checkouts
 were not rebuilt. Temporary stash cleanup does not remove the archived source objects.
 
-
 ## Completion-paced profiling checkpoint (2026-10-27)
 
 - c53b369 and 2cca3f9 commit frame-tail reporting and host-resource measurements. Headless
@@ -435,7 +441,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
   but GPU quality and repeated performance qualification are pending. Concurrent build
   activity is retained and flagged.
 
-
 ## Hardware-aware benchmark checkpoint (2026-10-27)
 
 - c53b369 commits profiled frame-time tails and the native blur guard. Resource instrumentation
@@ -451,7 +456,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
 - Source, package hashes, raw counters and per-window associations are retained in ignored
   artifacts/blur-performance-regression/environment-loaded and environment-observer. Rendering
   experiments remain uncommitted. Next: single-sample resolved post-processing, preserving AA.
-
 
 ## In progress: native-resolution Advanced regression (2026-10-27)
 
@@ -489,7 +493,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
   durations are zero on this Metal adapter. These are unavailable timings, not zero-cost
   filters. Do not publish them as GPU cost; use controlled ablation or another profiler.
 
-
 ## Advanced world and projectile blur (2026-10-27)
 
 - Advanced now reconstructs camera motion with dense centered 17-257 taps, plus independent
@@ -516,7 +519,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
   Native Windows/Linux, every weapon/effect/resolution/frame rate and ordinary campaign play
   are not tested. Old detached app-primary worktree remains parked after app cleanup refusal;
   original checkout is active, with unrelated scratch files untouched.
-
 
 ## Advanced weapon blur surface stability (2026-10-27)
 
@@ -581,7 +583,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
   docs/validation.md. Native Windows runtime, native retail raster comparison and
   ordinary campaign playthrough are not tested. Next: broader native HUD comparisons.
 
-
 ## Chapter background presentation during background loading and unclipped QuickInfo crosshair hud (2026-10-27)
 
 - Fixed background map loading presentation: when launching the game into the main menu without a gameplay map, the chapter's pre-blurred background texture (`materials/console/<background>.vtf` / `_widescreen.vtf`) is now immediately rendered alongside the `#GameUI_Loading` tip plaque in the bottom-right corner rather than showing a plain black screen.
@@ -592,7 +593,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
 - Refactored `Console::draw` in `crates/hl2-ui/src/console.rs` (reducing production lines from 219 to 21 lines), modularizing `draw_menu_buttons` and `draw_menu_titles` into `draw_menu.rs`, tightening `architecture-baseline.json`.
 - Corrected Play button pointer coordinates in `test-inputs/bevy-chapters-lostcoast.json` (`[640, 508]`), ensuring `chapter_selection` replay test clicks Play in the 600-unit layout.
 - `validate.sh`, `check_windows.sh`, and packaged replay checks (`chapter_selection`, `power_hud`, `hud`, `hud_aspect`, `submenus`, `return_menu`, `chapter_menu`) pass with 0 failures.
-
 
 ## Asynchronous startup map loading with chapter background and progress UI verified (2026-10-27)
 
@@ -639,7 +639,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
 - Zero per-frame cost when commentary is disabled.
 - Packaged replay check `commentary` (`test-inputs/bevy-lostcoast-commentary.json` on `d2_lostcoast`) and `coverage` passed; `validate.sh` and `check_windows.sh` passed.
 
-
 ## Chapter browser layout/fonts, submenu background retention, and loading screen backdrop verified (2026-10-27)
 
 - Normalized `CardBrowser` and `Catalog::browser_layout` card geometry to `168x146` with a
@@ -656,7 +655,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
   with menu titles/buttons hidden during gameplay map loads.
 - `validate.sh`, `check_windows.sh`, owned-install font/catalog tests, and packaged
   `submenus`, `return_menu`, and `chapter_selection` replays pass (3/3 checks, 0 failures).
-
 
 ## Background loading now waits before showing controls (2026-10-27)
 
@@ -680,7 +678,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
   canvas-quad tests verify hidden rendering. Final physics/GPU install can still hitch.
 - Evidence: artifacts/chapter-loading-gate; commands/limits in docs/validation.md and
   docs/performance.md. Native Windows/Linux execution and ordinary campaign play not tested.
-
 
 ## Dialog/background loading fixes verified (2026-10-27)
 
@@ -706,7 +703,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
 - Next: profile individual installation phases/input latency if remaining stalls reproduce;
   keep media deferred. Baseline invalid-entity command warnings remain outside this fix.
 
-
 ## Portability / dependency declaration checkpoint (2026-10-27)
 
 - Owner deferred movies/commentary before runtime source or Cargo dependencies were added.
@@ -721,7 +717,6 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
   Workflow YAML/matrix, architecture/whitelist, 13 Python tests, fmt, POSIX syntax and strict
   Windows-target Clippy pass. Runtime unchanged; no gameplay rebuild/frame-time rerun.
 - Next: obtain hosted CI results before upgrading Linux's status; media work stays deferred.
-
 
 ## Chapter selection / shared card browser verified (2026-10-27)
 
@@ -749,6 +744,26 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
 
 
  Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. PR readiness maintenance findings are fixed; runtime behavior is unchanged. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
+
+## Retail LookAt registration, request updates and base-animation fields (2026-10-27)
+
+The selected endline LookAt from an authored inactive channel does more than enter a callback: the instrumented native trace observes successful actor/base registration, an actor scene-event vector growing 5 -> 6, and 27 processing calls with nested player-directed attention-request updates. Stored target handles, timing, ramp and importance match raw call inputs. The selected scene-event record is absent in the final post-tail snapshot. This establishes registration and requests for this event; final eye/head pose, gaze arbitration and general inactive-channel policy remain untested.
+
+A fresh never-attached control accepts 5,573 of 5,687 samples, excluding 109 tick-crossing acquisitions and five reload null-slot acquisitions. Its 87 selected-event samples contain 27 distinct coincident player requests. Retail descriptor/RTTI bindings admit actual base sequence, cycle, playback rate and 24 pose parameters. Numeric sequences are not yet resolved to virtual-model clips; overlay, flex, root and final bone/eye pose remain open.
+
+The packed native curve uses 10-byte samples and observed default type 257. Four of five loaded values differ by one float step from rounding byte/255; all five match float32(byte * float32(1/255)). A separate BR static supplement binds the event-curve restore caller and actual unsigned-byte conversion/MULSS instructions, explaining that match. Restore invocation was not traced in the passive run. Original source journals and rejected alignment/verifier/harness drafts remain retained.
+
+BN/BO/BP/BQ seals pass 46/122/93/18 files, with 7/15/13/4 external bindings and one bounded owned-content range for BP. BR seals 20 files/three exact bodies/seven byte anchors. Both new owned native processes exit 0/settings unchanged; observer closed, with no research-owned game/fixture/audio/Ghidra process left at closeout. No Rust edits/builds or parity test. First_map_finished:false; original 16 gaps/four missing exact scene entries remain. Next bind virtual-model/include mapping for the observed sequence IDs before claiming animation selection. Private checkpoint: work/publishing/research-followup-continuation-20261027br.md.
+
+## Finite opening callbacks and passive control (2026-10-27)
+
+The new private file recorder passes an authored x86 fixture beyond REA's 16 MiB message cap: 30,002 records, 15,000 closed pairs and 90,000 raw reads. Binary sidecars reduce median fixture cost from about 1.58 ms to 0.20 ms per recorded call. This is fixture performance, not native HL2 overhead or a long-capture guarantee.
+
+A guarded native opening run retains 388 contiguous records/134 closed pairs/5,030 raw reads with no drops or open calls at finish. Its fresh-map window matches all 39 G-Man and 11 endline authored event type/start/end tuples, including one LookAt on a channel marked inactive by the static catalogue. Do not infer callback omission from the catalogue's combined enabled flag; actual LookAt application remains untested.
+
+A fresh never-attached control passes 4,143 samples, with five map-reload samples explicitly excluded. Three scene-state milestones agree with the instrumented run's native-clock brackets. Endline OnCompletion occurs while playing is still set; the control corroborates a later playing-clear transition. The instrumented recorder ends during that tail, so full endline ownership cleanup is not observed there. The first passive sampler's guard failure remains a separate rejected attempt.
+
+BJ/BK/BL/BM seals pass 309/121/85/89 retained files. All three owned native processes exit 0 with checked installed settings unchanged; the observer is detached and process-audio recorder ended. Native bodies, recordings and tools remain private. No Rust changes/builds or parity test. First_map_finished:false; original 16 gaps/four missing scene-index entries remain. Next trace the inactive-channel callback through retail actor registration and bind actual actor animation fields before measuring animation. Private checkpoint: work/publishing/research-followup-continuation-20261027bm.md.
 
 ## Windows CI test portability (2026-10-26)
 
@@ -939,6 +954,26 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
 - Next checkpoints: floor overlays in the canal start corridor, lamp/tube emissive material
   rules, then flashlight availability and authored enable/disable integration. Plan: DESIGN.
 
+## Native first-map route/audio and immediate grab velocity (2026-10-26)
+
+New private BF controlled-input traversal reaches storage after train exit, customs, the security pen and Barney's room: 79 player snapshots, 60 motion files/5976 samples and 53 serialized requests. Raw integrity checks pass 54574 read occurrences/17597584 bytes. The owned native process exits 0 with installed settings unchanged; both Frida sessions are closed. Three process-specific audio segments and a native demo are retained privately. Waveforms are not proof of dialogue identity or 1:1 mixing.
+
+Two expanded traces hit REA's fixed 16 MiB session cap; that approach stopped after the second failure. Their retained windows remain partial. The strongest security window contains 1993 events/930 closed pairs/53 complete sampled pause groups and 31 recognized outputs, with raw source/generation checks passing; overall trace continuity acceptance stays false. An offline generation-registry bug was caught and corrected before loading the expanded observer. A fresh never-attached matching control was not run.
+
+BH is separately sealed at 73 files: 16 new/15 reused exact bodies, 15 rooted graphs/3984 bytes/1278 starts, 38 anchors. The held-grab callback selects an instantaneous linear-velocity setter, writes active linear terms and clears pending linear terms; its angular pointer is null. The pending setter is a separate method. Actual solver order and measured performance remain unobserved. Keep optimization tied to profiling, membership/rebuild flags and behavior preservation.
+
+Private checkpoint: work/publishing/research-followup-continuation-20261026bi.md. Usage reached 99% at closeout. No Rust edits/builds, branch switch or memory update. First_map_finished:false; original 16 gaps/four missing scene-index entries and full audiovisual/animation/camera/transfer/Rust parity remain open. Next validate a logging backend on an owned fixture before another long scene capture; do not repeat either capped capture unchanged.
+
+## Pending-vector consumer sealed; live REA 6.8 verified (2026-10-26)
+
+The restarted built-in REA connection now reports package/server 6.8.0, the rea-6.8.0 launcher, 229 tools and skill 49, with aligned identity expectations. The earlier Ghidra and disposable x86 Frida validation receipts remain private; they do not verify all 229 operations. No reinstall or repeated decompilation was needed in this closeout.
+
+Private BC is sealed at 73 retained files. Its 13 new exact bodies/two reused bodies and 15 rooted byte graphs bind a 149-byte/27-instruction consumer through the environment stepping wrapper and default scheduler construction. It adds pending angular/linear components into their base vectors and clears the six pending words. Independent retained Ghidra Evidence agrees with the consumer extent, instruction starts/mnemonics and exact pass14 pseudocode. Queue-helper internals, actual queue entries and runtime invocation/timing remain unobserved; other retained caller metadata prevents assuming this is the only consumption phase.
+
+The 27 historical manifest identities remain unchanged; their existing navigator still covers 5411 occurrences/36 exact dependencies. BC is a separate 28th bounded research seal, not a rewrite of that navigator. Both original handoff inventories pass; rejected drafts and AY/AU/AX caveats remain. Read-only verification: `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-force-consumer-20261026bc/verify_seal.py`. Private checkpoint: work/publishing/research-followup-continuation-20261026bd.md.
+
+No native game was launched or attached in this closeout, and no Rust implementation/build changed. Next feature question: can held-prop controller increments be consumed again within the same scheduler event, or do they survive for a later event? Bind concrete controller/continuation targets statically before any required runtime test. First_map_finished:false; original 16 authored gaps/four missing scene-index entries, full ABI/solver and Rust parity remain open. Claude owns Rust implementation.
+
 ## Flashlight on the weapon (2026-10-25)
 
 - Implemented: the placed beam illuminates the viewmodel through its existing world-lighting
@@ -1057,6 +1092,18 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
 - Known: `monitors-kleiner-scene`'s gib removal count varies between runs of one build: once in four runs 7 gibs were removed instead of 8 at its last two labels; the replay checks do not mark it as varying.
 - Known: `pallet-gibs-fade`'s kill tick varies between runs of one build. In one of four runs the pallet's kill and its gibs came at tick 32 instead of 34; only its `hits` is marked as varying in the replay checks.
 
+## Corrected native impact evidence and instrumentation caveat (2026-10-24)
+
+The interior-hook caveat supersedes older descriptions limited to timing perturbation. Sealed private AW reproduces saved-EDI corruption from Frida object/onEnter call-listener form at an interior instruction; the documented function-callback probe preserves the baseline sentinel. Sealed AY audits 18 selected roots/five loaded scripts/29 sites and identifies four affected interior sites across AF, AR and X. Keep their raw observations, but do not promote their dynamic causal interpretations to unmodified retail behavior. Static body/byte evidence and separate non-Frida controls remain distinct. The X transition is still an observed controlled instrumented event; ordinary first-map completion remains false.
+
+AU is sealed as a failed diagnostic: owned PID 75492 exits after force/torque application and before any window collision witness. Its retained dump places the access violation at preferred server101d77b1. Wrong interior listener form is consistent with the fault; full causal attribution is unproven. Settings unchanged and session closed after exit.
+
+Corrected AX seals 615 files. Five complete collision/calculator/scale/lookup/selection/damage pairs bind the actual glass table and scale 1. Actual lookup values 334.4362, 143.1501, 594.3675, 4.9655 and 0.3967 are below 625; native selection index and damage are 0, with health 15 unchanged. Reconstruction matches each actual argument. Its 48 events, 67 motion files/6804 samples and 518 trajectory samples retain raw provenance and images. This remains instrumented evidence. A later guard accidentally overwrote the original full pre-attach guard file; independent creation/module/prefix/storage records remain and the missing snapshot is explicitly recorded. No crossing was attempted.
+
+BA seals 26 files and corroborates per-line reset versus cumulative same-line wait additions using corrected probes: 10 parser pairs/eight sites/192 raw reads. It submits echo/wait commands in AX's idle owned process; no fixed timing units or button-phase claim follows. Both observers unload/close before normal native exit 0; checked settings unchanged. AZ binds normal velocity to base plus pending increments and matches 18 recorded post vectors. BB binds five actual callback return stacks to PostCollision dispatch. One separate game-data getter remains missing from pass14, with only its four raw entry bytes verified.
+
+Nine new private seals retain 1370 file occurrences. The combined 27-root navigator checks 5411 occurrences/36 exact body dependencies/19 metadata query cases; these are evidence counts, not semantic coverage. Current checkpoint: work/publishing/research-followup-continuation-20261024bb.md. No Rust changes/builds; first_map_finished:false, original 16 gaps/four missing scene-index entries and Rust parity remain open.
+
 ## Architecture review: structure without behaviour change (2026-10-23)
 
 - Plan in docs/DESIGN.md (same title). Every step keeps output, errors, effects and gameplay outcomes unchanged and is verified by `scripts/checks/validate.sh`, the Windows-target check and packaged replays.
@@ -1082,6 +1129,56 @@ were not rebuilt. Temporary stash cleanup does not remove the archived source ob
 - Fixed after the merge: the replay checks `fov_settings` and `console`, which failed before it too. `fov_settings` expected the old portrait (+8) and ultrawide viewmodel FOV boosts that the per-weapon offset tuning removed; the console replay now resumes from the pause menu after closing the console.
 - Packaged checks run with `--mute` (silent, settings untouched, asserted per run) and cap `JOBS` by physical memory: a packaged game peaks at about 5.5 GB on the station maps (main: about 3.2 GB; see the startup memory section above), so a 16 GB machine runs two at once.
 - Known content gap: `Weapon_Alyx_Shotgun.Cock` (female citizen / Alyx `shoot_shotgun` event) has no Half-Life 2 sound script; main's F4 citizen spawn pool preloads it on every map.
+
+## Aligned-release rejection and exact-entry byte supplements (2026-10-23)
+
+AL seals618 files: a measured platform bypass, confirmed support/held pose, two aligned throws that leave health15, and517 passive release-trajectory samples. Its65 motion files contain6431 samples; verification checks90804 reads/28246816 bytes. Owned game closed/settings unchanged. The south-input summary was initially misread because it masked to jump/duck bits; raw button1024 is present with zero movement. The correction and rejected verifier drafts are preserved, including a separate contextual AM erratum. No crossing was attempted.
+
+AN seals18 files with two unsuccessful exact StopSchedule retrievals:330s import timeout, then a longer CLI run that reaches the address query but finds no Ghidra procedure entry. AO seals12 files with a separate196-byte/67-instruction rooted raw branch graph and three native field descriptors. AP seals15 files with rooted camera-disable forwarding, intro blend-completion stores and speaker deadline/owner/dispatch flow,597 bytes/186 instructions. These corroborate bounded static routing previously SDK-only; they do not recover indexed/Ghidra bodies or close the original16 gaps/four missing-index requests.
+
+AS seals31 files: three exact on-demand physics accessor bodies and four preserved missing requests, supplemented by seven rooted byte graphs173 bytes/60 instructions. This binds selected flags/mass-scalar/inertia fields for passive reads; no getters were called. AR seals606 files: one aligned diagnostic release observes force/torque application (force length about4000), four complete window collision pairs and four computed damage0 results, with health15 unchanged. Its25 trace events,6928 motion samples and518 trajectory samples are retained; exact impact cause/full equation remain unverified. Hooks unloaded/detached, owned game closed/settings unchanged. Two early model scans observe no literal candidates, without absence claims. No Rust changes/builds; first_map_finished:false and Rust parity untested. Current private checkpoint: research-followup-continuation-20261023ar.md.
+
+## Storage/model witnesses and command-node dataflow (2026-10-23)
+
+AI is now sealed at 538 files. Its 65 motion files/6310 samples preserve two confirmed attached-crate throws that leave window health15; actual ground support resolves by handle/serial. No crossing was attempted. AJ seals nine files: two late first-map live candidates match their static model choices, with runtime slot/serial and retail RTTI byte corroboration. Seven literal candidate names were not observed at that time; G08 and scene actor bindings remain open. Both depend on the already-closed AI process and checked unchanged settings.
+
+AM seals 15 files: one new exact pass14 command-insertion body, 215 bytes/72 instruction starts, binds passed scalar storage in a three-word node and the byte+2048/current+2034 conditional dispatch. The two ordering helpers remain unexpanded and units are not established. An extra dumpbin padding byte was rejected and excluded. AL and AN subsequently finished as bounded negative results above. No Rust changes/builds; first_map_finished:false and parity remain open.
+
+## Early platform obstruction retained (2026-10-23)
+
+AK's fresh route stopped before storage: the copied platform-east pulse advanced about43 units and failed its expected-position guard. The selected static world-brush query found no entering candidate; dynamic/static-prop collision or another cause remains unresolved. The run closed/settings unchanged, with no test of the new held-pose approach. Stop repeating that fixed pulse. Next park after the grate exit, retain nearby live entity/collision state, and choose a measured bypass before resuming the route. Earlier AI's two failed frontal throws remain separate evidence.
+
+## Fresh storage route stopped at impact limit (2026-10-23)
+
+AI reached the storage platform, confirmed normal carry and resolved the player's actual ground handle to crate456 with matching serial/pointer. Two frontal throws left window health15; the approach stopped and the owned process closed with checked settings unchanged. No crossing was attempted. Held-crate poses remained low and the player was near the lateral edge; these observations motivate alignment and held-pose checks before throwing, not another blind throw. Original failed motions/attachments remain retained. Next private approach must park before throws and use actual support and aperture clearance; no Rust changes or first-map/parity completion claim.
+
+## Active buffer diagnosis and fresh input controls (2026-10-23)
+
+Sealed AF/AG (99/93 files) resolve the earlier batching question. The actual engine buffer is bound through one newly retrieved exact caller and raw ECX/call bytes. Its wait flag/default increment are both 1. In the instrumented fixture, newline configuration lines arrive as separate parser calls; their local wait additions do not carry into the following line. One semicolon line preserves cumulative additions and actual server button phases. Fresh no-Frida-by-this-task controls corroborate jump/duck/release ordering, but identical wait counts give different sampled server-tick delays. Do not equate command-buffer scalars with server ticks or promise fixed timing.
+
+AF checks 19 call pairs/eight wait-site events/662 passive samples; AG checks 400 samples/three positive ordering controls. Both owned runs closed/settings unchanged; AF instrumentation unloaded/detached. AE's EOF setup failure and AG's LF/CRLF binding rejection are retained. AH was preempted before storage after a missing driver import was found; corrected AI later stopped at its two-impact limit and is sealed as a negative result above. Precise milestone: private research-command-buffer-progress-20261023af.md. No Rust edits/builds; original first-map gaps and Rust parity remain open.
+
+## Native input latency and conditional wait research (2026-10-23)
+
+Resumed in fresh private AC; the naturally controlled train fixture measures separate-command jump-to-duck at first observed 25 ticks/0.375 game seconds despite a requested 50 ms wall pause. Acquisition bounds are 0.360..0.480 seconds; the actual wall pause is 62 ms and each submission process takes about 0.27..0.28 seconds. Two wait 4/wait 12 batches emit markers but no sampled button phases; that approach stops at two failures. No campaign route replay.
+
+AC is sealed with 94 files: 593 samples/5488 raw reads/1754824 bytes/five captures; nine clock-raced samples excluded from timing. New AD is sealed with 25 files: a different exact raw wait-string anchor binds one retail parser and one comparison helper, 514 body bytes/216 instruction starts. Conditional wait handling exists statically; the active buffer/flag/path and scheduling guarantees remain unobserved. Owned PID 31504 and REA session closed; checked installed settings unchanged. Current private handoff: work/publishing/research-input-ack-continuation-20261023ac.md. No Rust edits/builds; first_map_finished:false, original gaps/fresh passage/exit/Rust parity remain open.
+
+## Research stopped at owner request (2026-10-23)
+
+Frozen W/X/Y/Z/AA navigator revalidation passes five roots/1868 files/22 query checks; original 16 gaps preserved. New private scene-input-ack-20261023ab prepares isolated input acknowledgement tests, but the owner requested wrap-up during the native introduction. No phase trial/new decompilation ran. Owned PID70548 closed through freshly guarded quit; six checked installed settings identities match. Interrupted reader/parent errors retained; AB is incomplete/unsealed. Private continuation: work/publishing/research-input-ack-continuation-20261023ab.md. No Rust changes/builds; first_map_finished:false and Rust parity untested.
+
+## Native first-map window escape and authored exit (2026-10-23, research only)
+
+The owner lifted the previous running-game restriction. A fresh instrumented native route now observes authored crate pickup/sustained carry, normal throws, window damage/break, crouched passage and actual transfer to d1_trainstation_02 through the live changelevel trigger. Loaded window health 15/15, modifiers .5/1/1 and Glass.Window/glass strings are measured. Selected collision results 10 then 75 change health 15->5->-70; these are particular impacts, not a constant damage rule. A stopped oblique throw and doorway-jamb attempts remain retained.
+
+Private scene-shadow-control-20261023w is sealed 28 files/11 bindings: three new exact bodies/two necessary helpers bind the selected physics virtual and scalar return chain. scene-storage-interaction-20261023x is sealed 694/38: 21 exact identities, 3197 main events/1543 pairs, seven collision pairs, 54 exit pairs and raw/capture validation. The old-player reader rejects a zero slot during transfer; fresh native status/player/map-time evidence establishes arrival separately. Owned game closed; checked installed settings unchanged. No Rust changes/builds.
+
+Fresh non-Frida Y/Z controls are sealed 498/631 files. Both corroborate carry/window removal but fail crossing/placement; fresh exit comparison remains incomplete. Z's actual crouch is observed about 0.81 game seconds after launch, after its jump peak, with an initially invalid lateral lane; it does not isolate a 50 ms timing effect. Failed approaches stop at their bounded limits. All three owned games are closed, checked settings unchanged. Original 16 authored gaps/four missing scene procedures and separate startup gaps stay open. **first_map_finished:false** remains the full semantic/audiovisual boundary; the narrower **native_input_led_exit_observed:true** is established. Ordinary unassisted campaign completion and Rust parity **not tested**. No second-map campaign research was started.
+
+Separate frozen-X audit scene-carry-core-state-20261023aa is sealed 17 files/21 bindings: 12 mass-set pairs show the selected core coefficient 0.04->1->0.04; rotational-damping fields show 0->10->0 across carried/released states. This is not a typed inverse-mass getter, an observed damping-setter call or a full physics law. The finite five-root navigator passes 1868 retained files/27 distinct exact dependencies/33 per-root occurrences and 22 query checks; older navigators remain unchanged.
+
+Current private handoff: work/publishing/research-native-exit-continuation-20261023w.md; lean prompt next-research-prompt-20261023w.txt; final receipt research-native-exit-closeout-20261023w.json. Next: isolate actual input/tick acknowledgement in a small private harness before another campaign replay. Two bounded engine wait-text queries found no exact body candidate; SDK wait semantics remain unproved for retail, and that text search is stopped.
 
 ## Current session: portrait viewmodel framing and Fit Display continuation (2026-10-22)
 
@@ -1701,6 +1798,7 @@ Antigravity, Gemini 3.8 Flash model family. 10-task follow-up pass underway:
   6. Placeholders still disabled: Load Game, Achievements, Workshop, Gamepad, Keyboard/Video Advanced; background map frozen and seen from the spawn; music ducking not modeled.
   7. Not tested: Windows/Linux (including No Border), full-screen/No Border startup, real monitor mode switching, audible music volume/focus mute, packaged key capture.
 
+
 ## Codex offline research handoff (2026-10-22)
 
 Current private continuation: work/publishing/research-pickup-dispatch-continuation-20261022j.md; lean prompt: next-research-prompt-20261022j.txt; final publication/remote/tree/quota receipt: research-pickup-dispatch-closeout-20261022j.json in the same directory. J..V are sealed13 roots/361 retained files,57 distinct exact bodies/63 per-root identity occurrences/64 export paths/five navigation-only occurrences. These are inventory counts, not semantic/runtime completion. Native material/tools remain outside Git; reviewed docs are committed/pushed.
@@ -1843,6 +1941,114 @@ Setup-only integration based on main `675c9df`: separate bootstrap window, Steam
 Main validation: five setup/control tests pass; workspace checks pass with **459 passed, 48 ignored and one unchanged physics test excluded**. The original glass-table `std::ptr::eq` assertion fails when explicitly executed (`main/original-physics-test.log`); its earlier test-only adjustment is excluded from main to preserve the requested setup-only scope. Strict Clippy, formatting and whitelist checks pass. The main release package was rebuilt; `main/setup-ready.png` and `main/gameplay.png` show the setup UI and station02 startup. Earlier missing-folder, readiness, preference and rejected-capture evidence remains under `artifacts/friendly-setup-20261015`. Native picker/clipboard interaction and macOS/Linux setup are **not tested** because Windows computer-use timed out through recovery. Readiness checks are bounded, not a full Steam integrity audit. Existing campaign limitations below remain applicable.
 
 Checkpoint: 2026-10-16 session 21 (native canals pistol comparison: metrocop pistol regulator, assault behavior, aiscripted_schedule, player hitboxes; on wip/npc-ai-20261014, not on main); 2026-10-16 session 20 (F4 overlay redesign, AI on by default + ai_disable, citizen heads, DX-level VMT blocks, RPG launch flash, grate fences/gates, combine ball rules; on wip/npc-ai-20261014, not on main); 2026-10-15 session 19 (template makers, StartNPC, NPC health/hitboxes/sneak attacks, NPC weapons in hands, muzzle flashes/tracers, stunstick glow; on wip/npc-ai-20261014, not on main); 2026-10-15 session 18 (terminal-cop policing like native; DESIGN 14w NPC weapons: equip, weapon-model events, pistol fire/reload; on wip/npc-ai-20261014, not on main); 2026-10-14 session 17 (explosions break props, explosive barrels, arsenal + physics merged to main with deferred leftovers, step 14 next); 2026-10-14 session 16 (prop data, chunk gibs, displacement and clip collision, world hinges); 2026-10-13 session 15 (stacked-prop margin, prop CCD frame drop, gibs, NPC studio decals, hinges, debris props; branch head after b0dc562 + debris); session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+
+## Current session 35 (2026-10-28)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. New branch `wip/session35-20261028` on top of `wip/session34-20261028`, merged into main (c83748f). Plan/status: DESIGN 14n session 35 (ragdoll rest). Private evidence: work/hl2-decompiled/npc-gunfire-20261021/lab/s35-*.txt (retail client.dll FX_AffectRagdolls FUN_1012ffa0, CRagdollLRURetirement::Update FUN_101aa3a0, CheckSettleStationaryRagdoll FUN_101a5390, ragdoll_sleepaftertime ConVar 0x104d6050).
+- **Owner playtest of session 34: bullets and the crowbar only moved corpses at the moment of death. Fixed.** Native (owner, 2026-10-28): three cop corpses still react to bullets and the crowbar minutes later. FX_AffectRagdolls (SDK and retail) refuses a shot's push while more than one ragdoll is simulating (root awake); native IVP rests a landed corpse moments after it stops, so that window is the tumble right after a multi-kill, and a resting (asleep) body still reacts: any hit wakes it. Our ragdolls never rested: Rapier needs every solid under 0.5 rad/s for 2 s, and a landed police corpse keeps one limb jittering at up to ~0.9 rad/s (artifacts/s35 c-two-sleep, `activity` diagnostics), so with two corpses down every later hit was refused (c-two-sleep: both "simulating" for 16 s). This dates from session 32 (post-death pushes arrived with the native rule): a pre-34 build (a8d41f3, built in a scratch worktree) refused all 10 shots with two corpses (c-two-shots-pre34); session 34's 37x weaker joint friction adds limb jitter. Fix: (1) CheckSettleStationaryRagdoll/ResetRagdollSleepAfterTime (retail: 1.0 unit per axis per update, 5 s, then clear velocities and sleep every solid); (2) ragdoll solids rest under 2 rad/s for 0.5 s (tuned; IVP's deactivation constants are not read). Packaged: two corpses rest 3.2 s after the kill (~1 s after landing); with two corpses down 10 of 11 later pistol shots push (the refusal came while both still tumbled); single-corpse pistol and crowbar 8/8 (c-pistol, c-crowbar). Push size per hit (~1-2 units of root travel for a pistol shot into a lying corpse) is not compared with native.
+- Rejected/withdrawn: the session 32 rd-corpse-shots fixture no longer measures pushes (death poses moved the corpse 70 units, its fixed aim passes over it); re-aimed fixtures replace it. A pre-34 worktree build that shared this checkout's target directory left stale modkit-core artifacts here (cleaned; do not share target dirs between worktrees).
+- **Merged into main (owner go-ahead): main = c83748f** (no-ff merge of `wip/session35-20261028`, which contains sessions 31-34, into d9295d5; pushed). The merged tree equals the session branch, so the branch's tests and regression stand for main; session 35's fix is not yet playtested by the owner. PR #4 (head 2cc130b) then conflicts in 13 files: MODLOG.md, README.md, STATUS.md, docs/DESIGN.md, docs/validation.md, crates/hl2-bevy/src/{audio,eyes,gameplay,main,rendering}.rs, crates/hl2-bevy/src/movement.rs (deleted in the PR, modified here) and crates/hl2-simulation/src/{entities,gameplay}.rs.
+- Tests: hl2-simulation 371 (new: settle timing and impact reset; a landed ragdoll rests and an impact wakes it, a forced sleep holds), strict Clippy and fmt clean; hl2-bevy: only the two known release-only should_panic image tests fail (PR #2's, since session 32). Owned suite (HL2_ROOT, --ignored): 63 pass, 0 fail (artifacts/s35/owned-suite.log). Regression artifacts/s35-regression: movement 26/26, weapons 17/17, attention 26/26; finals vs s34-regression: Breen slate 9 px (max 5), the rest identical.
+
+### Open bugs and issues for future branches (consolidated 2026-10-28, owner request)
+
+Ragdolls and physics:
+- Native time-to-rest A/B (when a second corpse stops blocking pushes) and per-hit push size against native; our rest thresholds are tuned, not IVP's.
+- Shotgun corpses ~33% long (native 95.5-99.2 units in three runs, ours 127-133; the 357 is within 4%): per-pellet hits, the batch's force bone and death-pose hitgroup against a native probe; world/static hits between a target's pellets must not split its multidamage batch (CBaseEntity::TraceAttack adds multidamage only with m_takedamage).
+- The vphysics ragdoll constraint init's torque conversion (assumed DEG2RAD, not read); phys_hinge friction not re-tested in its scenes; tic-tac-toe block turns ~176 degrees vs native ~90 within 0.3 s.
+- Pistol crumple slide (~30 vs native ~12 units, not re-measured with the single-shot method); native SetHealth turns the cop (AI reaction to self-damage), ours does not.
+- Death poses: the moving-NPC origin extrapolation term is not ported; convention checked against the SDK and the A/Bs only.
+- prop_ragdoll map entities (d1_trainstation_04 ragdoll_cop templates, station03's dead citizen), zombie headcrab release (RELEASE_RAGDOLL/IMMEDIATE), burning ragdolls (IgniteRagdoll, LRU exemption), PVS out-of-view fade test (frustum only), eyes do not fade.
+Weapons and damage:
+- Friendly immunity: ai_relationship overrides are not consulted; weapon lowering at friends; NPC blast damage does not feed AI pain/damaged-by-player; metered NPC ball damage.
+Particles:
+- Timed native capture 1-2 s after ignition; studio hitboxes for Position on Model Random; remaining burning_fx operators (Lock to Bone, noise operators, Position Modify Warp, random force, emit_continuously, dual-sequence sprites); other PCF effects (blood_impact, fire_01, rocket_fx); gas-can bursts igniting NPCs.
+NPC AI and behaviors:
+- Every NPC's own attacks in campaign order: the session 33 Open list below (zombies incl. door bashing, prop swats, torso split, fast/poison zombies; headcrabs; barnacles; cop manhacks/rappelling; Combine kicks; manhacks; scanners; rollermines; antlions/guards with thumpers and bugbait; vortigaunts; turrets/cameras/snipers; helicopter/gunship/dropship/APC; striders; dog).
+- Squad strategy slots, AnnounceEnemyType/FLANK/GREN; more ally concepts; player blocks do not mark graph links stale.
+- Can cop: the thrown can's bounce into throwcan_trigger (native: same aim, no trigger); native knock-out branch recording; cop chatter rate (native ~1 vs ours ~6 lines a minute).
+- Runtime entities (14r): late precache of NPC classes outside the F4 list, gibs as entities, ent_create physics-prop placement.
+Long-standing (README/AGENTS): saved/global state transfer between maps unfinished; door blocked reversal/arbitrary spawn/native linkage incomplete; native head/facial/random/tactical attention unfinished; multiplayer/netcode not implemented; platforms other than Windows 11 (and the contributor's macOS run) not tested.
+Tooling: the two hl2-bevy release-only should_panic image tests (PR #2) fail under --release; the oracle refuses while the owner's hl2.exe runs.
+
+## Current session 34 (2026-10-28)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. New branch `wip/session34-20261028` on top of `wip/session33-20261027` (neither is on main; main = d9295d5). Plan/status: DESIGN 14n session 34 (crossbow pins behind doors; ragdoll punch). Private research: work/hl2-decompiled/friendly-projectiles-20261027/notes.md (door pins), work/hl2-decompiled/ragdoll-punch-20261028 (notes.md, single-shot native recordings, track2.py/track_forward.py, vphysics decompiles).
+- **Crossbow pins to doors (owner case): ported, matches native.** BoltTouch's 128-unit trace behind a struck NPC is MASK_BLOCKLOS with the standard filter; StandardFilterRules (SDK, and retail server.dll FUN_1027c0a0 via CTraceFilterSimple::ShouldHitEntity FUN_1027bf80) never hits studio models without CONTENTS_MONSTER, so the trace passes prop_door_rotating leaves and pins against the world behind them; brush doors still stop it. Second bug: a pin retried on the tick its ragdoll is built missed it (Rapier's query tree does not hold colliders inserted that tick; an incremental refit did not help in the full map): `ragdoll_ray` now tests ragdoll solids directly. Owned test: the hall `noexit` doors sit 0.5 units in front of the world (pin), the east `station_entrance` doors have nothing within 128 units (no pin, native T092202Z). Packaged pin-hall: the cop hangs upright against the left leaf like native T104329Z (pelvis z 99; before: slumped, z 72; artifacts/s34/pin-hall.png). Commit a8d41f3.
+- **Ragdoll punch: session 33's "half of native" was a measurement error; the real shotgun bug is in multidamage.** (1) Session 33's native recordings held +attack for ~5 s (each oracle view costs ~2.8 s of screenshot overhead), so the weapon refired into the corpse (ns1 has two shotgun flashes; a 357 run had a second shot at +0.82 s), and its tracker (dark pixels, 75-degree horizontal FOV) locked onto walls and shadows. New: one cfg line "+attack;wait 3;-attack" (record_single.sh), background subtraction with the real projection (fov 75 keeps the 4:3 vertical FOV: 0.617 units/px at the floor; forward-view projection agrees with the top view within 3 units). (2) Native `ent_fire ... sethealth 1` turns the cop sideways (SetHealth self-damage; ours does not turn: AI difference, open), so the first single-shot runs measured side hits; front-facing runs leave the cop at 40 HP. (3) Front-facing A/B, 40 HP, one shot from 137 units: 357 native 122.5 units / ours 127; shotgun native 95.5, 99.2 and 95.8 (a fourth run rejected: the cop survived) / ours ~25 before the fix (our pellet batch applied each pellet separately, so the cop died on the fifth and the ragdoll got only the last pellets' force), 127-133 after (`hit_batch`: a target the batch kills takes every pellet's summed force on the last pellet's solid, ApplyMultiDamage -> one TakeDamage); SMG grenade: both corpses leave the 245-unit top view (ours 274). Shotgun is now ~33% long; native is consistent across spreads, so this is not spread variance (open).
+- **Ragdoll physics from retail vphysics.dll:** (a) death poses ported from the parked wip/session33b-20261027 (SDK death_pose.cpp: activity from the force side, frame from LastHitGroup, generic keeps the head frame; RagdollApplyAnimationAsVelocity), without its withdrawn killing-shot push; (b) C_ClientRagdoll::HandleAnimatedFriction: police.phy animatedfriction (min 1, max 1000, in 0.8 s, hold 0, out 0.5 s) drives SetAngularMotor(0, m_iCurrentFriction) on every ragdoll joint each think (models without it lose their joint friction at the first think: m_iCurrentFriction starts 0); (c) torque units: retail CPhysicsConstraint::SetAngularMotor FUN_1000c820 (vtable 0x100acee0) and InitHinge FUN_1000b110 multiply torques by DEG2RAD (0.0174533), not our x1000 x 0.0254^2: ragdoll .phy joint friction was 37x strong, phys_hinge friction 27x weak. Re-test (test-inputs/bevy-tictactoe-use-spins-block, artifacts/s34/ttt): the used block now spins briefly and settles at ~170 degrees within ~1 s (session 16/17: spun at the 3600 deg/s cap for over 6 s); native turns it about a quarter turn and settles within 0.3 s. Then env_physexplosion aims at BodyTarget -> WorldSpaceCenter (the collision bounds' center; ours used the mass center, 2 units off the hinge axis: session 17; SDK physobj.cpp): the block turns smoothly to ~176 degrees by ~1 s and the neighbour block (which also turned ~130 degrees) stays put; native's quarter turn is still not matched (open). The ragdoll constraint init's own conversion is not read (assumed DEG2RAD). Effect on the 1 HP 357/shotgun fixtures: 140/119 -> 127/118 (poses) -> 124/103 (friction).
+- Tests: hl2-simulation 369 (new: studio/brush door behind-trace, spawn-tick ragdoll ray, death poses, animated friction ramp, shotgun batch death force), strict Clippy and fmt clean. Owned suite (HL2_ROOT, --ignored): 63 pass, 0 fail (artifacts/s34/owned-suite.log; new: hall/east door traces). Regression artifacts/s34-regression (before the bounds-center aim): movement 26/26, weapons 17/17, attention 26/26; finals vs s33-regression within known variance (attention glance spots, Breen screen spot 690 px, slate exposure max 7; movement final is exposure only, same end position (-2206,-1669,36.18), Clippy ran in parallel).
+- Rejected runs kept (private ragdoll-punch-20261028): native-357-1 (held attack, refire), native-357-single-1 (separate release view arrived 2.84 s later), rejected-357-single-2 (old script after a patch error, no sethealth), native shotgun-single-2 (cop survived), front-357-1 (script edit not yet applied: sethealth, sideways); first door-pin build (query refit) still missed (bolt_misses 1).
+
+Open (next, in order):
+- Owner playtest of sessions 31-34 (ragdoll passthrough/pushes, shotgun punch at normal health, crossbow pins incl. the hall noexit door, friendly immunity + F4 toggle, dropped weapons, ragdoll fade); merge wip/session34-20261028 (contains 31-33) into main when the owner agrees; @OrbitalMan's PR #4 conflicts: owner decides the merge order.
+- Ragdolls: shotgun ~33% long (native 95.5-99.2 in three runs, ours 127-133; the 357 matches within 4%): compare per-pellet hits, the batch's force bone (last pellet's solid vs native m_nForceBone) and its death-pose hitgroup against a native probe; our pellet batches also flush on any different hit entity, but CBaseEntity::TraceAttack (SDK baseentity_shared.cpp) only calls AddMultiDamage when m_takedamage, so world/static hits between a target's pellets must not split its batch (loses force; cannot explain the overshoot); the ragdoll constraint init's torque conversion (vphysics) to confirm DEG2RAD; pistol crumple slide re-measure with the single-shot method; native SetHealth turning (AI reaction to self-damage); tic-tac-toe block: ours turns ~176 degrees vs native ~90 within 0.3 s (hinge friction/impulse; native T001349Z); prop_ragdoll map entities, zombie headcrab release, burning ragdolls, PVS out-of-view fade test.
+- Particles, NPC behaviors in campaign order and the can cop leftovers: as in the session 33 Open list below.
+
+## Current session 33 (2026-10-27)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. New branch `wip/session33-20261027` on top of `wip/session32-20261026` (neither is on main; main = d9295d5). Plan/status: DESIGN 14n session 33. Private research notes: work/hl2-decompiled/friendly-projectiles-20261027 (retail PassesDamageFilter, BoltTouch, CBreakableProp::Break), work/hl2-decompiled/shotgun-punch-20261027 (native 60 fps recordings, tracker, probes).
+- **Friendly immunity for projectiles, blasts and thrown props (owner request 2026-10-26):** `projectiles::Attacker` (none, player, entity) on every `Damage`; projectiles keep their thrower/owner (player launches, NPC grenade tosses, balls, missiles); `gameplay::damage_refused` generalizes CAI_BaseNPC::PassesDamageFilter (retail server.dll FUN_10057d20: bits_CAP_FRIENDLY_DMG_IMMUNE, attacker != self, IRelationType D_LI; outputs only for the player) to any attacker; explosive props credit m_hLastAttacker, else the player within 2 s of a physgun/+USE pickup or drop (retail CBreakableProp::Break FUN_1021ce50: 2.0); NPC impact damage names the player within 1 s (VPhysicsShadowCollision FUN_100f58e0: HasPhysicsAttacker(1.0)); NPC bullets follow the same rule (HitSource::npc); ball dissolves test the struck character's disposition toward the ball's owner. Packaged (artifacts/s33 fr-*): frag, crossbow bolt, RPG, SMG grenade and a shot explosive barrel leave a citizen at 40 HP and kill the metrocop control; a Combine soldier's flush grenade still hurts a citizen (40 -> -18.8). Rejected runs kept: fr-combine-rejected-facing (soldier spawned facing away: no enemy), -ar2 (AR2 soldier threw nothing), -occluded (citizen around the corner from the blast: 11 occluded blast targets). Commit 23641c8.
+- **Dropped weapons (owner playtest):** stunsticks collided with the player and sank half into the floor. (1) COLLISION_GROUP_WEAPON (CBaseCombatWeapon::FallInit, CGameRules::ShouldCollide): `WEAPON_GROUPS` keeps players (movement, convex SAT path, shadow), NPCs (models, hulls) and debris off dropped weapons; bullets, +USE and the gravity gun still hit them. (2) Their collider was the bind mesh, turned 90 degrees from the drawn idle pose: the .phy adapter required one identity root bone, and weapon models have rotated roots. PhysModelCreate uses a VPhysics prop's solid as stored at the entity's origin/angles; owned check (`weapon_solids_match_their_idle_pose_not_the_bind_mesh`): the w_stunbaton/w_pistol/w_irifle solids match their idle pose within 1 unit and not the bind mesh. `read_physics` now accepts any MDL 44-49 (`phy::studio_checksum`); static props keep the identity adapter. Packaged wd-walk: the player walks over a dropped stunstick (y -2520 -> -2155, no contacts); wd-look: it lies flat on the floor (artifacts/s33/wd-look.png). Unit test: player hull sweep passes a dropped weapon, rays and pick still hit it.
+- **Crossbow pins to doors (owner report): reproduced natively, not ported.** The owner's case: d1_trainstation_02 main hall, the unnamed cop #575 at (-3512,-1653) in front of the locked wooden double door `noexit` (prop_door_rotating #739/#740 at x -3464, spawnflags 2048). Native (oracle view-d1_trainstation_02-20261027T104329Z, crossbow from (-3620,-1653)): the corpse hangs pinned upright against the door (artifacts/s33/native-hall-door-pin*.png). Ours (artifacts/s33/pin-hall): it slumps to the floor, pins 0. At the station's east double door (x -3199; T092202Z, cop 40 units in front) native does not pin. SDK/retail BoltTouch (server.dll body at 0x10411d10) dispatch BoltImpact behind a struck NPC only if the 128-unit MASK_BLOCKLOS trace hits the world or a MOVETYPE_NONE entity; the door is MOVETYPE_PUSH (a bolt fired at it does not stick: T104550Z), its model contents are CONTENTS_SOLID, and CBasePropDoor::Spawn adds FSOLID_CUSTOMRAYTEST (TestCollision against its VPhysics shape). Leading hypothesis: the trace behind the cop misses the door's custom ray test and reaches the wall behind the fake `noexit` door within 128 units (the east door has open space behind). Next: retail CBasePropDoor::TestCollision and the wall distance behind both doors, then our behind-ray against prop_door_rotating.
+- **Shotgun punch (owner playtest): measured, not fixed.** Retail ammo forces equal ours (server.dll ammo table FUN_102de7f0: Buckshot 1308.7, pistol 668.0, 357 10905.7 kg in/s). Native front-facing cop, one shotgun shot at 137 units: corpse 72, 72 (stills T092602Z/T092644Z), 129 and 136 units (60 fps recordings, private shotgun-punch-20261027), airborne 0.1 s after the shot, landing ~0.35 s. Ours: 61 units, sliding at 130-160 in/s until 0.7 s. Tried: (1) pushing the new ragdoll with the killing shot's impact effects (temp entities fire after the entity update): 114 units, but **withdrawn**: retail client.dll CRagdollEnumerator::EnumElement (FUN_1012ff00) and CRagdollExplosionEnumerator (FUN_102434c0) skip ragdolls created on the current tick (SDK WasRagdollCreatedOnCurrentTick, "the forces were already applied on the server"), so session 32's skip stands; even with that double push, our SMG grenade kill reached 264 units against native ~430-500 (one recording, floor projection of the final frame). Both cases suggest our ragdoll physics answers the same impulse with about half the motion (IVP vs Rapier: contacts, friction, joint limits, inertia): next step. (2) Death poses (CAI_BaseNPC::SelectDeathPose + RagdollApplyAnimationAsVelocity; retail networks m_iDeathPose/m_iDeathFrame; ACT_DIE_* sequences exist on police/combine/citizen models): ported but parked on `wip/session33b-20261027` (unvalidated): for chest hits police `deathpose_front` folds the head forward and cut the push to 31 units; the pose convention needs a native check before it ships. Pistol at 1 HP: ours ~30 units, native ~12 (session 32): slide open.
+- Oracle (owner, twice): the engine ignores `-x/-y` and centers its window on the main monitor; run_view_oracle.py now moves every game window to ORACLE_WINDOW (-1600,180) with an async SetWindowPos as soon as it exists and logs `window_moved`/`window_rect` (verified: (-1600,180) for the whole run; about a second on the main monitor at startup remains). A synchronous SetWindowPos had blocked 3-6 s during map load.
+- Tests: hl2-simulation 365 (new: friendly refusal per attacker, barrel attacker, ball owner, dropped-weapon groups), source-assets owned weapon-solid test; strict Clippy and fmt clean. Regression artifacts/s33-regression (binary with the later-withdrawn ragdoll changes, which only act on NPC deaths, absent from these scenes): movement 26/26, weapons 17/17, attention 26/26; finals vs s32-regression within known variance (Breen/Kleiner spots, slate exposure max 9; movement final is an exposure difference: tonemap 1.69 vs 1.92 after 11 instead of 27 readbacks because the owned suite ran in parallel; same final position). Owned suite (HL2_ROOT, --ignored): 62 pass, 0 fail (artifacts/s33/owned-suite.log).
+
+Open (next, in order):
+- Owner playtest of sessions 31-33; merge wip/session33-20261027 (contains 31-32) into main when the owner agrees; @OrbitalMan's PR #4 conflicts: owner decides the merge order.
+- Ragdolls: shot and blast kills move about half of native (shotgun 61 vs 72-136, SMG grenade ~half): measure our ragdoll's response to a known impulse against native (IVP vs Rapier contacts/friction/joint limits/inertia), then CalculateExplosiveDamageForce from the base damage and RadiusDamage's DispatchTraceAttack force bone; validate the parked death poses (wip/session33b-20261027) against native; native A/B with the recording method (record_punch.sh: FIRE=attack2, ORACLE_SETUP give item_ammo_smg1_grenade); pistol crumple slide (~30 vs native ~12 units); door pins if the owner names a case; prop_ragdoll map entities, zombie headcrab release, burning ragdolls, PVS out-of-view fade test.
+- Particles: timed native capture, studio hitboxes, remaining burning_fx operators, other PCF effects, gas-can bursts igniting NPCs.
+- **NPC behaviors still to port, in campaign order (owner list 2026-10-27: every NPC's own attacks, not only equipped weapons):**
+  - Zombies: npc_zombie door bashing and swatting physics props at the player, ambush/slump wake-up, headcrab release on death (RELEASE_RAGDOLL/RELEASE_IMMEDIATE), torso split into npc_zombie_torso on blast/heavy damage (and its crawling attacks); npc_fastzombie leap attack, gallop, scream, climbing (pipes/climb nodes), fast torso; npc_poisonzombie throwing its black headcrabs (up to 3) and melee.
+  - Headcrabs: npc_headcrab leap/bite, burrow and unburrow, ceiling drop; npc_headcrab_fast quick jumps; npc_headcrab_black poison bite (to 1 HP, then regeneration), jumping off poison zombies.
+  - npc_barnacle: tongue grab and lift, eating, releasing on damage, grabbing props/NPCs.
+  - Metropolice: manhack deployment (cops dropping manhacks), rappelling from roofs (also Combine soldiers), arrest/harass leftovers.
+  - Combine soldiers: melee kick at close range, shotgun soldiers, elite AR2 balls (done), squad flanking/hiding (partial).
+  - npc_manhack: flight, slicing melee, swarming; player gravity-gun use as a weapon. npc_cscanner: photo flash blinding, inspecting, following, divebomb when damaged. npc_clawscanner (shield scanner): carrying and dropping combine_mine hopper mines; combine_mine bounce/arm/explode.
+  - npc_rollermine: rolling chase, jump, shock, vehicle latching, physgun pickup/throw.
+  - npc_ichthyosaur: underwater charge and bite. Birds (crow/pigeon/seagull): flee and fly.
+  - Antlions: leap/jump, melee, burrow/unburrow, short flight, thumper repel, bugbait control and following; npc_antlionguard charge, shove, prop knocking, summoning antlions.
+  - Vortigaunt: electric zap attack, HEV suit charging. Citizens: medics healing, ammo giving, squads following the player, RPG citizens (partial), weapon pickup.
+  - Combine machines: npc_turret_floor (auto-fire, knock-over, carried turrets), npc_turret_ceiling (deploy/retract), npc_combine_camera (alarm), npc_sniper (laser sight, shots), npc_stalker beam.
+  - Vehicles/flyers: npc_helicopter (chain gun, dropped bombs, mega bomb, crash), npc_combinegunship (belly gun, rotor wash, RPG dodge, crash), npc_combinedropship (troop/APC/container delivery, container gun), APC (rockets, machine gun).
+  - npc_strider: pulse minigun, warp cannon, impaling/stomping NPCs, crouch and stand, walking over the city, explosive-only damage, death.
+  - npc_dog (throwing props/cars, fetch), npc_alyx/npc_barney/npc_monk combat leftovers; scripted characters (Breen, G-Man, Kleiner, Eli, Mossman) beyond scenes.
+- Can cop leftovers and the session 28 Open list.
+
+## Current session 32 (2026-10-26)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. New branch `wip/session32-20261026` on top of `wip/session31-20261022` (neither is on main; main = d9295d5). Plan/status: DESIGN 14n session 32. Private research notes: work/hl2-decompiled/ragdolls-20261026 (retail decompiles and native logs).
+- **Owner playtest of session 31 (2026-10-26), ragdolls.** (1) **Ragdolls blocked the player: fixed.** The player's hull trace has a separate convex SAT path whose collision-group exclusion list missed the ragdoll group (the Rapier filter already excluded it). Unit test: a player hull sweep through a ragdoll is unobstructed (it failed before the fix). Packaged rd-walk: the player walks from y -2520 to -2155 straight through a cop corpse at -2352. (2) **Death force ("only the revolver punches"):** SDK ammo forces are as before (357 BULLET_IMPULSE(800, 5000) ~ 10,900 vs pistol/SMG/AR2 (200, 1225) ~ 670 per bullet: 16x, by design). The shotgun was wrong: only the killing pellet counted. Now FireBullets' multidamage order: pellets on one target add up and apply when a pellet hits a different target (AddMultiDamage -> ApplyMultiDamage) or after the last pellet; pellets after a kill in the same shot pass through the corpse and add their force to it. Owner note: session 31 already let pellets through lined-up cops (damage per pellet, hitboxes off at death); my intermediate trace-all-first version blocked them and was never shipped. Packaged rd-lineup: one shotgun shot kills two lined-up cops. The force solid is m_nForceBone (the last bullet hit's solid; the root for blasts without one); blasts add CalculateExplosiveDamageForce's and CalcDamageForceVector's random fudges; crossbow kills carry CalculateMeleeDamageForce x 0.7 (21,000). (3) **Ragdolls react after death:** client ragdoll effects per tick: FX_AffectRagdolls for every bullet/club trace (4000 kg in/s on the root solid at start + fraction x (hit - start); skipped for ragdolls created this tick and while more than one ragdoll simulates), C_TEExplosion::AffectRagdolls ((dir x (magnitude - magnitude/radius x dist) + 32 up) x 500 at the root, in line of sight). **Retail differs from the 2013 SDK source:** client.dll C_ClientRagdoll::ImpactTrace (FUN_100a5510) scales blasts by 500, not 4000; the shot constant (4000) and the double-fraction point match. Packaged: rd-corpse-shots 8 pushes (corpse moves 14 units over 8 pistol shots); rd-corpse-frag 1 blast push, the corpse is thrown ~500 units by a frag ~40 units away (velocity clamp 2000 u/s; **not native-verified**). Ragdolls stay out of every server trace and projectile sweep (no meat shields). (4) **Crossbow pinning:** SDK client/c_stickybolt.cpp StickRagdollNow / CRagdollBoltEnumerator, confirmed in retail client.dll (FUN_1023cf20: MASK_SHOT clip, mass x2, CreateBallsocketConstraint, Weapon_Crossbow.BoltSkewer): every BoltImpact (bolt stuck in the world, also behind a struck NPC) pins the first ragdoll solid within 128 units in front of the wall point with a ball-socket to the world. The bolt's kill reaches the damage list a tick after its impact, so an unmatched BoltImpact retries once. Packaged: rd-bolt-kill (cop at the north wall, AI off): the corpse hangs on the wall (pelvis z 166); rd-bolt-corpse: a pistol-killed corpse pinned to the floor by a steep bolt (shallow bolts ricochet: hit dot < 0.5, as BoltTouch). Screenshot artifacts/s32/bolt-pins.png.
+- **Native A/B of death forces (owner request; oracle, metropolice, sethealth 1, same camera; corpse displacement from the spawn spot, pixels projected to the floor):** sideways (yaw 0, native npc_create): shotgun native ~73 / ours 47 units, pistol ~12 / 31; front-facing (native npc_create_aimed, ours angles 0 270 0): shotgun ~83 / 107, pistol ~11 / 29 (artifacts/s32/ab-cop-sideways.png, ab-cop-front.png). The shotgun is within ~25 units either way (one random spread each): not overbroad. Ours drifts ~18 units more while crumpling after a pistol kill (likely landing slide/friction; open). Rejected runs: the first oracle run timed out waiting for the map (load evidence only); the next two shot a citizen, which HL2 never lets the player hurt (see below). Frag A/B (frag 1 kills a 1-HP cop, frag 2 by the corpse; native view-d1_trainstation_02-20261026T164645Z, ours ab-frag-corpse): **inconclusive**: native frags rolled out of range (the cop survived both), ours killed the cop with frag 1 (corpse thrown ~135 units) but frag 2 rolled to y -1927. Thrown frags cannot place a blast next to a corpse; next attempt: a placed explosion (native `ent_create env_explosion` + Explode; our ent_create does not create env_explosion yet).
+- **Friendly damage (owner: Gordon can't hurt friendlies):** our player's bullets and clubs killed citizens. Now CAI_BaseNPC::PassesDamageFilter: NPCs with bits_CAP_FRIENDLY_DMG_IMMUNE (citizens, Alyx, Barney, vortigaunts, fisherman, Kleiner, Eli, Mossman, Monk, Breen, G-Man, Dog, Magnusson) refuse the player's damage while the player likes them (default table: CLASS_PLAYER -> CLASS_CITIZEN_PASSIVE/REBEL D_LI); no impact/decal (m_fNoDamageDecal), OnDamagedByPlayer/OnDamagedByPlayerSquad fire, blood from TraceAttack stays. Packaged rd-friendly: a citizen keeps 40 HP after three pistol hits. Debug option (owner request): F4 overlay options row "player hurts friendlies" (status line in the F1 overlay). Not done: the player's projectiles and blasts (frags, bolts, RPG) still hurt friends (Damage carries no attacker), ai_relationship overrides are not consulted, weapon lowering at friends not ported.
+- Oracle: run_view_oracle.py now opens the native window on the second monitor (`-x -1600 -y 180`, env ORACLE_WINDOW; owner request).
+- Tests: hl2-simulation 361 (new: player hull through a ragdoll, ragdoll ray/impulse/pin, multidamage death force), hl2-bevy (only the two known release-only should_panic image tests fail), strict Clippy and fmt clean. Regression artifacts/s32-regression (d554876): weapons 17/17, attention 26/26, movement 25/26 (known doll01); finals vs s31-regression-b within known variance (Breen slate exposure max 12, monitor max 8, small glance/Kleiner spots). Owned suite (HL2_ROOT, --ignored): 61 pass (artifacts/s32/owned-suite.log).
+- **Ragdoll fade (retail LRU):** retail client.dll CRagdollLRURetirement::Update (FUN_101aa3a0) runs the SDK's episodic or non-episodic algorithm by the hl2_episodic ConVar; HL2 (0) takes the non-episodic one: beyond g_ragdoll_maxcount 8, the oldest ragdoll outside the view starts fading (one per update), else the oldest ones until the count fits; fading ragdolls lose g_ragdoll_fadespeed 600 alpha/s (kRenderTransAlpha) and are released at 0. Ours: `Ragdolls::retire` with a frustum-only out-of-view test (the view-cluster PVS test is not modeled; burning ragdolls are not exempt yet), the host blends the NPC's materials (`present_ragdoll_fades`; the eyes do not fade). Unit test: ten corpses, the one behind the player fades first, then the oldest; both released after ~0.43 s. Packaged rd-fade (ten cops killed in one tick with `ent_fire c1 sethealth 0`): the two oldest fade (all in view) and are released ~0.43 s later (active 10 -> 8). SetHealth on NPCs now lowers health to zero through the entity damage path (InputSetHealth -> TakeDamage DMG_GENERIC), so it kills like the SDK (before, it set health 0, which our NPC damage reads as "unset").
+- Commits: d554876 (session 32 fixes), then the ragdoll fade and docs.
+
+Open (next, in order):
+- Owner playtest of sessions 31-32 (ragdoll passthrough, shotgun/frag/bullet pushes, crossbow pins, friendly immunity + F4 toggle); merge wip/session32-20261026 (which contains session 31) into main when the owner agrees; @OrbitalMan's PR #4 (377 files incl. hl2-simulation entities/ai splits) conflicts with both branches: owner to decide the merge order.
+- Ragdolls: native A/B of a corpse blast push with a placed env_explosion (add env_explosion to our ent_create) and of a crossbow pin; pistol crumple drift (friction/landing); PVS out-of-view test, eye fade and burning exemption; prop_ragdoll map entities (d1_trainstation_04's ragdoll_cop templates + env_physexplosion, station03's dead citizen, mattresses); zombie headcrab release (RELEASE_RAGDOLL: a headcrab client ragdoll + headless body; RELEASE_IMMEDIATE needs the live npc_headcrab); burning ragdolls (IgniteRagdoll moves the flame to the ragdoll); friendly immunity for the player's projectiles/blasts (owner asked for it 2026-10-26, deferred at 88% of the 5-hour window): add the attacker (player flag) to `projectiles::Damage` (17 construction sites in entities, fire, gameplay, impact_damage, phys_explosion, projectiles, weapon_crossbow, weapon_physcannon), carry the thrower/owner on each projectile into `grenade_explosion` (shared by player frags, NPC grenades and prop explosions), then call `player_damage_refused` in the entity damage path (SDK: CBaseGrenade::Explode, CMissile and CCrossbowBolt name the player as attacker, so PassesDamageFilter refuses).
+- Then the session 31 Open list: particles (timed native capture, studio hitboxes, remaining operators), natural attacks (fast zombie, headcrabs, torso split, poison crab throws), can cop leftovers.
+
+## Current session 31 (2026-10-22)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. **Owner approved the merge (playtest done): main = d9295d5** (no-ff merge of `wip/squads-20261022`, sessions 28-30). New work on `wip/session31-20261022` (named by session; the squads branch had grown well past squads). Plan/status: DESIGN 14n session 31.
+- **Owner question: was squad functionality implemented?** Yes, in session 28: squad membership (squadname, FindCreateSquad, MAX_SQUAD_MEMBERS), fixed GetLeader (silent members, enemy finders), enemy-memory sharing and copy on join, SquadNewEnemy, NotifyDeadFriend lines (MAN_DOWN / LAST_OF_SQUAD), the squad sound gate and the cops' idle question/answer exchange (DESIGN 14n session 28 steps (1)-(4)). Not done: strategy slots (attack/grenade slots), AnnounceEnemyType/FLANK/GREN.
+- **Performance report (@OrbitalMan: FPS ~4 while the can cop chased him to the street ladder): cause found and fixed.** Owned measurement (`assets::owned_route_cost`, d1_trainstation_02, routes from the can cop's post to all 386 graph nodes): one failed route took ~1.9 s (1002 link probes); successful long routes took 0.3-1.6 s. Our A* validated every expanded link with a stepped hull `ground_move` (~1.9 ms each). The nodes south of the street (-3744..-3616, -5264..-5088) are disconnected from the cop's component, so each failed chase swept the whole component, and the cop re-requested about 10 times a second (SCHED_CHASE_ENEMY <-> WARN_TARGET). SDK ports: (1) CAI_Pathfinder::IsLinkUsable uses link data only. Links an NPC fails to walk are marked stale (MarkCurWaypointFailedLink: 4 s) and rechecked once per plan (IsLinkStillStale/CheckStaleRoute: +1 s while still blocked); route doors are probed when the actor reaches the segment. Difference: ours does not mark links on player blocks (the SDK marks everything but NPC blocks); the player-obstruction hold/retry is kept. (2) RememberUnreachable/IsUnreachable (3 s, 120 units) on TASK_GET_PATH_TO_ENEMY/_LKP failures; the chase task chains them by the 300-unit LKP rule; ForceChooseNewEnemy; COND_ENEMY_UNREACHABLE (on a node network); BestEnemy puts reachable enemies first; an unreachable unseen enemy whose LKP is out of sight is eluded. After: worst failed route 10.5 ms, no link probes; packaged can-cop catwalk chase (artifacts/s31/cancop-catwalk): about 10 plan requests per second (~6 ms each) before, one per ~3 s after. cancop-throw-dense, retarget-zombie and retarget-soldier keep their session 30 outcomes (3 baton hits, 8 claws, soldier retarget), and mean step time fell by ~25% (5.8 -> 4.5 ms, 6.1 -> 4.6, 7.1 -> 5.3). Not reproduced: the exact 4 FPS frame on the report's machine (my two packaged placements, catwalk and ladder well, cost ~6 ms per request or lost sight; the owned measurement is the evidence). Reports carry `npc_paths` (plans, failures, link_probes, micros).
+- Tests: hl2-simulation 357 (+ unreachable memory, BestEnemy reachability, stale link); strict Clippy/fmt; owned route-cost guard (no link probes, worst failure < 250 ms). Regression artifacts/s31-regression: weapons 17/17, attention 26/26, movement 25/26 (known doll01); finals vs s30-regression-b within known variance (attention glance 73 px, monitor 653 px max 6, Breen slate 9 px).
+- **Ragdolls (owner request; DESIGN 14n session 31 ragdolls): NPC deaths become physics ragdolls.** Per-bone PHY solids in bone space (owned test: every solid sits on its bone in the reference pose), Rapier jointed bodies with the authored limits/mass/damping, collision rules, the death force nudge (bullets, clubs, blasts), client-ragdoll collision (world and props block them, props are not pushed, traces/player/NPCs ignore them), the skinned mesh and eyes driven from the bodies, max 8. Packaged (artifacts/s31, hall, pistol): ragdoll-citizen (dies, pelvis from z 101 down to the floor at ~82, pushed away from the shooter), ragdoll-cop (crumples, pistol dropped beside him), ragdoll-zombie (crumples; headcrab still on: release not done). First attempt rejected: the bodies were placed from skinning matrices instead of bone poses (all solids at the feet inside each other; the pelvis was thrown 114 units up and slid 90 units sideways). Bodies start with the NPC's root velocity over the last tick (RagdollApplyAnimationAsVelocity approximated by root motion; per-bone animation velocity not done; a moving death is **not tested**: the fixture zombie was nearly still). Not done: per-bone animation velocity, hit-bone force mapping (nearest solid), fade, prop_ragdoll map entities, headcrab release, burning ragdolls; native A/B of how bodies fall **not tested**. Unit test: two-body ragdoll falls jointed within limits and stays out of traces. Owned suite (HL2_ROOT, --ignored): 61 pass (new: route-cost guard, ragdoll solids on their bones). Regression artifacts/s31-regression-b (ragdoll build): weapons 17/17, attention 26/26, movement 25/26 (known doll01), 0 pose/visibility mismatches; finals vs s31-regression within variance (Breen slate whole-frame exposure shift, mean 60.5 -> 63.1, same content: artifacts/s31/breen-slate-ab.png; attention glance 89 px; Kleiner 9-17 px).
+- **Particle operators from the SDK's compiled particle library (prompt step 4):** the Source SDK 2013 clone ships `particles.lib` (x64, Valve's compiled particle code; object files keep symbols). The operator objects were linked into an analysis-only DLL with a map (private work/hl2-decompiled/particles-20261022/README.md) and decompiled by address; the DMX unpack tables give each parameter's default and field offset. Ported into `pcf_runtime`: Radius Scale (only particles in [start, end) change; easing replaces the bias; Schlick bias f/((1/b-2)(1-f)+1), not the power form), Alpha Fade In/Out Random (a per-particle random fade time r^exponent x (max-min)+min, not the midpoint; proportional defaults on; fade-in spline unless "fade in curve exponent" is set; fade-out spline by default ("ease in and out" defaults to 1), else 1 - bias), Color Fade (skipped when start == end), Movement Basic drag ((1-drag)^(30 dt), frame-rate independent; the exp/log reading is inferred from the call shape). Packaged barrel-burn (artifacts/s31/burn-s30-vs-s31.png): narrower, taller column than session 30, closer to the native frame; single random frames, not frame-verified. The library is the 2025 SDK build; byte equality with the retail client.dll is **not verified**. Position on Model Random now follows the SDK's CParticleSystemQuery::GetRandomPointsOnControllingObjectHitBox (game/shared/particlesystemquery.cpp; C_INIT_CreateOnModel passes "force to be inside model" as the try count and "hitbox scale"/"direction bias"): the best of tries + 1 random hitbox points scored U(0,72) + dot(point - CP, bias) + 1000 inside; our hitbox is still the model's world bounds (one box). Native A/B (artifacts/s31/burn-native-vs-s31.png: native ignite frame vs ours before/after) is **inconclusive**: the native frame was taken right at ignition (few young particles) and the barrels sit at different distances; ours looks larger relative to the barrel. Next: a timed native capture 1-2 s after ignition, studio hitboxes for props, Lock to Bone, the noise initializers, render_animated_sprites dual sequences.
+
+- Branch: `wip/session31-20261022` (pushed; head after the closing docs commit), on top of main d9295d5. Commits 0ce8e66 (route cost + unreachable memory), 6fbed5c (ragdolls), cffa087 (particle operators), ef93e33 (position on model), c68a4f9 (ragdoll root velocity). Regression batches: artifacts/s31-regression (route build), artifacts/s31-regression-b (ragdoll build; the next batch diffs against it). The particle and root-velocity commits came after the batches (unit/owned tests and packaged fixtures only).
+
+Open (next, in order):
+- Owner playtest of session 31 (can cop chase to the street ladder: FPS; NPC deaths: ragdolls of citizens/cops/soldiers/zombies; burning barrels); merge wip/session31-20261022 into main when the owner agrees. Ask @OrbitalMan (via the owner) to retest the ladder chase on macOS.
+- Ragdolls: a moving-death fixture (running cop/soldier) for the root velocity; native A/B of a death fall (oracle: npc_create + kill); prop_ragdoll map entities (campaign dead bodies, step (d)); ragdoll fade; per-bone animation velocity; hit-bone force mapping; then zombie headcrab release (RELEASE_RAGDOLL: headcrab ragdoll gib + headless body; RELEASE_IMMEDIATE needs the live npc_headcrab of the natural-attacks step) and burning ragdolls.
+- Particles: a timed native capture 1-2 s after ignition (the session 30 native frame was taken at ignition); studio hitboxes for props in Position on Model Random; the remaining operators from particles.lib (Lock to Bone, Velocity/Remap Noise, Lifetime Pre-Age Noise, Position Modify Warp, random force, emit_continuously, render_animated_sprites dual sequences); other PCF effects (blood_impact, fire_01, rocket_fx); gas-can burst igniting NPCs.
+- Natural attacks in campaign order: npc_fastzombie (run, leap, climb), npc_headcrab (leap attack), torso split, poison zombie crab throws; then scanners/manhacks, antlions + bugbait.
+- Can cop: the thrown can's bounce into throwcan_trigger (native: same aim, no trigger); a native knock-out branch recording; cop chatter rate (native 1 vs ours 6 lines a minute; retail GatherConditions/NPCThink). The session 28 Open list leftovers. Player blocks still do not mark graph links stale (SDK does): revisit if NPCs keep pushing into the player.
 
 ## Current session 30 (2026-10-22)
 
@@ -2522,6 +2728,7 @@ One list of priorities, with claims: an item someone takes gets a GitHub issue a
 - Done: macOS support (install discovery, POSIX build/launch scripts), PR #1 by @OrbitalMan, merged 2026-10-07 (ad480e1) after Windows CI passed.
 - Done: HDR lightmap/sky image format fix, PR #2 by @OrbitalMan, merged by the owner 2026-10-08 (dc429c5).
 - Main menu with settings (menus in hl2-ui, wiring in hl2-bevy, settings persisted next to the build; video, audio, mouse/keys, later "High Dynamic Range: None/Full"): @OrbitalMan, [issue #3](https://github.com/kvalls/hl2-rs/issues/3) (opened 2026-10-08). Keep other work out of the hl2-ui menu code and its hl2-bevy wiring meanwhile.
+- HL2 UI and Options implementation (menus, dev console, graphics/gameplay options, guardrails): @OrbitalMan, [PR #4](https://github.com/kvalls/hl2-rs/pull/4) (opened 2026-10-26 against main, 100 commits, 377 files; it also splits hl2-simulation entities.rs/ai runtime.rs and rewrites hl2-ui console.rs). Session 32 kept new commands out of console.rs (F4 option instead).
 - Save/load: deferred by the owner (2026-10-07) until entity/scene state settles; start with a design issue when it resumes.
 
 Native oracle (private work/hl2-decompiled/original-oracle): run_view_oracle.py <map> label=x,y,eyez,pitch,yaw[,fov] and run_security_gesture_oracle.py. Owner-verified cursor-safe setup (2026-10-07): -nomouse (SDK Init_Mouse returns early) + +cl_mouseenable 0 + the game window disabled (EnableWindow FALSE, WS_EX_NOACTIVATE) on appearance + focus guard + ClipCursor release. Earlier runs trapped the cursor (sessions T040936Z rejected, T053505Z had 91 focus grabs).
