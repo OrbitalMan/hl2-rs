@@ -44,7 +44,7 @@ pub struct LineEditor {
     search: Option<(String, usize)>,
 }
 
-fn char_index(text: &str, chars: usize) -> usize {
+pub(super) fn char_index(text: &str, chars: usize) -> usize {
     text.char_indices()
         .nth(chars)
         .map_or(text.len(), |(i, _)| i)

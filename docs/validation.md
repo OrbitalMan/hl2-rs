@@ -1,6 +1,6 @@
 # Caption viewport repair (2026-10-29)
 
-`cargo test -p hl2-ui closecaption --locked`: 14 passed, one owned-install test ignored. Long styled streams stay within the authored panel at 1x, 1.5x and 2x; resizing reflows cached work and style boundaries do not increase the panning step count. Packaged visual capture pending final package.
+`cargo test -p hl2-ui closecaption --locked`: 15 passed, one owned-install test ignored; the owned Episode One resource/font check also passed when run explicitly. Long styled streams stay within the authored panel at 1x, 1.5x and 2x; resizing reflows cached work and style boundaries do not increase the panning step count. The style-boundary negative control failed before the fix: the first bold glyph began at x=24 with width=7 in a 24-pixel line. It now wraps before that glyph. Packaged visual capture pending final package.
 
 # Local validation — 2026-10-05
 

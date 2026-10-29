@@ -1,5 +1,18 @@
 # MODLOG
 
+## 2026-10-29 Caption style-boundary regression and console draw allocation
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** An empty styled run now honors a pending line break. A targeted case with a style boundary exactly at the right edge reproduced a glyph escaping the caption viewport before the repair. Console selection drawing borrows UTF-8 spans instead of allocating strings for each colored span.
+
+**Tested how / Result:** The new caption test failed before the repair (glyph at x=24 with width=7 in a 24-pixel line), then passed; `cargo test -p hl2-ui closecaption --locked`: 15 passed, one ignored. The owned Episode One caption resource/font check passed separately. Toolkit tests: 134 passed. Final workspace validation and strict Windows checks passed.
+
+**Still broken or not tested:** Native runtime comparison and interactive desktop clipboard roundtrip not tested.
+
+**Next:** Finish packaged captures and weapon-blur evidence.
+
+
 ## 2026-10-29 Console input selection and clipboard editing
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

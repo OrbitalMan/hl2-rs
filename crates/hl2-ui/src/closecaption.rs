@@ -310,9 +310,14 @@ struct Params {
 }
 
 impl Params {
-    /// AddWorkUnit: an empty chunk adds nothing and keeps the position and newline flag.
+    /// Flush the current styled run and honor line breaks even at style boundaries.
     fn add(&mut self, item: &mut Item, tall: f32) {
         if self.out.is_empty() {
+            if self.newline {
+                self.newline = false;
+                self.x = 0.;
+                self.y += tall;
+            }
             return;
         }
         let unit = WorkUnit {

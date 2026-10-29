@@ -74,9 +74,13 @@ impl ConsolePanel {
             ],
         };
         for (span, color) in spans {
-            let shown: String = chars[span.clone()].iter().collect();
+            if span.is_empty() {
+                continue;
+            }
+            let from = super::super::editor::char_index(&line, span.start);
+            let to = super::super::editor::char_index(&line, span.end);
             text(
-                &shown,
+                &line[from..to],
                 inner_x + width(start, span.start),
                 row_top + (CONSOLE_ROW - CONSOLE_DESCENT) * scale,
                 color,

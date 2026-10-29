@@ -419,3 +419,12 @@ fn panning_counts_lines_instead_of_color_and_style_runs() {
         super::paint::pan(&styled, 60., 12., 0.5)
     );
 }
+
+#[test]
+fn a_style_boundary_at_the_right_edge_wraps_before_the_next_glyph() {
+    let mut unit = item("aaaa<B>bbbbbbbb", false);
+    compute_work(&mut unit, 24., &Fixed);
+    for run in unit.work.as_ref().unwrap() {
+        assert!(run.x + run.width <= 24., "{run:?}");
+    }
+}
