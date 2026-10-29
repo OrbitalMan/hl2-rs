@@ -2,6 +2,8 @@
 
 ## Loaded gesture tags, duration and server flex filtering (2026-10-29)
 
+Private CK statically binds stored-float probe sites and the processor's reused stack slots with12 PE anchors/four call edges/three corruption controls. It adds no new decompiler body or runtime evidence. Original info/scene identities must survive separately from the stack slots later reused for scene time/duration; instruction-hook semantics remain fixture-unverified.
+
 CF binds retail normalized event progress through two loaded absolute-tag lists: playback percentages select an interval and original percentages supply the mapped cycle, with linear endpoint flags or a normalized-X Catmull-Rom branch. CJ follows an actual captured event vtable pointer into the identity-matching PE, resolving slot0 to finite end-minus-start or zero for the end sentinel -1. The caller stores the duration as float32 before division. The live vtable slot/getter invocation and full native floating-point control remain unobserved.
 
 Fresh CG/CH supplies stronger source-state evidence than CA: hashes of local collector code before launch/after cleanup, choreography/tag rereads and repeated selected source graphs within the native tick bracket. All102 accepted graphs bind direct root and cached male_gestures identity; selected 100-byte animation descriptors agree with owned metadata. Among145 loaded-tag observations, names/percentages agree with the authored arrays, while loop/end linear bits change before/after active layer association. That association is not callback causality; high flag bits remain uninterpreted. Ordinary pose, ANI decoding and blend evaluation remain untested.

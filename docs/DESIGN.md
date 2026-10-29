@@ -2,6 +2,8 @@
 
 ## Loaded gesture timing findings and next boundary (2026-10-29)
 
+CK preflight identifies explicit stored-float probe sites and argument-slot reuse in the exact processor. Original info/scene stack slots become scene-time/duration floats before the remap call. Preserve original identity separately; do not interpret those later slots as pointers or an integer return-value handle as floating-point result evidence. Disposable-fixture proof of instruction-hook context, relocation and reentrancy remains required before HL2 instrumentation.
+
 The fresh guarded capture now retains loaded tag names/percentages/linear flags, scene-clock rereads and repeated gesture source witnesses. Interpret stored cycles using the actual tag state: native setup can change linear flags, and simple event progress is not the complete mapping. The exact duration getter returns end-minus-start except its -1 end sentinel; the caller rounds that result into float32 before division. These findings guide a future implementation, but this research changes no Rust code.
 
 All tested sampled-clock hypotheses still disagree with some recorded cycles, even after accounting for the layer access timestamp. Next use a finite, fixture-validated paired recorder on the selected gesture callback/remap/cycle setter to retain actual inputs, outputs and nesting. Reuse exact event/actor/module admission, bounded file-backed storage, explicit footer/cleanup and negative controls. Do not substitute another fitted time shift or expand into final-pose/next-map claims. Keep the conditional server flex filter separate from client facial evaluation; unchanged server face slots are not an absence-of-animation result.
