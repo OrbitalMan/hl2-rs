@@ -1,5 +1,9 @@
 # STATUS
 
+## Map loading optimization baseline (2026-10-29)
+
+Serial loader stages and CPU installation/request latency are now recorded in render.map_metadata.loading_ms. Portable/Windows checks and packaged base/expansion background plus gameplay captures pass. Exploratory worker totals are 2.35/2.05/2.67 seconds; audio accounts for 1.03/0.87/1.26 seconds, models about 0.7 seconds, and main-thread scene installation 0.34–0.52 seconds. Baseline retained before optimizations. Startup stub currently duplicates gameplay/audio preparation; next work removes it, overlaps preparation, defers background audio safely, cancels superseded work and reuses content with override-safe cache identities. These single runs do not establish comparative performance.
+
 ## Forced-normal artwork camera matching (2026-10-29)
 
 The saved blur override now also selects the background camera baseline: enabled caps the authored horizontal view at 4:3 and follows the normal artwork's center-crop; disabled retains the original FOV calculation exactly. Startup, live commands and debug readout/reset/aspect changes share this policy. Changing the flag clears temporary debug FOV tuning; ordinary config updates retain it. Gameplay FOV is unaffected.

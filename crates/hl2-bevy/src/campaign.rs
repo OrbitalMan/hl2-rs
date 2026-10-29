@@ -33,6 +33,7 @@ type ResultSlot = Arc<Mutex<Option<Result<assets::LoadedMap, String>>>>;
 struct Job {
     request: Request,
     result: ResultSlot,
+    started: std::time::Instant,
 }
 #[derive(Resource, Default)]
 pub struct Campaign {
@@ -131,8 +132,8 @@ pub fn poll(
         if loading::reuse_background(&request, &campaign, &mut ui, &mut sim) {
             return;
         }
-        let result = match loading::spawn_worker(&request, &options, &ui) {
-            Ok(result) => result,
+        match loading::begin(request, &options, &mut ui, &mut sim) {
+            Ok(job) => campaign.job = Some(job),
             Err(error) => {
                 ui.source.log(&error);
                 ui.source.loading_failed(&error);
@@ -140,11 +141,7 @@ pub fn poll(
                 sim.loading_failed();
                 return;
             }
-        };
-        loading::log_debug_load_start(&request, &mut sim, &mut ui);
-        loading::start(&request, &mut ui);
-        sim.loading = true;
-        campaign.job = Some(Job { request, result });
+        }
     }
     let Some((job, result)) = loading::completed(&mut campaign, &mut ui) else {
         return;
@@ -202,21 +199,13 @@ pub fn poll(
             &job.request.landmark,
         )
     };
-    if !job.request.direct {
-        // changelevel keeps the global table and the player's damage state.
-        let previous = game.scene.globals.clone();
-        loaded.gameplay.scene.globals.carry(&previous);
-        carry_player_state(&mut loaded.gameplay, &mut game);
-        loaded.gameplay.inventory = std::mem::take(&mut game.inventory);
-        loaded
-            .gameplay
-            .inventory
-            .rebase_clock(game.scene.time, loaded.gameplay.scene.time);
-    }
+    loading::carry_state(&job.request, &mut loaded, &mut game);
     loaded.gameplay.consume_attacks();
     campaign.history.push(serde_json::json!({"from":game.world.name,"to":loaded.world.name,"direct":job.request.direct,"landmark":job.request.landmark,
         "previous_eye":previous_eye.to_array(),"arrival_eye":eye.to_array(),"inventory":loaded.gameplay.inventory,"previous_time":game.scene.time}));
     campaign.metadata = assets::map_metadata(&loaded);
+    campaign.metadata["loading_ms"]["request_to_worker_ms"] =
+        (job.started.elapsed().as_secs_f64() * 1000.).into();
     campaign.loaded_map = Some(hl2_ui::console::GameMap::new(
         &loaded.game,
         &loaded.world.name,
@@ -246,6 +235,7 @@ pub fn poll(
     loading::log_debug_load_finish(&job.request, true, &mut sim, &mut ui);
     ui.source
         .log(format!("Loaded {}/{}", loaded.game, loaded.world.name));
+    let install_started = std::time::Instant::now();
     crate::map_install::install_loaded_map(
         loaded,
         &mut commands,
@@ -255,6 +245,10 @@ pub fn poll(
         ui.source.config.video.advanced.filtering,
         frame.as_ref().map(|f| &f.image),
     );
+    campaign.metadata["loading_ms"]["install_ms"] =
+        (install_started.elapsed().as_secs_f64() * 1000.).into();
+    campaign.metadata["loading_ms"]["request_to_installed_ms"] =
+        (job.started.elapsed().as_secs_f64() * 1000.).into();
     crate::capture::installed_frame(&mut commands, options.capture.as_ref());
 }
 

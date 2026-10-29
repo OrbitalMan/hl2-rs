@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-29 Map-loader timing baseline
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** Extracted serial map preparation into a bounded loader module and smaller helpers without changing load policy; tightened architecture debt. Reports now retain per-worker stage milliseconds plus request-to-worker and request-to-installed CPU timings. This establishes a packaged baseline before parallel/deferred/cached work.
+
+**Tested how / Result:** Workspace validation, strict Windows checks and release build pass. Muted isolated default-detail Metal captures at 1024x768 load base background01, Episode Two ep2_background01 and gameplay d1_trainstation_02. Worker totals: 2353.5/2047.8/2670.9 ms; audio 1031.4/874.8/1255.6; models 746.8/701.8/705.4; materials 242.1/144.2/246.5. Request-to-installed CPU totals: 2970.6/2477.5/3203.7 ms. These are single exploratory samples, not a speedup comparison; the baseline package/reports/captures are retained in ignored artifacts. Main-thread installation remains 516.3/339.4/418.3 ms, excluding deferred GPU work. Live GitHub claims refresh unavailable (gh absent; API request unavailable); existing local UI integration claim reviewed.
+
+**Still broken or not tested / Next:** Loading behavior is unchanged. Remove heavy startup-stub duplication, overlap independent preparation, support cancellable background late audio, and cache verified reusable content. Measure repeated alternating pairs after changes; Windows GPU runtime not tested.
+
 ## 2026-10-29 Match background camera FOV to forced normal artwork
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

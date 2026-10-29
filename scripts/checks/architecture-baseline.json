@@ -181,7 +181,6 @@
   "fed629d3999b"
  ],
  "files": {
-  "crates/hl2-bevy/src/assets.rs": 1107,
   "crates/hl2-bevy/src/audio.rs": 1174,
   "crates/hl2-bevy/src/effects.rs": 1085,
   "crates/hl2-bevy/src/gameplay.rs": 1671,
@@ -207,9 +206,6 @@
   "crates/hl2-bevy/src/assets.rs::load_material": [
    229
   ],
-  "crates/hl2-bevy/src/assets.rs::load_with_progress": [
-   178
-  ],
   "crates/hl2-bevy/src/audio.rs::load": [
    195
   ],
@@ -220,7 +216,7 @@
    114
   ],
   "crates/hl2-bevy/src/campaign.rs::poll": [
-   144
+   137
   ],
   "crates/hl2-bevy/src/canvas_renderer.rs::present": [
    150

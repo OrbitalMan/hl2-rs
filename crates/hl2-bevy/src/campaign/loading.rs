@@ -29,6 +29,24 @@ pub(super) fn install_view(
     }
 }
 
+pub(super) fn begin(
+    request: Request,
+    options: &crate::Options,
+    ui: &mut ui_host::Console,
+    sim: &mut crate::simulation::Simulation,
+) -> Result<super::Job, String> {
+    let started = std::time::Instant::now();
+    let result = spawn_worker(&request, options, ui)?;
+    log_debug_load_start(&request, sim, ui);
+    start(&request, ui);
+    sim.loading = true;
+    Ok(super::Job {
+        request,
+        result,
+        started,
+    })
+}
+
 pub(super) fn spawn_worker(
     request: &Request,
     options: &crate::Options,
@@ -219,6 +237,25 @@ pub(super) fn log_debug_load_finish(
         let status = if success { "success." } else { "failure." };
         ui.source
             .log(format!("Finished loading map {}, {}", request.map, status));
+    }
+}
+
+/// Transfer gameplay state only after a worker succeeds and wins request arbitration.
+pub(super) fn carry_state(
+    request: &Request,
+    loaded: &mut crate::assets::LoadedMap,
+    game: &mut crate::gameplay::Gameplay,
+) {
+    if !request.direct {
+        // changelevel keeps the global table and the player's damage state.
+        let previous = game.scene.globals.clone();
+        loaded.gameplay.scene.globals.carry(&previous);
+        super::carry_player_state(&mut loaded.gameplay, game);
+        loaded.gameplay.inventory = std::mem::take(&mut game.inventory);
+        loaded
+            .gameplay
+            .inventory
+            .rebase_clock(game.scene.time, loaded.gameplay.scene.time);
     }
 }
 

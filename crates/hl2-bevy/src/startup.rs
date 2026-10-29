@@ -108,6 +108,7 @@ pub(crate) fn load_stub(root: &std::path::Path, game: &str) -> Result<crate::ass
         |_| true,
     ));
     Ok(crate::assets::LoadedMap {
+        load_timings: Default::default(),
         game: game.to_owned(),
         world,
         gameplay,
