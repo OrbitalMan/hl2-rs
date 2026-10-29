@@ -1,5 +1,13 @@
 # STATUS
 
+## Fresh loaded gesture tags and source-state capture (2026-10-29)
+
+Fresh owned native CG closes0 with collector sources pinned before launch and unchanged after cleanup, final module identity checked and six installed settings unchanged. CH replays all 130,523 reads/18,090,096 bytes in three chunks: 2,948 acquisitions, 2,728 accepted, 220 explicit race exclusions, native time5.82..102.0. Choreography bytes and loaded tags are reread; 102 accepted gesture-source graphs are collected inside the native tick bracket. Selected animation descriptors match all100 owned bytes. Sequence flags/activity words remain raw and unadmitted; a rejected verifier assumption about their flags is retained.
+
+The three authored head-gesture intervals have145 loaded-tag observations and142 active layer matches (827:93,823:49; one head-back row has zero weight). Tag names/percentages match the authored arrays in this window; loop/end linear bits change between observations before and after active layer association. CF binds the retail playback-to-original remap; CJ resolves the captured event vtable pointer through the matching PE to its duration getter, including the caller's float32 denominator store. These are source-state and static dataflow witnesses, not a runtime callback trace.
+
+Current-clock, one-tick-offset and previous-sample calculations do not match all stored cycles. A separate setter-access-time hypothesis reduces the largest discrepancy but still leaves about0.0213 cycle error; sampled layer access lags reach0.090004 seconds. Preserve those mismatches rather than claim timing parity or force a universal time shift. CD separately binds conditional server filtering for four authored head tracks; unchanged server facial slots cannot adjudicate client facial animation. No Rust edits/builds; first_map_finished:false. Next narrow target: observe the selected callback's actual clock/remap inputs and cycle-setter output using a bounded paired recorder, retaining source identities and acquisition limits. Private checkpoint: work/publishing/research-followup-continuation-20261029cj.md.
+
 ## Audited overlay, source and facial-input evidence (2026-10-29)
 
 The unpublished BX/BY/BZ research and CA passive run are now independently audited. Retail bytes bind the selected citizen's 76-byte overlay records, gesture scene-info/layer-index relationship, virtual animation-source lookup and 54 named model-local flex controllers within 96 allocated storage slots. The three static roots contain 38 unique exact bodies; their shared constructor must not be counted twice.

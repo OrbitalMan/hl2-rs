@@ -1,5 +1,15 @@
 # Sources and native research
 
+## Loaded gesture tags, duration and server flex filtering (2026-10-29)
+
+CF binds retail normalized event progress through two loaded absolute-tag lists: playback percentages select an interval and original percentages supply the mapped cycle, with linear endpoint flags or a normalized-X Catmull-Rom branch. CJ follows an actual captured event vtable pointer into the identity-matching PE, resolving slot0 to finite end-minus-start or zero for the end sentinel -1. The caller stores the duration as float32 before division. The live vtable slot/getter invocation and full native floating-point control remain unobserved.
+
+Fresh CG/CH supplies stronger source-state evidence than CA: hashes of local collector code before launch/after cleanup, choreography/tag rereads and repeated selected source graphs within the native tick bracket. All102 accepted graphs bind direct root and cached male_gestures identity; selected 100-byte animation descriptors agree with owned metadata. Among145 loaded-tag observations, names/percentages agree with the authored arrays, while loop/end linear bits change before/after active layer association. That association is not callback causality; high flag bits remain uninterpreted. Ordinary pose, ANI decoding and blend evaluation remain untested.
+
+CI retains unsuccessful timing hypotheses against142 matched layers. Sampled current scene time, a declared one-tick offset and previous observed time each leave substantial differences. The separate access-time hypothesis has worst absolute error about0.0213 cycle. Native setters statically update the layer access timestamp, but other accessors can also touch it; this correlation does not certify callback timing. No extra time shift is chosen to manufacture agreement.
+
+CD proves retail FLEXANIMATION type10 and conditional server-only track filtering. Its exact name classifier admits four of the11 authored tracks, matching local head input indices44/45/46/51; the other seven do not classify as server-side. The live filter byte/loaded track flags, actual write execution and client facial consumption remain unobserved. Do not infer missing facial animation from unchanged server facial storage. Private roots CD/CF/CG/CH/CI/CJ retain proofs, failed diagnostics and controls; first_map_finished:false, Rust parity untested.
+
 ## Overlay, animation-source and facial-input audit (2026-10-29)
 
 Private BX/BY/BZ bind the citizen's primary CBaseAnimatingOverlay/CBaseFlex ancestry, named overlay layout, gesture index/sequence routing, virtual animation lookup and named flex storage. Independent CB verifies 38 unique exact retail bodies across the three roots, preserving the shared-constructor overlap. The source metadata remains distinct from blend evaluation and final bones.

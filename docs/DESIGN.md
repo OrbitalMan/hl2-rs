@@ -1,5 +1,11 @@
 # Design
 
+## Loaded gesture timing findings and next boundary (2026-10-29)
+
+The fresh guarded capture now retains loaded tag names/percentages/linear flags, scene-clock rereads and repeated gesture source witnesses. Interpret stored cycles using the actual tag state: native setup can change linear flags, and simple event progress is not the complete mapping. The exact duration getter returns end-minus-start except its -1 end sentinel; the caller rounds that result into float32 before division. These findings guide a future implementation, but this research changes no Rust code.
+
+All tested sampled-clock hypotheses still disagree with some recorded cycles, even after accounting for the layer access timestamp. Next use a finite, fixture-validated paired recorder on the selected gesture callback/remap/cycle setter to retain actual inputs, outputs and nesting. Reuse exact event/actor/module admission, bounded file-backed storage, explicit footer/cleanup and negative controls. Do not substitute another fitted time shift or expand into final-pose/next-map claims. Keep the conditional server flex filter separate from client facial evaluation; unchanged server face slots are not an absence-of-animation result.
+
 ## Research audit and next capture: loaded gesture timing (2026-10-29)
 
 Audit the unpublished BX/BY/BZ/CA follow-up before repeating native work. Preserve CA's report-key comparison failure; compare its replayed result in the JSON wire domain in a separate audit root. Bind loaded header identity and full selected animation descriptors against owned bytes. Keep its single-read scene clock, earlier source-graph snapshot and missing local code hashes at launch explicit.
