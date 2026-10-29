@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Forced-normal artwork camera projection (2026-10-29)
+
+The forced-normal camera caps the authored horizontal view at 4:3 and matches the cropped artwork ray extents across eleven tested aspects. Disabled mode is exactly equal to the prior formula. Unit tests also cover config toggles, gameplay invariance, debug arrows, unrelated config retention, forced resize baseline and overlay readout. `scripts/checks/validate.sh`: 1,257 Rust tests passed, 105 ignored, 27 Python tests; strict Clippy, formatting and architecture pass. Windows cross-target checks and release packaging pass.
+
+Muted isolated packaged runs set the flag in saved configuration before startup, sample the actual camera before enabling debug, then turn debug on with blur at 0%. At 1280x720, enabled/disabled camera FOV is 46.69213/59.84044 degrees; at 2560x720 it is 24.35654/32.10609. Each value matches the expected authored projection within 0.001 degrees with debug off and on. A separate packaged run toggles both ways with debug off and on, including an intervening explicit 65-degree debug FOV. Both toggles restore their baseline; manual FOV adjustment works. Inspected 16:9 and 32:9 blur-free captures; reports and captures remain in ignored artifacts. Windows GPU runtime and native pixel parity not tested.
+
 ## Normal artwork center-crop (2026-10-29)
 
 The normal-artwork 16:9 negative control failed with a full 512x512 source instead of the centered 512x384 span. Shared crop tests now cover both authored variants at portrait, square, 5:4, 4:3, 16:10, 16:9, 21:9 and 32:9, independent of encoded bitmap dimensions; assertions check equal margins, bounds and aspect-preserving ray extents. Emitted menu/loading quads fill the canvas using the cropped source. Texture selection retains normal metadata when forced or when wide is missing. `scripts/checks/validate.sh`, `scripts/checks/check_windows.sh` and `scripts/build-bevy.sh` pass. Isolated muted packaged captures at 1280x720 and 2560x720 show forced normal artwork at full opacity; wide artwork captured as control. Reports/captures remain in ignored artifacts. Camera projection is unchanged in this checkpoint; matching it to the override is requested next. Windows GPU runtime not tested.

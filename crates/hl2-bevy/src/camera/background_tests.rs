@@ -84,3 +84,87 @@ fn fit_display_uses_internal_frame_aspect_through_resize() {
         );
     }
 }
+
+#[test]
+fn forced_normal_projection_matches_its_crop_and_disabled_math_is_unchanged() {
+    let reference_tan = (crate::video::vertical_fov_for(75., 4. / 3.) * 0.5).tan();
+    for aspect in TESTED_ASPECTS {
+        let old_scale = (aspect / hl2_ui::tuning::widest_design_aspect()).max(1.);
+        let old = 2. * ((75f32.to_radians() / 2.).tan() / ((4. / 3.) * old_scale)).atan();
+        assert_eq!(super::background_fov(aspect, false), old);
+        let crop = hl2_ui::gameui::loading::background_source(
+            glam::vec2(aspect, 1.),
+            glam::Vec2::ONE,
+            false,
+        );
+        let tan_v = (super::background_fov(aspect, true) * 0.5).tan();
+        assert!((tan_v - reference_tan * crop.h).abs() < 1e-6);
+        assert!((tan_v * aspect - reference_tan * (4. / 3.) * crop.w).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn config_toggle_updates_background_camera_and_preserves_gameplay_and_debug_adjustments() {
+    let world = modkit_core::World::default();
+    let mut sim =
+        crate::simulation::Simulation::new(&world, glam::Vec3::ZERO, 0., 0., false, vec![]);
+    let mut game = crate::gameplay::Gameplay::synthetic(world);
+    let mut ui = crate::ui_host::Console::new(Default::default());
+    let aspect = 16. / 9.;
+    sim.background_level = true;
+    for force in [true, false, true, false] {
+        sim.background_debug.fov = Some(70.);
+        let effects = ui.source.submit(&format!(
+            "background_force_default_blur {}",
+            u8::from(force)
+        ));
+        sim.console_effects(&mut ui, &mut game, effects);
+        assert_eq!(sim.background_force_default_blur, force);
+        assert_eq!(
+            sim.background_debug.fov, None,
+            "artwork changes reset temporary tuning"
+        );
+        let expected = super::background_fov(aspect, force);
+        assert_eq!(sim.world_camera_fov(110., aspect), expected);
+        assert_eq!(
+            sim.background_debug.fov(aspect, force),
+            expected.to_degrees()
+        );
+        sim.background_debug
+            .adjust_fov(&[bevy::prelude::KeyCode::ArrowUp], 1., aspect, force);
+        assert!(
+            (sim.background_debug.fov(aspect, force) - expected.to_degrees() - 1.).abs() < 0.02
+        );
+        sim.background_level = false;
+        assert_eq!(
+            sim.world_camera_fov(90., aspect),
+            world_fov(90., sim.fov, aspect, sim.vertical_fov, false)
+        );
+        sim.background_level = true;
+    }
+}
+
+#[test]
+fn disabled_config_updates_keep_manual_debug_fov_and_forced_resize_uses_normal_baseline() {
+    let world = modkit_core::World::default();
+    let mut sim =
+        crate::simulation::Simulation::new(&world, glam::Vec3::ZERO, 0., 0., false, vec![]);
+    let mut game = crate::gameplay::Gameplay::synthetic(world);
+    let mut ui = crate::ui_host::Console::new(Default::default());
+    sim.background_debug.fov = Some(65.);
+    let cfg = ui.source.config.clone();
+    sim.console_effects(
+        &mut ui,
+        &mut game,
+        vec![hl2_ui::console::Effect::ApplyConfig(Box::new(cfg))],
+    );
+    assert_eq!(sim.background_debug.fov, Some(65.));
+    ui.source.config.video.background_force_default_blur = true;
+    sim.background_debug.enabled = true;
+    sim.background_debug.last_aspect = Some(4. / 3.);
+    sim.background_debug
+        .check_aspect_change(32. / 9., "32:9", &mut ui.source);
+    let expected = super::background_fov(32. / 9., true).to_degrees();
+    assert_eq!(sim.background_debug.fov, Some(expected));
+    assert!(sim.background_debug.lines(32. / 9., true)[4].contains(&format!("{expected:.2}")));
+}

@@ -106,6 +106,8 @@ pub struct Simulation {
     /// `video.vertical_fov` (0 = automatic) and `video.viewmodel_fov` of the applied settings.
     pub vertical_fov: f32,
     pub viewmodel_fov: f32,
+    /// Saved menu artwork policy, applied independently of background debug mode.
+    pub background_force_default_blur: bool,
     /// PlayerDeathThink: every button must be released before one press respawns.
     death_buttons_released: bool,
     /// `impulse 100` presses and commands since the flashlight last read them.
@@ -153,6 +155,7 @@ impl Simulation {
             frame_size: None,
             camera_fov: None,
             vertical_fov: 0.,
+            background_force_default_blur: false,
             viewmodel_fov: hl2_simulation::viewmodel_effects::VIEWMODEL_FOV,
             death_buttons_released: true,
             flashlight_toggles: 0,
@@ -238,6 +241,7 @@ impl Simulation {
     ) {
         self.fov = options.config.video.fov;
         self.vertical_fov = options.config.video.vertical_fov;
+        self.background_force_default_blur = options.config.video.background_force_default_blur;
         self.viewmodel_fov = options.config.video.viewmodel_fov;
         self.applied_window = Some(
             WindowSettings::new(options.width, options.height, options.display_mode)
@@ -389,7 +393,9 @@ impl Simulation {
                 ui.source.log(format!("background_map_fov {deg:.2}"));
             }
             Effect::BackgroundMapFov(None) => {
-                let fov = self.background_debug.fov(aspect);
+                let fov = self
+                    .background_debug
+                    .fov(aspect, self.background_force_default_blur);
                 self.background_debug.fov = None;
                 ui.source
                     .log(format!("\"background_map_fov\" = \"{fov:.2}\""));
@@ -549,6 +555,10 @@ impl Simulation {
     ) {
         self.fov = cfg.video.fov;
         self.vertical_fov = cfg.video.vertical_fov;
+        if self.background_force_default_blur != cfg.video.background_force_default_blur {
+            self.background_debug.fov = None;
+        }
+        self.background_force_default_blur = cfg.video.background_force_default_blur;
         self.viewmodel_fov = cfg.video.viewmodel_fov;
         let target = WindowSettings::of(&cfg.video);
         if self.applied_window != Some(target) {

@@ -63,14 +63,14 @@ impl Default for BackgroundDebug {
 
 impl BackgroundDebug {
     /// Current field of view in degrees.
-    pub fn fov(&self, aspect: f32) -> f32 {
-        let def_v = crate::camera::world_fov(75., 75., aspect, 0., true).to_degrees();
+    pub fn fov(&self, aspect: f32, force_default_blur: bool) -> f32 {
+        let def_v = crate::camera::background_fov(aspect, force_default_blur).to_degrees();
         self.fov.unwrap_or(def_v)
     }
 
     /// Formats the lines displayed in the debug overlay.
     pub fn lines(&self, aspect: f32, force_default_blur: bool) -> Vec<String> {
-        let fov = self.fov(aspect);
+        let fov = self.fov(aspect, force_default_blur);
         vec![
             format!("state: {}  |  map: {}", self.state_label, self.map_name),
             format!("blur_texture: {}", self.blur_texture_name),
@@ -138,8 +138,14 @@ impl BackgroundDebug {
     }
 
     /// Adjusts FOV based on fired arrow keys.
-    pub fn adjust_fov(&mut self, fired: &[KeyCode], step: f32, aspect: f32) -> bool {
-        let mut v = self.fov(aspect);
+    pub fn adjust_fov(
+        &mut self,
+        fired: &[KeyCode],
+        step: f32,
+        aspect: f32,
+        force_default_blur: bool,
+    ) -> bool {
+        let mut v = self.fov(aspect, force_default_blur);
         let mut changed = false;
         for key in fired {
             match *key {
@@ -175,7 +181,11 @@ impl BackgroundDebug {
             .is_some_and(|last| (last - aspect).abs() > 1e-4);
         self.last_aspect = Some(aspect);
         if changed {
-            let def_v = crate::camera::world_fov(75., 75., aspect, 0., true).to_degrees();
+            let def_v = crate::camera::background_fov(
+                aspect,
+                console.config.video.background_force_default_blur,
+            )
+            .to_degrees();
             self.fov = Some(def_v);
             let is_wide = aspect > 4. / 3. + 1e-3;
             self.blur_texture_name = console.blur_texture_name(&self.map_name, is_wide);
@@ -194,26 +204,26 @@ mod tests {
     fn background_debug_default_fov_and_overrides() {
         let mut debug = BackgroundDebug::default();
         let aspect = 16. / 9.;
-        let def_v = debug.fov(aspect);
+        let def_v = debug.fov(aspect, false);
         assert!((def_v - 59.85).abs() < 0.2);
 
         // Setting explicit FOV
         debug.fov = Some(65.0);
-        assert_eq!(debug.fov(aspect), 65.0);
+        assert_eq!(debug.fov(aspect, false), 65.0);
     }
 
     #[test]
     fn background_debug_arrow_adjustments() {
         let mut debug = BackgroundDebug::default();
         let aspect = 16. / 9.;
-        let init_v = debug.fov(aspect);
+        let init_v = debug.fov(aspect, false);
 
         // ArrowUp increases FOV
-        assert!(debug.adjust_fov(&[KeyCode::ArrowUp], 2.0, aspect));
+        assert!(debug.adjust_fov(&[KeyCode::ArrowUp], 2.0, aspect, false));
         assert!((debug.fov.unwrap() - (init_v + 2.0)).abs() < 0.02);
 
         // ArrowDown decreases FOV
-        assert!(debug.adjust_fov(&[KeyCode::ArrowDown], 1.0, aspect));
+        assert!(debug.adjust_fov(&[KeyCode::ArrowDown], 1.0, aspect, false));
         assert!((debug.fov.unwrap() - (init_v + 1.0)).abs() < 0.02);
     }
 

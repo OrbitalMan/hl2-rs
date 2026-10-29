@@ -536,14 +536,7 @@ fn viewmodel_quads(
         crate::camera::viewmodel_projection(raw_viewmodel_fov, framing.fov_offset, 1000., aspect)
             .0
             .to_degrees();
-    let world_fov = crate::camera::world_fov(
-        sim.view_fov(fov),
-        sim.fov,
-        aspect,
-        sim.vertical_fov,
-        sim.background_level,
-    )
-    .to_degrees();
+    let world_fov = sim.world_camera_fov(sim.view_fov(fov), aspect).to_degrees();
     let offset = glam::Vec3::from_array(framing.offset);
     // DoLoadEffect -> "CrossbowLoad" (client c_weapon_crossbow.cpp): FX_ElectricSpark at
     // viewmodel attachment 1, a world position from FormatViewModelAttachment (right/up

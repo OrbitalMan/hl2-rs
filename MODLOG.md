@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-29 Match background camera FOV to forced normal artwork
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** With `background_force_default_blur` enabled, cap the background camera's authored horizontal view at 4:3, matching the normal artwork crop. Keep the disabled formula numerically unchanged. Apply the saved flag at startup and live config changes; use the same baseline for camera presentation and debug FOV readout, arrow adjustment, reset and resize. A flag change clears temporary debug tuning; unrelated settings preserve it. Gameplay FOV remains unchanged. Reuse one simulation view helper for projection consumers and tighten the architecture baseline after shrinking the existing effect caller. README and current feature/GameUI documentation describe the behavior.
+
+**Tested how / Result:** `scripts/checks/validate.sh`: 1,257 Rust tests passed, 105 ignored; 27 Python tests, strict Clippy/fmt/architecture pass. `scripts/checks/check_windows.sh` and `scripts/build-bevy.sh` pass. Tests cover exact disabled-formula equivalence across eleven aspects, forced-normal projection rays against artwork crop, live config toggles, manual debug adjustment retention, forced resize/readout and gameplay invariance. Isolated muted packaged startup/debug-on/off captures and camera reports at 16:9 and 32:9 pass: enabled/disabled vertical FOV 46.69213/59.84044 and 24.35654/32.10609 degrees. Live toggles with debug off and on restore the expected baseline; explicit 65-degree debug tuning still works. Blur-free captures inspected.
+
+**Performance:** Same projection and render passes; one stored boolean and constant arithmetic, no new frame allocation or asset access. Frame-time benchmark not run for this projection-policy change.
+
+**Still broken or not tested:** Windows GPU runtime and native pixel parity not tested.
+
+**Next:** Ordinary play validation across chapter backgrounds; retain disabled value 0 for existing behavior.
+
 ## 2026-10-29 Center-crop normal background artwork on wide frames
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

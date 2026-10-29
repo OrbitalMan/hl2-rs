@@ -564,7 +564,12 @@ fn process_background_debug_keys(
             crate::background_debug::BACKGROUND_ADJUST_KEYS,
         );
         let step = viewmodel_adjust_step(input.keys);
-        sim.background_debug.adjust_fov(&fired, step, input.aspect);
+        sim.background_debug.adjust_fov(
+            &fired,
+            step,
+            input.aspect,
+            sim.background_force_default_blur,
+        );
 
         let opacity_fired = opacity_repeat.update(
             input.keys,

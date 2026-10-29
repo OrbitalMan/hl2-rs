@@ -183,7 +183,7 @@
  "files": {
   "crates/hl2-bevy/src/assets.rs": 1107,
   "crates/hl2-bevy/src/audio.rs": 1174,
-  "crates/hl2-bevy/src/effects.rs": 1092,
+  "crates/hl2-bevy/src/effects.rs": 1085,
   "crates/hl2-bevy/src/gameplay.rs": 1671,
   "crates/hl2-bevy/src/main.rs": 1061,
   "crates/hl2-bevy/src/rendering.rs": 1534,
@@ -232,7 +232,7 @@
    182
   ],
   "crates/hl2-bevy/src/effects.rs::viewmodel_quads": [
-   219
+   212
   ],
   "crates/hl2-bevy/src/eyes.rs::present": [
    273

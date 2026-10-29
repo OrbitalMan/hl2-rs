@@ -3,6 +3,14 @@ use super::Simulation;
 use crate::gameplay::Gameplay;
 
 impl Simulation {
+    pub(crate) fn world_camera_fov(&self, view_degrees: f32, aspect: f32) -> f32 {
+        if self.background_level {
+            crate::camera::background_fov(aspect, self.background_force_default_blur)
+        } else {
+            crate::camera::world_fov(view_degrees, self.fov, aspect, self.vertical_fov, false)
+        }
+    }
+
     pub(crate) fn prepare_background_view(&mut self, game: &mut Gameplay) {
         game.scene.tick(&game.world, self.player.feet, 0.);
         self.refresh_scripted_view(game);

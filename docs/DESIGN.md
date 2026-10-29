@@ -1,3 +1,7 @@
+## Match forced-normal camera projection to artwork (2026-10-29)
+
+When the saved override is enabled, cap the background camera's horizontal span at the normal artwork's authored 75-degree 4:3 view: crop vertically above 4:3. Keep the disabled path numerically unchanged, including debug arrow/manual adjustments and gameplay FOV. Apply at startup and live config changes, and use the same baseline for debug readout/reset/aspect changes. Toggling the artwork option resets temporary debug FOV so stale tuning cannot mask the new baseline. Test rays against artwork, disabled equivalence, live toggles, startup and first-frame presentation; compare packaged blur-free captures with disabled controls. No new pass, allocation or asset read.
+
 # Design
 
 ## Crop selected background artwork to its authored aspect (2026-10-29)

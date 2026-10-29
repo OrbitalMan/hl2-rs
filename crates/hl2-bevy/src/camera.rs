@@ -27,13 +27,21 @@ pub fn world_fov(
     background_level: bool,
 ) -> f32 {
     if background_level {
-        let widest = hl2_ui::tuning::widest_design_aspect();
-        let scale = (aspect / widest).max(1.);
-        // Authored menu artwork uses the 75-degree 4:3 reference, never player FOV/zoom.
-        2. * ((75f32.to_radians() / 2.).tan() / ((4. / 3.) * scale)).atan()
+        background_fov(aspect, false)
     } else {
         crate::video::vertical_fov_with(view_degrees, default_degrees, aspect, vertical)
     }
+}
+
+/// Authored menu projection; forced normal artwork caps the horizontal span at 4:3.
+pub fn background_fov(aspect: f32, force_default_blur: bool) -> f32 {
+    let widest = if force_default_blur {
+        4. / 3.
+    } else {
+        hl2_ui::tuning::widest_design_aspect()
+    };
+    let scale = (aspect / widest).max(1.);
+    2. * ((75f32.to_radians() / 2.).tan() / ((4. / 3.) * scale)).atan()
 }
 
 /// CViewRender::SetUpView: the viewmodel's FOV is `viewmodel_fov - (default_fov - fov)`. At or
@@ -100,16 +108,12 @@ pub(crate) fn present_player_view(
             crate::source_to_bevy(crate::source_direction(yaw, pitch)),
             Vec3::Y,
         );
-        let fov = world_fov(
-            sim.view_fov(player_fov),
-            sim.fov,
-            aspect,
-            sim.vertical_fov,
-            sim.background_level,
-        );
+        let fov = sim.world_camera_fov(sim.view_fov(player_fov), aspect);
         if let Projection::Perspective(perspective) = &mut *projection {
             let active_fov = if sim.background_debug.enabled {
-                sim.background_debug.fov(aspect).to_radians()
+                sim.background_debug
+                    .fov(aspect, sim.background_force_default_blur)
+                    .to_radians()
             } else {
                 fov
             };

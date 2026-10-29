@@ -106,7 +106,10 @@ ratios, with the normal existing fallback when that artwork is unavailable. **1*
 always selects the normal blur texture, even on wide frames. The choice applies to
 menu and loading backgrounds and survives restarting the game. Both variants fill
 the frame by center-cropping against their authored aspect (normal 4:3, wide 16:9),
-so normal artwork loses top/bottom portions on wide frames without stretching. Query it by entering
+so normal artwork loses top/bottom portions on wide frames without stretching.
+With the override enabled, the background camera matches this 4:3 crop; disabling
+it restores the original aspect-based FOV. Toggling resets temporary debug FOV
+tuning; arrows and reset then use the selected artwork baseline. Query it by entering
 `background_force_default_blur` without an argument.
 
 

@@ -1,5 +1,11 @@
 # STATUS
 
+## Forced-normal artwork camera matching (2026-10-29)
+
+The saved blur override now also selects the background camera baseline: enabled caps the authored horizontal view at 4:3 and follows the normal artwork's center-crop; disabled retains the original FOV calculation exactly. Startup, live commands and debug readout/reset/aspect changes share this policy. Changing the flag clears temporary debug FOV tuning; ordinary config updates retain it. Gameplay FOV is unaffected.
+
+Verified: 1,257 Rust tests passed, 105 ignored; 27 Python tests, strict Clippy/fmt/architecture, Windows cross-target checks and release packaging pass. Packaged startup and debug-on/off reports match 46.69213 degrees enabled versus 59.84044 disabled at 16:9; 24.35654 versus 32.10609 at 32:9. Live toggles restore the respective baseline, and a manual 65-degree debug override remains functional. Inspected blur-free packaged views at both ratios. Windows GPU runtime and native pixel parity not tested. Unrelated scratch files untouched.
+
 ## Normal blur artwork crop (2026-10-29)
 
 Normal menu/loading artwork now center-crops against its authored 4:3 aspect, including forced-normal and missing-wide fallback cases. Square VTF dimensions no longer cause wide-frame stretching. Widescreen artwork retains its 16:9 crop. Regression failed before the fix; geometry invariants, emitted menu/loading quads and fallback metadata pass. Workspace validation, strict Windows checks and release build pass. Isolated packaged 16:9 and 32:9 captures inspected at 100% blur. Camera matching for the override is the next requested checkpoint; projection is unchanged here. Windows GPU runtime not tested.
