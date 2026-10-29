@@ -1,5 +1,18 @@
 # MODLOG
 
+## 2026-10-29 Document non-retail video controls and developer tools
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** Added a central non-retail features guide with all requested video extensions and debug tools; README overview table and GameUI cross-link make existing scattered information discoverable. Documented control keys, saved versus session-only settings, ranges, blur tiers and limitations. Clarified the current 15-second confirmation trigger: changing aspect choices, including Fit Display, rather than every resolution change. Updated the older tweak-overlay description to its separate axis rows.
+
+**Tested how / Result:** Documentation coverage check: seven sections include all requested features. Five new local links resolve; the guide is allowed by the source-only whitelist. `git diff --check` and `python3 scripts/checks/architecture.py` passed. Commit hooks check repository isolation.
+
+**Still broken or not tested:** Documentation-only; no runtime behavior changed. Gameplay rebuilds and replays were not run for this edit. Existing runtime limits are retained in the guide and linked evidence.
+
+**Next:** Keep the guide synchronized when these controls or their persistence change.
+
+
 ## 2026-10-29 Final UI validation and idle-caption fast path
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

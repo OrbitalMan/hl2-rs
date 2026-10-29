@@ -3,6 +3,14 @@
 Status: **in progress** (started 2026-10-11). This file is the single architectural description of the
 menu/options work; other documents link here instead of repeating it.
 
+## Non-retail feature guide
+
+The [non-retail features guide](non-retail-features.md) documents the current
+Advanced/Ultra blur tiers, extra aspect ratios, 15-second aspect-change confirmation,
+vertical and viewmodel FOV sliders, viewmodel tweak controls and menu background
+debug controls. It is the user-facing reference; the sections below retain the
+implementation detail and historical validation.
+
 ## 0. Conventions for UI, HUD and localization work
 
 Rules for every change to source-ui, hl2-ui and their host wiring (moved verbatim from AGENTS.md on
@@ -1173,7 +1181,7 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
       `game.inventory.active`, switching weapons applies the new weapon's framing immediately as its
       draw animation begins.
   - The console command `viewmodel_tweak_mode 1|0` turns the runtime-only viewmodel tuning overlay on or off. It needs a loaded gameplay map (not a menu background level, not while a map loads) and otherwise logs why it refuses; loading another map or returning to the main menu turns it off. F5 and F6 are not bound. The overlay shows the
-    active aspect profile, weapon classname, `fov_offset`, and `[x, y, z]` offset. `[`/`]` adjust FOV,
+    active aspect profile, weapon classname, `fov_offset`, and separate `offset.x`, `offset.y` and `offset.z` rows. `[`/`]` adjust FOV,
     `,`/`.` lower/raise forward X, Up/Down adjust Z, and Left/Right adjust lateral Y. Steps are
     `0.1`, `1.0` while Shift is held, or `0.01` while Alt/Option is held. Adjust keys repeat while held (same timing as Options >
     Keyboard list arrows). `viewmodel_tweak_reset` zeros the selected weapon's current profile `fov_offset` and `offset`; it works only while the mode is on.

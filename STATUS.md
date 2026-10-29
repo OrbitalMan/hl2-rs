@@ -1,5 +1,10 @@
 # STATUS
 
+## Non-retail feature documentation (2026-10-29)
+
+Added docs/non-retail-features.md as the current user-facing guide to Advanced/Ultra blur, all seven added aspect choices, the 15-second aspect-change keep/revert dialog, both FOV sliders and both console tuning/debug modes. README now has an overview table and GameUI notes link to the guide. Checked behavior against source, including the limitation that same-aspect resolution changes do not trigger the confirmation. Documentation-only: seven sections and five local links checked, whitelist/diff/architecture checks passed; no runtime change or gameplay rebuild.
+
+
 ## UI and Advanced SMG blur repairs verified (2026-10-29)
 
 All five requested reports are addressed on the UI integration branch. Confirmation labels share measured source-ui painter padding; offset X/Y/Z have explicit rows; long captions stay inside the authored viewport and reflow on resize; console input supports Shift selection, platform select-all, copy and replacement paste; SMG blur preserves opaque interior coverage while retaining silhouette trails.
