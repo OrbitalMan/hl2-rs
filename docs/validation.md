@@ -1,5 +1,18 @@
 # Local validation — 2026-10-05
 
+## Compact viewmodel snapshots (2026-10-29)
+
+Two new formatter regressions fail before the repair and pass afterward. They cover
+missing versus explicit zero fields, zero-only partial profiles, nonzero FOV-only
+profiles, unchanged offset components, stable repeated compaction and the complete
+session snapshot with a standard `[0.0, 0.0, 0.2]` edit. Workspace validation and
+strict Windows checks pass. A rebuilt isolated headless package enabled tweak mode
+for the portrait SMG and reset it, exercising live console snapshot emission. The
+output retains the authored RPG and shotgun offsets without adding zero FOV fields;
+the reset SMG entry is absent. Snapshot and report remain under ignored artifacts.
+This checks the actual emission path; interactive keyboard tuning was not retested.
+
+
 ## Raster-scale confirmation padding (2026-10-29)
 
 Owned-font negative control: at 1.25x, Quit had 8.75 pixels of left padding and 5.25

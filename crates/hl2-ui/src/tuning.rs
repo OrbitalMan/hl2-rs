@@ -395,14 +395,14 @@ pub fn tuning_json_with_viewmodel_profiles(
 }
 
 /// Pretty-prints the tuning asset with each viewmodel profile on one line, omitting zero
-/// `fov_offset`/`offset` fields and all-zero profiles (and the weapons or default block left empty
-/// by that), since missing fields and profiles load as zero.
+/// `fov_offset`/`offset` fields and all-zero profiles (and the weapons left empty by that),
+/// since missing fields and profiles load as zero.
 fn compact_viewmodel_json(mut root: serde_json::Value) -> String {
     let is_zero = |profile: &serde_json::Value| {
-        profile["fov_offset"].as_f64() == Some(0.0)
+        profile["fov_offset"].as_f64().unwrap_or(0.0) == 0.0
             && profile["offset"]
                 .as_array()
-                .is_some_and(|v| v.iter().all(|x| x.as_f64() == Some(0.0)))
+                .is_none_or(|v| v.iter().all(|x| x.as_f64() == Some(0.0)))
     };
     let mut inline = Vec::new();
     let mut compact = |block: &mut serde_json::Value| {
@@ -413,10 +413,12 @@ fn compact_viewmodel_json(mut root: serde_json::Value) -> String {
             if map.get(name).is_some_and(is_zero) {
                 map.remove(name);
             } else if let Some(profile) = map.get_mut(name) {
-                let number =
-                    |value: &serde_json::Value| format!("{:?}", value.as_f64().unwrap_or(0.0));
+                let number = |value: &serde_json::Value| {
+                    let value = value.as_f64().unwrap_or(0.0);
+                    format!("{:?}", if value == 0.0 { 0.0 } else { value })
+                };
                 let mut fields = Vec::new();
-                if profile["fov_offset"].as_f64() != Some(0.0) {
+                if profile["fov_offset"].as_f64().unwrap_or(0.0) != 0.0 {
                     fields.push(format!(
                         "\"fov_offset\": {}",
                         number(&profile["fov_offset"])
@@ -447,6 +449,9 @@ fn compact_viewmodel_json(mut root: serde_json::Value) -> String {
     }
     text
 }
+
+#[cfg(test)]
+mod snapshot_tests;
 
 #[cfg(test)]
 mod tests {

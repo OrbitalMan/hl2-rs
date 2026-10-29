@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-29 Omit implicit zero defaults from viewmodel console snapshots
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** The compact formatter compared missing `fov_offset` against an explicit JSON zero, then printed the missing value as zero. It now applies zero defaults consistently for FOV and missing offset arrays, omits all-zero partial profiles/empty weapons, and normalizes negative zero when formatting retained arrays. Nonzero offset arrays keep every component. Authored tuning values and edit precision are unchanged. Documented the omission rule in the non-retail guide.
+
+**Tested how / Result:** Both new regressions failed before the fix. `cargo test -p hl2-ui snapshot_tests --locked` passes partial-profile semantic round trips, repeated-compaction stability, supplied RPG/shotgun/SMG cases and a complete accumulated-session snapshot. `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh` pass. Release package rebuilt. An isolated muted headless packaged run enabled tweak mode on the portrait SMG and reset its profile; the live console output preserves untouched RPG/shotgun offsets, contains no zero FOV fields and omits the zeroed SMG entry. Its snapshot is retained in ignored artifacts.
+
+**Performance:** Existing edit-triggered serialization only; no new per-frame work, file reads or render changes.
+
+**Still broken or not tested:** Native comparison is not applicable to this non-retail formatter. Interactive keyboard tuning was not retested; the packaged reset uses the same snapshot emission path. The first GPU validation launch did not start because automatic permission review timed out; its permitted retry completed successfully.
+
+**Next:** Continue tuning with compact snapshots; no manual cleanup of implicit zero fields is needed.
+
+
 ## 2026-10-29 Extend confirmation buttons for raster-scale text padding
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

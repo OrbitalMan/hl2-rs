@@ -93,7 +93,9 @@ by weapon and aspect profile within that session; a map load or return to the ma
 menu ends it. F5 and F6 are not bound to this tool.
 
 Each adjustment updates one replaceable console snapshot of the complete tuning
-JSON. The tool does not save its edits automatically: copy that JSON into the
+JSON. Zero FOV offsets and entirely zero offset arrays are omitted, including in
+untouched profiles. Zero components remain in nonzero arrays, for example
+`"standard": {"offset": [0.0, 0.0, 0.2]}`. The tool does not save its edits automatically: copy that JSON into the
 project's `crates/hl2-ui/assets/ui/tuning.json` to retain authored changes.
 
 ## Menu background debug mode

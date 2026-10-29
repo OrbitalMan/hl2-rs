@@ -1,5 +1,10 @@
 # STATUS
 
+## Compact viewmodel snapshot defaults corrected (2026-10-29)
+
+The console snapshot formatter now treats omitted FOV/offset fields as zero, matching the tuning loader, rather than adding explicit zero FOV fields to untouched compact profiles. All-zero partial profiles and empty weapon entries are omitted; zero components remain in nonzero arrays. Both new regression tests failed before the fix and pass after it, including stable repeated compaction and the supplied RPG/shotgun/SMG cases. Workspace validation and strict Windows checks pass. The rebuilt isolated package generated a live console snapshot after a portrait SMG reset: untouched RPG/shotgun offsets are preserved with no zero FOV fields, and the zeroed SMG entry is absent. No authored tuning values were changed.
+
+
 ## Scaled confirmation-button padding corrected (2026-10-29)
 
 The prior logical-inset fix did not account for whole-pixel font rasterization at the dialog scale. The owned Quit label reproduced 8.75 pixels left padding versus 5.25 right at 1.25x. Shared source-ui confirmation fitting now only extends widths using actual raster metrics and the leading glyph bearing; the same case measures 8.75 left versus 9 right. Drawing, input and occlusion use the fitted layout for quit, return and Options confirmations. Label drawing, glyph size and wrapping are unchanged.
