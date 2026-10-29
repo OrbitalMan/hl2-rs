@@ -113,6 +113,7 @@ pub(crate) fn load(input: LoadInput<'_>, mode: LoadMode) -> Result<LoadedMap> {
         canvas,
         mode.audio_reuse.clone(),
         hdr,
+        &mode.cancel,
     )?;
     timing.mark("parallel_plan");
     let effects = crate::effects::PreparedEffects::load_with_lod(&vfs, &world, root_lod);
@@ -219,19 +220,23 @@ fn parallel_resources(
     canvas: source_ui::canvas::Canvas,
     audio_reuse: Arc<crate::audio::reuse::AudioReuse>,
     hdr: bool,
+    cancel: &super::work::Cancellation,
 ) -> Result<(
     super::work::Work<crate::audio::PreparedAudio>,
     super::work::Work<super::loading_auxiliary::Auxiliary>,
 )> {
+    cancel.check()?;
+    let world = gameplay.world.clone();
+    let aux_vfs = vfs.clone();
+    let aux_work = super::work::Work::spawn("hl2-visual-auxiliary", move |cancel| {
+        super::loading_auxiliary::load(&aux_vfs, &world, canvas, hdr, &cancel)
+    })
+    .map_err(anyhow::Error::msg)?;
     let plan = crate::audio::PreparedAudio::plan(&vfs, gameplay);
+    cancel.check()?;
     let audio_vfs = vfs.clone();
     let audio_work = super::work::Work::spawn("hl2-audio-preparation", move |cancel| {
         plan.decode(&audio_vfs, &cancel, &audio_reuse)
-    })
-    .map_err(anyhow::Error::msg)?;
-    let world = gameplay.world.clone();
-    let aux_work = super::work::Work::spawn("hl2-visual-auxiliary", move |cancel| {
-        super::loading_auxiliary::load(&vfs, &world, canvas, hdr, &cancel)
     })
     .map_err(anyhow::Error::msg)?;
     Ok((audio_work, aux_work))

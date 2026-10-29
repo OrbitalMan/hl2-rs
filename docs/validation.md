@@ -1,5 +1,57 @@
 # Local validation — 2026-10-05
 
+## Parallel loading, late audio and reuse (2026-10-30)
+
+Routine validation: 1,268 Rust tests passed, 106 ignored; 28 Python tests. Strict
+Clippy, formatting, architecture and Windows cross-target checks pass; release
+packaging is rebuilt. No dependencies added. The architecture baseline shrinks to
+110 long functions/19 large files, with no growth accepted.
+
+```sh
+scripts/checks/validate.sh
+scripts/checks/check_windows.sh
+scripts/build-bevy.sh
+cargo test -p hl2-bevy displayed_background_late_audio --locked -- --ignored
+```
+
+The explicit owned-content headless test passes both replacement types. It holds
+an old audio task in a background-state fixture, verifies it is cancelled as soon
+as gameplay or another background is requested, then verifies asynchronous loading,
+old map-owned entity removal and real new scene installation. No GPU/audio device
+is needed for that lifecycle test. The ordinary suite covers cancellation/drop,
+late-success rejection, panic/disconnection failure reporting, map-owner tokens
+independent of world copies, ordered buffered requests, script clock gating,
+exact-byte cache identity and LRU eviction. A generated alternate-wave fixture
+checks expansion overrides and shared immutable sample allocations. Rapid return
+cannot reuse an incomplete/cancelled audio background.
+
+Packaged muted Metal groups pass:
+
+```sh
+NO_BUILD=1 ONLY='background_reveal background_fov return_menu submenus chapter_selection save_config' python3 scripts/checks/replays.py
+NO_BUILD=1 ONLY='captions background_reveal background_fov campaign console_map' python3 scripts/checks/replays.py
+```
+
+Return/menu groups were rerun after the final silent-reuse guard. The final visual-first
+worker launch order also passes the portable/Windows suite and strengthened owned
+replacement test; all 18 repeated final timing reports have complete audio and
+advancing world clocks. Initial reveal
+retains the authored camera; gameplay FOV controls do not change it. Captions and
+campaign/map transitions pass with background scene/audio start synchronization.
+A live four-background sequence retains correct game/map identities and yields
+1,214 wave/1,441 VOX hits with no eviction. A subsequent background→gameplay case
+retains the complete 785-wave set and reuses all 482 VOX words. Inspected gameplay
+and Lost Coast captures; the latter's unsupported water material also appears in
+the retained baseline, so it is not a new loading regression.
+
+Three alternating paired packaged runs per scene measure request-to-installed CPU
+latency and steady frame cost with environment samples. These are local process-
+cold/OS-cache-warm observations; background visual readiness differs from audio
+readiness. Raw arrays, rejected attempts, source/package identities, cache sizing
+and resource-pressure limitations are detailed in docs/performance.md. Gameplay
+memory pressure and short aligned windows limit hardware conclusions. Windows GPU
+runtime, audible ordinary play, lower-core runtime and native parity are not tested.
+
 ## Forced-normal artwork camera projection (2026-10-29)
 
 The forced-normal camera caps the authored horizontal view at 4:3 and matches the cropped artwork ray extents across eleven tested aspects. Disabled mode is exactly equal to the prior formula. Unit tests also cover config toggles, gameplay invariance, debug arrows, unrelated config retention, forced resize baseline and overlay readout. `scripts/checks/validate.sh`: 1,257 Rust tests passed, 105 ignored, 27 Python tests; strict Clippy, formatting and architecture pass. Windows cross-target checks and release packaging pass.

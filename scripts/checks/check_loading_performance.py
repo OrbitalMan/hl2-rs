@@ -1,7 +1,7 @@
 """Alternating isolated map-load pairs; LOADING_BASELINE names a retained package folder.
 
 Writes raw timing, frame and environment reports under ignored artifacts/loading-performance.
-LOADING_RUNS defaults to three. Run after validation/builds finish; each launch is muted.
+LOADING_RUNS defaults to three; LOADING_OUTPUT selects a separate artifact folder. Run after validation/builds finish; each launch is muted.
 """
 import hashlib
 import json
@@ -81,8 +81,10 @@ def main():
     repeats = int(os.environ.get('LOADING_RUNS', '3'))
     if not 1 <= repeats <= 9:
         raise ValueError('LOADING_RUNS must be between 1 and 9')
-    r.OUT = r.REPO / 'artifacts/loading-performance'
-    r.OUT.mkdir(exist_ok=True)
+    r.OUT = (r.REPO / os.environ.get('LOADING_OUTPUT', 'artifacts/loading-performance')).resolve()
+    if not r.OUT.is_relative_to((r.REPO / 'artifacts').resolve()):
+        raise ValueError('LOADING_OUTPUT must be under artifacts/')
+    r.OUT.mkdir(parents=True, exist_ok=True)
     current = r.OUT / 'current-game'
     if baseline == current.resolve():
         raise ValueError('baseline and current packages must differ')

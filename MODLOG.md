@@ -1,5 +1,17 @@
 # MODLOG
 
+## 2026-10-30 Start visual preparation before audio metadata planning
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** The measured auxiliary tail still waited behind 17–43 ms of audio metadata planning. Start HUD/sky/face/flashlight preparation first, then build audio metadata and spawn decoding; recheck parent cancellation before additional work. Keep the same bounded workers and ownership rules. Strengthen the owned scene-replacement test with an old-entity removal assertion. The paired harness supports separate artifact output folders, preserves earlier measurements and verifies complete audio plus advancing world state. Record full initial/final timing arrays, frame/resource caveats, reusable content, rejected assumptions and limits in performance/validation documentation.
+
+**Tested how / Result:** Portable validation: 1,268 Rust tests passed/106 ignored, 28 Python tests, strict Clippy/fmt/architecture. Windows cross-target checks, release build and strengthened owned cancellation test pass. Repeated three alternating baseline/final pairs per scene, 18 complete muted Metal runs with no known competing builds or game processes: median request-to-installed CPU latency 2517.6→368.8 ms (base background), 2508.4→269.9 ms (Episode Two), 3271.7→2160.8 ms (gameplay). Auxiliary waits drop to 0.006–0.011 ms. Current scene clocks advance and full gameplay audio is preserved. Initial nine packaged groups and final return/submenu guards pass; timing packages and all rejected/accepted observations are retained in ignored artifacts.
+
+**Performance / Limits:** Final frame medians before→after are 15.939→15.261, 13.965→13.689 and 6.945→7.005 ms. Gameplay's +0.060 ms is within overlapping run ranges; short aligned telemetry and host/scene variation do not isolate a causal frame change. Final memory pressure is level 1, unlike the earlier gameplay round, so do not attribute inter-round differences solely to kickoff order. GPU occupancy is a proxy, thermal/quiet-preflight evidence is incomplete, and first GPU-present timing is not measured. Windows GPU runtime, audible ordinary play, lower-core runtime and native parity remain not tested.
+
+**Next:** Ordinary play across chapter backgrounds; isolate remaining model/host-installation cost before further caching or late-render changes.
+
 ## 2026-10-30 Cancellable parallel map loading and reusable audio
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

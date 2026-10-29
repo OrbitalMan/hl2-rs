@@ -29,6 +29,7 @@ fn displayed_background_late_audio_is_cancelled_by_gameplay_and_background_repla
             ..Default::default()
         };
         app.insert_resource(Gameplay::synthetic(world));
+        let old_map_entity = app.world_mut().spawn(super::MapOwned).id();
         let mut sim = Simulation::new(&Default::default(), glam::Vec3::ZERO, 0., 0., false, vec![]);
         sim.background_level = true;
         app.insert_resource(sim);
@@ -89,6 +90,10 @@ fn displayed_background_late_audio_is_cancelled_by_gameplay_and_background_repla
         let campaign = app.world().resource::<Campaign>();
         assert!(campaign.failures.is_empty(), "{:?}", campaign.failures);
         assert_eq!(app.world().resource::<Gameplay>().world.name, target);
+        assert!(
+            app.world().get_entity(old_map_entity).is_err(),
+            "old scene entity replaced"
+        );
         assert!(!app.world().resource::<Simulation>().loading());
         let mut query = app
             .world_mut()

@@ -1,5 +1,162 @@
 # Performance measurements - 2026-10-05
 
+## Background/shared map loading: parallel preparation and content reuse (2026-10-30)
+
+The serial timing baseline is `2bf2290`; the first complete pipeline checkpoint is
+`8261813`. Compare retained packaged executables, not ordinary terminal wall time:
+`render.map_metadata.loading_ms.request_to_installed_ms` measures request-to-host
+installation CPU time, including worker polling, view/physics handoff and host
+installation. It excludes completion of deferred GPU work. It is not a first-window
+or GPU-present timestamp. Background visual readiness now precedes audio readiness;
+authored clocks wait for audio while the menu is usable. Gameplay waits for all
+sound/speech metadata.
+
+The change removes throwaway startup gameplay/audio precache and hidden F4 spawn
+preparation from backgrounds, overlaps materials with HUD/face/sky/flashlight work,
+uses bounded wave/VOX decoders, and shares immutable audio across map loads. Gameplay
+retains its full spawn templates and resource set. No render pass or frame-system
+file read is added. Normal inactive polling is an optional resource check; caches
+are accessed during loading and diagnostic snapshots, not playback decoding.
+
+### Initial complete-pipeline comparison
+
+Apple M1 Pro, 10 logical CPUs, 16 GiB unified memory, Metal, owned default-detail
+content, HDR/AA off, 1024x768, muted isolated processes. Three pairs per scene,
+ordered baseline/current, current/baseline, baseline/current; no concurrent builds
+or other game processes reported. Each process starts with empty application
+caches. OS file caches were not purged. Each run renders 240 profiled frames;
+frame comparison uses the 120 measured frames after warm-up, with world_running
+and complete audio verified. Resource sampling runs at 0.5 seconds with a discarded
+primer. Retained executable SHA prefixes: baseline `fa0cd3483912`, first pipeline
+`424ab1ca2d5b`. Raw reports, package copies, environment samples and paired summaries
+remain in ignored artifacts/loading-performance.
+
+| Scene | Baseline installed CPU ms (raw) | Pipeline ms (raw) | Median before → after | Paired after/before |
+| --- | --- | --- | --- | --- |
+| Base background01 | 2805.6, 2526.5, 2509.3 | 391.5, 375.0, 370.2 | 2526.5 → 375.0 | .140, .148, .148 |
+| Episode Two background | 2644.1, 2500.1, 2483.5 | 287.3, 320.4, 295.4 | 2500.1 → 295.4 | .109, .128, .119 |
+| d1_trainstation_02 | 3442.9, 3283.0, 3269.3 | 2141.3, 2186.4, 2123.1 | 3283.0 → 2141.3 | .622, .666, .649 |
+
+The initial median reductions are 85%, 88% and 35%. Background worker medians fall
+from 2119/2103 ms to 312/267 ms; host installation from 321/315 to 47/24 ms.
+Gameplay worker time falls from 2766 to 1646 ms; installation remains substantial
+(415→398 ms). This is a shared improvement, without omitting gameplay resources.
+
+| Scene | Mean-frame ms median before → after | Per-run frame ranges, before / after |
+| --- | --- | --- |
+| Base background | 15.622 → 14.987 | 15.578–15.861 / 14.840–15.077 |
+| Episode Two | 14.044 → 13.390 | 13.828–14.050 / 13.255–13.508 |
+| Gameplay | 6.945 → 6.917 | 6.935–6.963 / 6.915–6.919 |
+
+These short runs show no added steady frame cost; they do not establish sustained
+FPS. Whole-process wall time also falls, but includes the rendered frames, GPU
+initialization, capture/report work and shutdown, so it is not reported as load time.
+
+The background active CPU/GPU occupancy medians are about 25.2/27.5% before versus
+25.0/29.5% after for base HL2, and 26.4/40.3% versus 23.8/42.8% for Episode Two.
+GPU percentages are occupancy proxies, not FLOPS or isolated pass cost. Dedicated
+VRAM is unavailable on this unified-memory host. Sampled peak game RSS ranges are
+1469–3856 versus 1349–1383 MiB (base background), 1330–3023 versus 1107–1116 MiB
+(Episode Two), and 1325–1802 versus 1527–2201 MiB (gameplay). These are sampled
+process peaks, not total CPU/GPU allocation accounting. Gameplay runs report memory
+pressure level 2 and insufficient aligned CPU/GPU samples in their short measured
+windows; backgrounds report level 1. Quiet-preflight and thermal-limit evidence is
+incomplete. Do not interpret the small gameplay frame difference as causal or use
+these samples as a hardware-independent guarantee.
+
+### Final visual-first launch order
+
+The remaining serial edge was resource kickoff: audio metadata planning (17–43 ms)
+ran before HUD/sky preparation started. Launch the independent visual worker first,
+then plan/start audio, checking parent cancellation again before spawning more work.
+This leaves resource adoption, decode concurrency and gameplay completeness unchanged.
+The owned cancellation test additionally checks that the old map-owned entity is gone.
+
+Repeated all three alternating pairs per scene with the same retained baseline,
+a separate final package and artifacts/loading-performance-final. Final executable
+SHA prefix `d2475f02abd8`. CPU/GPU warm-up conditions and caveats above still apply.
+All 18 final reports have complete audio, world_running=true and advancing scene
+clocks. The final round reports memory pressure level 1, but gameplay's short aligned
+CPU/GPU windows remain insufficient. Different memory pressure between rounds means
+the rounds themselves are not a controlled isolated launch-order experiment.
+
+| Scene | Baseline raw installed CPU ms | Final raw ms | Median before → final | Paired final/baseline |
+| --- | --- | --- | --- | --- |
+| Base background01 | 2625.5, 2517.3, 2517.6 | 368.8, 368.7, 375.1 | 2517.6 → 368.8 | .140, .146, .149 |
+| Episode Two | 2508.4, 2467.1, 2510.1 | 263.8, 278.9, 269.9 | 2508.4 → 269.9 | .105, .113, .108 |
+| Gameplay station02 | 3382.2, 3234.4, 3271.7 | 2160.8, 2182.9, 2141.0 | 3271.7 → 2160.8 | .639, .675, .654 |
+
+Background medians improve about 85%/89%, gameplay about 34%, relative to the serial
+baseline. Visual-auxiliary waiting is now 0.006–0.011 ms in these runs; its work
+finishes during planning/material preparation. The prior Episode Two worker had
+about 38 ms of auxiliary waiting in the recorded first pair. This establishes the
+removed dependency; it does not isolate an overall speedup due solely to kickoff order.
+
+Final mean-frame medians before→after: base 15.939→15.261 ms, Episode Two
+13.965→13.689 ms, gameplay 6.945→7.005 ms. Gameplay's +0.060 ms lies within overlapping
+run ranges (baseline 6.911–7.100, current 6.965–7.385); Episode Two also has an
+isolated higher current run. Short, insufficiently aligned resource windows and
+ordinary scene/host variation do not establish a causal frame regression or a
+sustained frame guarantee. The loading improvement is much larger and consistent
+across the separated per-run load ranges. No new recurring decode or render pass
+was introduced. Remaining gameplay model preparation and host installation are
+still visible costs; they were not replaced with feature/quality reductions.
+
+Reproduce the separate final round with:
+
+```sh
+LOADING_BASELINE=artifacts/loading-performance/baseline-game LOADING_OUTPUT=artifacts/loading-performance-final python3 scripts/checks/check_loading_performance.py
+```
+
+### Reuse, cancellation and rejected trials
+
+The 192 MiB wave/256 MiB VOX LRU limits account retained encoded identities and
+decoded payloads; allocator/container overhead and other live resources are extra.
+Decoded samples share Arc storage with current playback, so cache retention is not
+a second decoded copy. Fresh cue libraries, entity bindings, RNG and soundscape
+playback state remain per map. Exact resolved bytes plus loop/distance policy
+protect game, loose-file and embedded-pak overrides.
+
+A live four-background sequence (HL2→Episode One→HL2→Lost Coast) records 1,214 wave
+hits, 1,441 VOX hits and no evictions, retaining about 317 MiB of accounted content.
+A background→gameplay transition reuses 482 VOX words and 488 waves, retains all
+785 gameplay waves and has no evictions. Its exploratory audio preparation is
+214 ms; this run verifies reuse behavior and was not a controlled paired benchmark.
+Five additional VOX entries across expansions are valid distinct content. A warm
+test's initial assumption of completely identical word content failed; the recorded
+counters and an independent fixture with alternate wave bytes verify correct
+separation instead of masking those differences.
+
+An initial 32 MiB VOX cache evicted 390 of 482 entries, defeating useful reuse.
+Its package/report is retained as a rejected sizing trial; the final measured base
+word working set is about 148 MiB including identities. The first paired harness
+stopped before launch on a null CPU sample; the shared telemetry checker now treats
+unavailable counters as unknown and has a regression test. Both rejected logs remain
+in artifacts alongside accepted results.
+
+Owned headless tests hold old late audio, start background/gameplay replacements,
+verify cooperative cancellation before the new worker completes, check old scene
+removal and real replacement installation. Unit tests verify owner tokens across
+world copies, cancellation before adoption, channel/panic failures, ordered events,
+budgeted eviction and exact content matches. A rapid return to a background whose
+late audio was cancelled requires fresh loading, preventing permanent silent reuse.
+
+Sky preparation was only 13–17 ms in the serial pilot and now overlaps materials.
+Persistent CPU/GPU sky caching is not implemented; isolated sky upload benefit is
+unmeasured. Final captures retain the pre-existing Lost Coast unsupported water
+fallback, verified against the retained baseline. Native image/audio parity, audible
+ordinary play, Windows GPU runtime and lower-core runtime are not tested.
+
+Reproduce after retaining the instrumented prior package and building current:
+
+```sh
+LOADING_BASELINE=artifacts/loading-performance/baseline-game python3 scripts/checks/check_loading_performance.py
+```
+
+The harness defaults to three alternating pairs. LOADING_OUTPUT can select another
+ignored artifact folder without overwriting a retained comparison. LOADING_RUNS
+supports 1–9; source/package hashes, raw observations and environment flags are kept.
+
 ## SMG opacity repair: bounded timing smoke (2026-10-29)
 
 The weapon gather retains opaque coverage when rejecting another weapon surface's motion,
