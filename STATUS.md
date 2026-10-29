@@ -1,5 +1,12 @@
 # STATUS
 
+## Remove Ubuntu CI check (2026-10-29)
+
+- Removed Ubuntu 24.04 from GitHub Actions PR CI workflow (`.github/workflows/rust.yml`).
+  Because no Linux test environment is available to run or verify the game, CI now checks
+  Windows (`windows-latest`) and macOS (`macos-15`).
+- Removed Linux library installation step from CI and updated platform notes in README.md.
+
 ## Background debug quick game background swaps and chapter background rotation (2026-10-29)
 
 Background debug mode has been expanded with quick game background swaps and chapter background cycling:

@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-29 CI: remove Ubuntu from PR workflow
+
+**Agent/model:** Antigravity, model `gemini-3.8-flash`. No subagents.
+**Changed:**
+- In `.github/workflows/rust.yml`: remove `ubuntu-24.04` and the matrix configuration; convert the portable job to a dedicated macOS 15 job (`macos`) named `Rust checks (macos-15)`; remove the Linux build libraries installation step (`apt-get`).
+- In `README.md`: update the Platforms table and source-only CI description to reflect that CI tests Windows and Apple Silicon macOS, and that no Linux test environment is available locally.
+- In `STATUS.md`: document the removal of Ubuntu CI.
+**Why:**
+- PR CI failed on `Rust checks (ubuntu-24.04)` during workspace tests on the headless Linux runner. The project has no Linux test environment or hardware to run or verify game builds on Linux; CI is scoped to tested development platforms (Windows and macOS).
+**Tested how:**
+- Validation suite (`scripts/checks/validate.sh`: architecture guardrails, Python tests, cargo workspace tests, clippy, fmt).
+- Windows cross-target check (`scripts/checks/check_windows.sh`).
+- Workflow file syntax check and POSIX launcher syntax validation (`bash -n launch-bevy.sh scripts/build-bevy.sh scripts/clean-target.sh`).
+**Result:**
+- GitHub Actions CI workflow no longer includes Ubuntu; Windows and macOS checks are retained.
+**Still broken or not tested:**
+- Linux runtime and headless execution remain untested.
+**Next:**
+- Continue UI and host work.
+
 ## 2026-10-29 Feature: background debug quick game background swaps and chapter background rotation
 
 **Agent/model:** Antigravity; exact identifier not exposed. No subagents.

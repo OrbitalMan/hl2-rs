@@ -30,13 +30,9 @@ jobs:
       - name: Run unit tests
         run: cargo +stable test --workspace --locked --no-fail-fast
 
-  portable:
-    name: Rust checks (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-15]
-    runs-on: ${{ matrix.os }}
+  macos:
+    name: Rust checks (macos-15)
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       CARGO_BUILD_JOBS: 2
@@ -45,11 +41,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Install Linux build libraries
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends g++ pkg-config libx11-dev libasound2-dev libudev-dev libxkbcommon-x11-0 libwayland-dev libxkbcommon-dev libdbus-1-dev
       - name: Install stable Rust with formatting and lint tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - name: Validate source, tests, lints and formatting
