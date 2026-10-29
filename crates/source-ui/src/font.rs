@@ -48,6 +48,7 @@ pub struct FontFace {
     glyphs: GlyphCache,
     cell_height: f32,
     ascent: f32,
+    freetype: Option<FreeTypeCell>,
 }
 type GlyphCache = Arc<MutexCell<HashMap<(char, u32, u16, u16), Glyph>>>;
 #[derive(Clone)]
@@ -57,8 +58,92 @@ struct Glyph {
     y: f32,
     advance: f32,
 }
+/// How a requested cell height (`tall`) maps to glyph size and where glyphs sit in the cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellBaseline {
+    /// Retail CWin32Font: the baseline is tmAscent (OS/2 usWinAscent) below the cell top.
+    Gdi,
+    /// Capitals centered in the cell (OS/2 sCapHeight), used by the GameUI dialogs and menus.
+    CapCentered,
+    /// Retail CLinuxFont (FreeType), which `resource/FontInfo.kv` forces for GorDIN: see
+    /// [`FreeTypeCell`]. Falls back to [`CellBaseline::Gdi`] when the font has no metrics.
+    FreeType,
+}
+
+/// Retail CLinuxFont::CreateFromMemory character cells. The cell is the ascender rounded up to
+/// whole pixels minus the scaled bounding-box bottom; the pixel size is searched (from `tall`
+/// down, or up) for the largest one whose cell fits `tall`, and the baseline is that ascender.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FreeTypeCell {
+    units_per_em: i64,
+    ascender: i64,
+    y_min: i64,
+}
+impl FreeTypeCell {
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let face = ttf_parser::Face::parse(bytes, 0).ok()?;
+        let units_per_em = i64::from(face.units_per_em());
+        // The ascender gives way to 'Ó' (U+00D3) when that glyph rises above it.
+        let accent = face
+            .glyph_index('\u{d3}')
+            .and_then(|glyph| face.glyph_bounding_box(glyph))
+            .map_or(i64::MIN, |rect| i64::from(rect.y_max));
+        (units_per_em > 0).then(|| Self {
+            units_per_em,
+            ascender: i64::from(face.ascender()).max(accent),
+            y_min: i64::from(face.global_bounding_box().y_min),
+        })
+    }
+    /// Cell height and ascent in whole pixels at a FreeType pixel size (26.6 fixed point).
+    fn cell(&self, pixels: i64) -> (i64, i64) {
+        let mul_fix = |a: i64, b: i64| {
+            let product = a * b;
+            product.signum() * ((product.abs() + 0x8000) >> 16)
+        };
+        let scale = ((pixels << 22) + self.units_per_em / 2) / self.units_per_em;
+        let ascent = (mul_fix(self.ascender, scale) + 63) & !63;
+        let height = ascent - mul_fix(self.y_min, scale);
+        ((height + 32) >> 6, ascent >> 6)
+    }
+    /// The pixel size (EM) and baseline (pixels below the cell top) for a requested `tall`.
+    pub fn size_for(&self, tall: f32) -> (f32, f32) {
+        let tall = tall.round().max(1.) as i64;
+        let (mut pixels, mut step, mut first) = (tall, -1, true);
+        loop {
+            let (height, ascent) = self.cell(pixels);
+            if height == tall || height < 7 || pixels < 2 {
+                return (pixels as f32, ascent as f32);
+            }
+            if first {
+                first = false;
+                if height < tall {
+                    step = 1;
+                }
+                pixels += step;
+            } else if step < 1 {
+                if height <= tall {
+                    return (pixels as f32, ascent as f32);
+                }
+                pixels -= 1;
+            } else if height <= tall {
+                pixels += 1;
+            } else {
+                step = -1;
+                pixels -= 1;
+            }
+        }
+    }
+    /// Baseline below the cell top for glyphs rasterized at `em` pixels.
+    fn ascent_at(&self, em: f32) -> f32 {
+        (self.ascender as f32 * em / self.units_per_em as f32).ceil()
+    }
+}
+
 impl FontFace {
     pub fn load(bytes: &[u8], canvas: Canvas) -> Result<Self> {
+        Self::load_with(bytes, canvas, CellBaseline::CapCentered)
+    }
+    pub fn load_with(bytes: &[u8], canvas: Canvas, baseline: CellBaseline) -> Result<Self> {
         let font = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default())
             .map_err(anyhow::Error::msg)?;
         let face = ttf_parser::Face::parse(bytes, 0).context("read HUD font metrics")?;
@@ -74,7 +159,7 @@ impl FontFace {
                 let cell_height = win_ascent + descent;
                 let ascent = face
                     .capital_height()
-                    .filter(|&cap| cap > 0)
+                    .filter(|&cap| cap > 0 && baseline == CellBaseline::CapCentered)
                     .map_or(win_ascent, |cap| {
                         (cell_height + f32::from(cap) / units) * 0.5
                     });
@@ -87,20 +172,34 @@ impl FontFace {
             glyphs: Arc::new(MutexCell::new(HashMap::new())),
             cell_height: cell_height.max(0.01),
             ascent,
+            freetype: (baseline == CellBaseline::FreeType)
+                .then(|| FreeTypeCell::from_bytes(bytes))
+                .flatten(),
         })
+    }
+    /// The EM a cell of `cell` pixels rasterizes at: retail CLinuxFont pixel sizes, else the
+    /// cell over the OS/2 cell height (unrounded, as measurement and scaled draws use it).
+    fn cell_em(&self, cell: f32) -> f32 {
+        self.freetype
+            .map_or(cell / self.cell_height, |ft| ft.size_for(cell).0)
+    }
+    /// Baseline below the cell top for glyphs rasterized at `em` pixels.
+    fn ascent_at(&self, em: f32) -> f32 {
+        self.freetype
+            .map_or(self.ascent * em, |ft| ft.ascent_at(em))
     }
     pub fn width(&self, value: &str, size: f32) -> f32 {
         // Retail CWin32Font uses a positive CreateFontA height: a character cell,
         // whereas fontdue's size is pixels per EM. Windows OS/2 metrics supply the
         // conversion; hhea descent differs significantly in the owned HalfLife2 font.
-        let size = size.round().max(1.) / self.cell_height;
+        let size = self.cell_em(size.round().max(1.));
         value
             .chars()
             .map(|c| self.font.metrics(c, size).advance_width)
             .sum()
     }
     fn glyph(&self, c: char, size: u16, blur: u16, scanlines: u16) -> Glyph {
-        self.raster(c, f32::from(size) / self.cell_height, blur, scanlines)
+        self.raster(c, self.cell_em(f32::from(size)), blur, scanlines)
     }
     fn raster(&self, c: char, em_size: f32, blur: u16, scanlines: u16) -> Glyph {
         let key = (c, em_size.to_bits(), blur, scanlines);
@@ -111,7 +210,7 @@ impl FontFace {
         let margin = usize::from(blur);
         let width = metrics.width + margin * 2;
         let height = metrics.height + margin * 2;
-        let ascent = self.ascent * em_size;
+        let ascent = self.ascent_at(em_size);
         let texture = if metrics.width == 0 || metrics.height == 0 {
             None
         } else {
@@ -202,7 +301,7 @@ impl FontFace {
     }
     /// Width of `value` for a font whose character cell is `cell` pixels tall.
     pub fn width_cell(&self, value: &str, cell: f32) -> f32 {
-        self.width_em(value, cell / self.cell_height)
+        self.width_em(value, self.cell_em(cell))
     }
     /// Draws `value` with an outline/border along the letter edge path with its character cell's
     /// top-left corner at `top_left`. Glyphs are rasterized at a whole-pixel EM and snapped to
@@ -215,10 +314,10 @@ impl FontFace {
         color: Color,
         outline: TextOutline,
     ) {
-        let raster = (cell / self.cell_height).round().clamp(1., 1024.);
+        let raster = self.cell_em(cell).round().clamp(1., 1024.);
         self.draw_baseline_outlined(
             value,
-            (top_left + Vec2::new(0., self.ascent * raster)).round(),
+            (top_left + Vec2::new(0., self.ascent_at(raster))).round(),
             raster,
             1.0,
             color,
@@ -250,7 +349,7 @@ impl FontFace {
                     (
                         vec2(
                             (pen.x + glyph.x).round(),
-                            (pen.y + glyph.y - self.ascent * em).round(),
+                            (pen.y + glyph.y - self.ascent_at(em)).round(),
                         ),
                         texture.size(),
                     )
@@ -258,7 +357,7 @@ impl FontFace {
                     (
                         vec2(
                             pen.x + glyph.x * scale,
-                            pen.y + (glyph.y - self.ascent * em) * scale,
+                            pen.y + (glyph.y - self.ascent_at(em)) * scale,
                         ),
                         texture.size() * scale,
                     )
@@ -429,6 +528,30 @@ mod tests {
         let fg_count = quads.iter().filter(|q| q.color == WHITE).count();
         assert_eq!(outline_count, 8);
         assert_eq!(fg_count, 1);
+    }
+
+    #[test]
+    fn freetype_cells_pick_the_largest_pixel_size_that_fits_like_retail_clinuxfont() {
+        // GorDIN (installed hl2_complete): 1000 units per EM, hhea ascender 968, bbox yMin -232.
+        // Retail draws the 1080p menu (MenuLarge tall 12 -> 27) at 22 px with a 22 px baseline,
+        // where GDI cells (OS/2 win metrics, 1403 units) would give 19 px glyphs.
+        let gordin = FreeTypeCell {
+            units_per_em: 1000,
+            ascender: 968,
+            y_min: -232,
+        };
+        for (tall, size) in [
+            (16., 13.),
+            (17., 14.),
+            (22., 18.),
+            (24., 19.),
+            (27., 22.),
+            (36., 29.),
+        ] {
+            assert_eq!(gordin.size_for(tall), (size, size), "tall {tall}");
+        }
+        assert_eq!(gordin.cell(22), (27, 22));
+        assert_eq!(gordin.cell(23), (28, 23));
     }
 
     #[test]

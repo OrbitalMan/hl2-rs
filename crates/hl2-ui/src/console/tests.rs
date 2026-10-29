@@ -848,7 +848,8 @@ fn submit_button_runs_the_line_and_close_button_closes_the_console() {
     assert_eq!(console.input_line(), "echo clicked", "runs on release");
     assert_eq!(
         release(&mut console, submit),
-        vec![Effect::PlaySound(RELEASE_SOUND.into())]
+        vec![],
+        "vgui buttons are silent"
     );
     assert_eq!(console.input_line(), "");
     assert_eq!(
@@ -1006,7 +1007,7 @@ fn pause_menu_entries_activate_by_pointer_and_keyboard() {
     // Cancel dismisses the dialog and remains in pause menu
     assert_eq!(
         click_btn(&mut console, layout.buttons[1]),
-        vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+        Vec::<Effect>::new()
     );
     assert!(console.confirm_box.is_none());
     assert_eq!(console.mode(), Mode::Pause);
@@ -1026,13 +1027,7 @@ fn pause_menu_entries_activate_by_pointer_and_keyboard() {
     assert!(console.confirm_box.is_none(), "Escape closes only the box");
     assert_eq!(console.mode(), Mode::Pause);
     keys(&mut console, &[Key::Enter]);
-    assert_eq!(
-        keys(&mut console, &[Key::Enter]),
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::Quit,
-        ]
-    );
+    assert_eq!(keys(&mut console, &[Key::Enter]), vec![Effect::Quit,]);
     console.confirm_box = None;
     click_row(&mut console, 0);
     assert_eq!(console.mode(), Mode::Gameplay, "Resume");
@@ -1069,10 +1064,7 @@ fn return_to_main_menu_confirmation_dialog_ok_unloads_to_background() {
     });
     assert_eq!(
         effects,
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::MainMenuMap(GameMap::new("hl2", "background01")),
-        ]
+        vec![Effect::MainMenuMap(GameMap::new("hl2", "background01")),]
     );
     assert!(console.confirm_box.is_none());
     assert_eq!(console.mode(), Mode::MainMenu);
@@ -1235,10 +1227,7 @@ fn background_map_single_source_of_truth_and_return_to_main_menu() {
     // Verifies the overridden background map was emitted
     assert_eq!(
         effects,
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::MainMenuMap(GameMap::new("hl2", "background02")),
-        ]
+        vec![Effect::MainMenuMap(GameMap::new("hl2", "background02")),]
     );
     assert_eq!(console.mode(), Mode::MainMenu);
 }

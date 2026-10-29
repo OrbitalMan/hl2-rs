@@ -23,7 +23,7 @@ use source_ui::{
         draw_texture_ex, texture, Canvas, Color, DrawTextureParams, FilterMode, MutexCell, Rect,
         Texture2D, YELLOW,
     },
-    font::FontFace,
+    font::{CellBaseline, FontFace},
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -1092,13 +1092,14 @@ impl WeaponHud {
         let icon_font = vfs
             .read("resource/HALFLIFE2.ttf")?
             .context("HalfLife2 HUD font missing")?;
-        let face = FontFace::load(&icon_font, canvas.clone())?;
+        // HUD numbers and labels sit on the retail GDI baseline (digit_ypos is from the cell top).
+        let face = FontFace::load_with(&icon_font, canvas.clone(), CellBaseline::Gdi)?;
         let bold = vfs
             .read("resource/linux_fonts/liberationsans-bold.ttf")?
             .or(vfs.read("resource/linux_fonts/DejaVuSans-Bold.ttf")?)
             .or(vfs.read("resource/gordin-bold.ttf")?)
             .context("Owned game installation font missing")?;
-        let bold = FontFace::load(&bold, canvas.clone())?;
+        let bold = FontFace::load_with(&bold, canvas.clone(), CellBaseline::Gdi)?;
         let animation_source = keyvalues::decode_text(
             &vfs.read("scripts/HudAnimations.txt")?
                 .context("HudAnimations.txt missing")?,

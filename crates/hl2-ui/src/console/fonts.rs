@@ -4,7 +4,8 @@ use super::CellMetrics;
 use source_assets::keyvalues;
 use source_assets::vpk::Vfs;
 use source_ui::canvas::Canvas;
-use source_ui::font::FontFace;
+use source_ui::font::{CellBaseline, FontFace};
+use source_ui::scheme_fonts::FontFileInfo;
 
 pub(crate) struct LoadedUiFonts {
     pub developer: Option<FontFace>,
@@ -37,6 +38,35 @@ pub(crate) fn load_ui_fonts(vfs: &Vfs, canvas: &Canvas) -> LoadedUiFonts {
             .and_then(|root| source_ui::scheme_fonts::resolve(root, name, |path| reader.read(path)))
             .or_else(|| fallbacks.iter().find_map(|path| reader.read(path)))
     };
+    // Retail CFontManager forces the families resource/FontInfo.kv maps to "freetype2"
+    // (every GorDIN face in the installed game) onto CLinuxFont, also on Windows.
+    let freetype_families: Vec<String> = reader
+        .read("resource/FontInfo.kv")
+        .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
+        .and_then(|roots| roots.into_iter().next())
+        .map(|root| {
+            root.children()
+                .iter()
+                .filter(|e| {
+                    e.text()
+                        .is_some_and(|v| v.eq_ignore_ascii_case("freetype2"))
+                })
+                .map(|e| e.key.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let is_freetype = |bytes: &[u8]| {
+        FontFileInfo::read(bytes)
+            .is_some_and(|info| freetype_families.iter().any(|family| info.matches(family)))
+    };
+    let ui_face = |bytes: &[u8]| {
+        let baseline = if is_freetype(bytes) {
+            CellBaseline::FreeType
+        } else {
+            CellBaseline::CapCentered
+        };
+        FontFace::load_with(bytes, canvas.clone(), baseline).ok()
+    };
     let menu_bytes = resolve(
         "MenuLarge",
         &[
@@ -46,11 +76,17 @@ pub(crate) fn load_ui_fonts(vfs: &Vfs, canvas: &Canvas) -> LoadedUiFonts {
     );
     let menu = menu_bytes
         .as_deref()
-        .and_then(|bytes| FontFace::load(bytes, canvas.clone()).ok())
+        .and_then(ui_face)
         .or_else(|| developer.clone());
     let menu_metrics = menu_bytes
         .as_deref()
-        .and_then(CellMetrics::from_bytes)
+        .and_then(|bytes| {
+            if is_freetype(bytes) {
+                CellMetrics::freetype(bytes)
+            } else {
+                CellMetrics::from_bytes(bytes)
+            }
+        })
         .unwrap_or_default();
     let ui = resolve(
         "Default",
@@ -59,7 +95,7 @@ pub(crate) fn load_ui_fonts(vfs: &Vfs, canvas: &Canvas) -> LoadedUiFonts {
             "resource/linux_fonts/liberationsans-regular.ttf",
         ],
     )
-    .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
+    .and_then(|bytes| ui_face(&bytes))
     .or_else(|| developer.clone());
     let mono = font("resource/linux_fonts/liberationmono-regular.ttf")
         .or_else(|| font("resource/linux_fonts/DejaVuSansMono.ttf"))
@@ -71,7 +107,7 @@ pub(crate) fn load_ui_fonts(vfs: &Vfs, canvas: &Canvas) -> LoadedUiFonts {
             "resource/linux_fonts/liberationsans-bold.ttf",
         ],
     )
-    .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
+    .and_then(|bytes| ui_face(&bytes))
     .or_else(|| ui.clone());
     // Dialog caption buttons (FrameButton) use Marlett's 'r' glyph (Source SDK Frame.cpp).
     let marlett = resolve("Marlett", &["resource/marlett.ttf"])
@@ -119,6 +155,7 @@ pub(crate) fn load_title_fonts(console: &mut super::Console, vfs: &Vfs, canvas: 
                 console.title_metrics = CellMetrics {
                     em_per_cell: 41. / 48.,
                     ascent_per_cell: 45. / 48.,
+                    freetype: None,
                 };
             }
             console.title = vfs

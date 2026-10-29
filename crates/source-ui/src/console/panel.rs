@@ -117,7 +117,7 @@ impl Default for Style {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     None,
-    /// The Close button was clicked: the app closes the console (and plays the button's sound).
+    /// The Close button was clicked: the app closes the console.
     Close,
     /// A line was submitted, with Enter or by clicking Submit (the button plays its sound).
     Submit {

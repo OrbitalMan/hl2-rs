@@ -1703,7 +1703,7 @@ fn open_dropdown_list_gates_input_to_elements_behind_it() {
         !h.dialog.draft().mouse.filter,
         "selection click must not reach the box"
     );
-    assert_eq!(h.dialog.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+    assert_eq!(h.dialog.take_sounds(), Vec::<String>::new());
 
     // Clicking outside closes the list without activating what was clicked.
     h.slow_click(page(AUTOAIM.0, AUTOAIM.1));
@@ -2204,7 +2204,7 @@ fn options_dialog_sound_events_hover_and_activation() {
         released: true,
         ..Default::default()
     });
-    assert_eq!(h.dialog.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+    assert_eq!(h.dialog.take_sounds(), Vec::<String>::new());
 }
 
 #[test]
@@ -2260,7 +2260,7 @@ fn options_dialog_close_button_behaves_like_cancel() {
     });
     // Crucial: Close(None) discards draft changes, exactly like Cancel!
     assert_eq!(outcome, OptionsOutcome::Close(None));
-    assert_eq!(h.dialog.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+    assert_eq!(h.dialog.take_sounds(), Vec::<String>::new());
 }
 
 #[test]

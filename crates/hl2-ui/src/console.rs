@@ -153,17 +153,20 @@ pub struct Console {
     chapter_index: crate::gameui::chapters::ChapterIndex,
 }
 
-/// Positive native font heights describe Windows character cells, not pixels per EM.
+/// Positive native font heights describe Windows character cells, not pixels per EM. Fonts
+/// that `resource/FontInfo.kv` forces to freetype2 (GorDIN) use retail CLinuxFont cells instead.
 #[derive(Clone, Copy)]
 pub(crate) struct CellMetrics {
     em_per_cell: f32,
     ascent_per_cell: f32,
+    freetype: Option<source_ui::font::FreeTypeCell>,
 }
 impl Default for CellMetrics {
     fn default() -> Self {
         Self {
             em_per_cell: 1.,
             ascent_per_cell: 0.8,
+            freetype: None,
         }
     }
 }
@@ -192,6 +195,14 @@ impl CellMetrics {
         Some(Self {
             em_per_cell: units / height,
             ascent_per_cell: ascent / height,
+            freetype: None,
+        })
+    }
+    /// Retail CLinuxFont cells for a FontInfo.kv freetype2 face.
+    pub(crate) fn freetype(bytes: &[u8]) -> Option<Self> {
+        Some(Self {
+            freetype: Some(source_ui::font::FreeTypeCell::from_bytes(bytes)?),
+            ..Self::from_bytes(bytes)?
         })
     }
 }
@@ -205,12 +216,18 @@ fn draw_cell_text_outlined(
     color: Color,
     outline: TextOutline,
 ) {
-    let em = (tall * metrics.em_per_cell).max(1.);
+    let (em, ascent) = metrics.freetype.map_or(
+        (
+            (tall * metrics.em_per_cell).max(1.),
+            tall * metrics.ascent_per_cell,
+        ),
+        |ft| ft.size_for(tall),
+    );
     let raster_size = em.round().clamp(1., 1024.);
     if let Some(font) = font {
         font.draw_baseline_outlined(
             value,
-            origin + vec2(0., tall * metrics.ascent_per_cell),
+            origin + vec2(0., ascent),
             raster_size,
             em / raster_size,
             color,
@@ -385,12 +402,15 @@ impl Console {
             console.menu_layout.apply_source_scheme(&root);
         }
         // The console and history colors from the installed source scheme (the base scheme it
-        // reads above is empty in the installed game).
+        // reads above is empty in the installed game). GameUI loads this scheme, so its
+        // MainMenu.MenuItemHeight and MenuLarge also size the menu (hl2_complete: 22 and a
+        // proportional GorDIN 12, where the platform base has a fixed 16 up to 1080 lines).
         if let Some(root) = scheme_reader
             .read("resource/SourceScheme.res")
             .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
             .and_then(|roots| roots.into_iter().next())
         {
+            console.menu_layout.apply_source_scheme(&root);
             for (name, color) in [
                 ("Console.TextColor", &mut console.shell.panel.style.text),
                 (
@@ -697,9 +717,6 @@ impl Console {
         self.draw_windows(time);
     }
 }
-
-/// Dialog push buttons play this when they activate.
-const RELEASE_SOUND: &str = "ui/buttonclickrelease.wav";
 
 fn vector(args: &[String]) -> Option<glam::Vec3> {
     if !(2..=3).contains(&args.len()) {

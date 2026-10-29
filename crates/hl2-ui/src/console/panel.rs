@@ -2,7 +2,7 @@
 //! ([`source_ui::console::panel::ConsolePanel`]) with HL2's commands, completion sources, texts
 //! and window look; printing, submitting lines and turning the dialog's actions into effects.
 
-use super::{commands, complete, Console, Effect, Window, RELEASE_SOUND};
+use super::{commands, complete, Console, Effect, Window};
 use source_ui::canvas::Rect;
 use source_ui::console::command;
 use source_ui::console::panel::{Action, Level, Look};
@@ -84,7 +84,8 @@ impl Console {
     }
 
     /// Input of the focused console: the dialog edits, scrolls and selects; a click on Close
-    /// closes it and a submitted line runs (both buttons play their release sound).
+    /// closes it and a submitted line runs. Like retail vgui Buttons without sound_* keys in
+    /// their resource file, neither button plays a sound (only GameMenu items do).
     pub(super) fn console_input(&mut self, input: &Input) -> Vec<Effect> {
         self.shell.pointer = input.pointer;
         match self
@@ -95,16 +96,9 @@ impl Console {
             Action::None => Vec::new(),
             Action::Close => {
                 self.toggle();
-                vec![Effect::PlaySound(RELEASE_SOUND.into())]
+                Vec::new()
             }
-            Action::Submit { line, clicked } => {
-                let mut effects = Vec::new();
-                if clicked {
-                    effects.push(Effect::PlaySound(RELEASE_SOUND.into()));
-                }
-                effects.extend(self.submit(&line));
-                effects
-            }
+            Action::Submit { line, .. } => self.submit(&line),
         }
     }
 

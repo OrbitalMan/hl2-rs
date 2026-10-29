@@ -349,17 +349,6 @@ pub const DEFAULT_TITLE_TALL: f32 = 32.;
 pub const DEFAULT_ITEM_TALL: f32 = 26.;
 /// Default menu font cell height.
 pub const DEFAULT_FONT_TALL: f32 = 11.;
-/// Base vertical spacing between menu buttons in 480p units (`BASE_SCREEN_HEIGHT`).
-/// At 1280x800 reference resolution (scale 5/3), this evaluates to exactly 20.0 pixels, matching
-/// original Source GameUI proportions while remaining resolution and DPI agnostic across scales.
-pub const BASE_MENU_BUTTON_SPACING: f32 = 12.;
-/// Vertical spacing between menu buttons at standard 1280x800 reference resolution.
-pub const MENU_BUTTON_SPACING: f32 = 20.;
-
-/// Computes the button spacing for a given 480p scale factor.
-pub fn button_spacing(scale: f32) -> f32 {
-    (BASE_MENU_BUTTON_SPACING * scale).round()
-}
 /// Base hit area width for menu items in 480p units.
 pub const MENU_ROW_BASE_WIDTH: f32 = 250.;
 
@@ -373,9 +362,11 @@ pub struct MenuLayout {
     pub menu_x: f32,
     pub menu_y: f32,
     pub title_tall: f32,
+    /// `MainMenu.MenuItemHeight` in 480p units, and the `MainMenu.MaxPropMenuItemHeight` cap.
     pub item_tall: f32,
-    pub font_ranges: Vec<(f32, f32, f32)>,
-    pub font_tall: f32,
+    pub max_item_tall: Option<f32>,
+    /// The menu font's scheme records in file order (`MainMenuFont`, else `MenuLarge`).
+    pub font_rules: Vec<FontRule>,
 }
 
 impl Default for MenuLayout {
@@ -390,8 +381,8 @@ impl Default for MenuLayout {
             menu_y: DEFAULT_MENU_Y,
             title_tall: DEFAULT_TITLE_TALL,
             item_tall: DEFAULT_ITEM_TALL,
-            font_ranges: vec![(1., 1080., 16.)],
-            font_tall: DEFAULT_FONT_TALL,
+            max_item_tall: None,
+            font_rules: vec![(16., Some((1., 1080.))), (DEFAULT_FONT_TALL, None)],
         }
     }
 }
@@ -474,13 +465,23 @@ impl MenuLayout {
     pub fn geometry_scaled(&self, height: f32, scale_factor: f32) -> MenuGeometry {
         let effective_height = height * scale_factor.max(1.0);
         let scale = effective_height / BASE_SCREEN_HEIGHT;
+        // Retail CScheme::ReloadFontGlyphs takes the first record whose yres range holds the
+        // screen height; only a record without a range is proportionally scaled (truncated).
         let font_tall = self
-            .font_ranges
+            .font_rules
             .iter()
-            .find(|(low, high, _)| effective_height >= *low && effective_height <= *high)
-            .map_or_else(|| (self.font_tall * scale).round(), |(_, _, tall)| *tall);
-        // Vertical stack of buttons with proportional spacing so they do not squish on high-DPI screens.
-        let item_tall = self.item_tall.max(font_tall + button_spacing(scale));
+            .find(|(_, range)| {
+                range.is_none_or(|(low, high)| (low..=high).contains(&effective_height))
+            })
+            .map_or(DEFAULT_FONT_TALL, |&(tall, range)| match range {
+                Some(_) => tall,
+                None => (tall * scale).trunc(),
+            });
+        // Retail CGameMenu::ApplySchemeSettings: the proportional MainMenu.MenuItemHeight,
+        // capped by MainMenu.MaxPropMenuItemHeight when that is set.
+        let item_tall = (self.item_tall * scale)
+            .trunc()
+            .min(self.max_item_tall.unwrap_or(f32::INFINITY));
         MenuGeometry {
             title: vec2(
                 (self.title_x * scale).trunc(),
@@ -504,17 +505,15 @@ impl MenuLayout {
         {
             self.item_tall = tall;
         }
+        if let Some(tall) =
+            resource_number(root, "MainMenu.MaxPropMenuItemHeight").filter(|value| *value > 0.)
+        {
+            self.max_item_tall = Some(tall);
+        }
         if let Some(fonts) =
             resource_font(root, "MainMenuFont").or_else(|| resource_font(root, "MenuLarge"))
         {
-            self.font_ranges.clear();
-            for (tall, range) in fonts {
-                if let Some((low, high)) = range {
-                    self.font_ranges.push((low, high, tall));
-                } else {
-                    self.font_tall = tall;
-                }
-            }
+            self.font_rules = fonts;
         }
     }
 
@@ -569,11 +568,17 @@ pub fn resource_font(root: &Entry, name: &str) -> Option<Vec<FontRule>> {
             if !tall.is_finite() || tall <= 0. || tall > 256. {
                 return None;
             }
+            // Retail "%d %d": a zero minimum means no range, a missing maximum equals the minimum.
             let range = entry.get("yres").and_then(|y| y.text()).and_then(|text| {
                 let mut parts = text.split_whitespace();
                 let low = parts.next()?.parse::<f32>().ok()?;
-                let high = parts.next()?.parse::<f32>().ok()?;
-                (low.is_finite() && high.is_finite() && low <= high).then_some((low, high))
+                let high = parts
+                    .next()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .filter(|v| *v != 0.)
+                    .unwrap_or(low);
+                (low != 0. && low.is_finite() && high.is_finite() && low <= high)
+                    .then_some((low, high))
             });
             Some((tall, range))
         })
@@ -970,14 +975,14 @@ mod tests {
     }
 
     #[test]
-    fn native_menu_uses_480_coordinate_scaling_with_proportional_spacing() {
+    fn native_menu_uses_480_coordinate_scaling_with_proportional_rows() {
         let layout = MenuLayout::default();
         let at_720 = layout.geometry(720.);
         assert_eq!(at_720.title, vec2(114., 217.));
         assert_eq!(at_720.title2, vec2(114., 258.));
         assert_eq!(at_720.menu, vec2(114., 360.));
         assert_eq!(at_720.title_tall, 48.);
-        assert_eq!(at_720.item_tall, 34.);
+        assert_eq!(at_720.item_tall, 39.);
         assert_eq!(at_720.font_tall, 16.);
         let at_480 = layout.geometry(480.);
         assert_eq!(at_480.title, vec2(76., 145.));
@@ -985,39 +990,70 @@ mod tests {
         assert_eq!(at_480.menu, vec2(76., 240.));
         assert_eq!(at_480.font_tall, 16.);
         assert_eq!(at_480.title_tall, 32.);
-        assert_eq!(at_480.item_tall, 28.);
+        assert_eq!(at_480.item_tall, 26.);
+        // Above the ranged record's 1080 lines the unranged one scales (truncated).
         assert_eq!(layout.geometry(1440.).font_tall, 33.);
-        assert_eq!(layout.geometry(1440.).item_tall, 69.);
+        assert_eq!(layout.geometry(1440.).item_tall, 78.);
 
-        // Regression assertion: 1280x800 layout values are exactly unchanged
         let at_800 = layout.geometry(800.);
         assert_eq!(at_800.font_tall, 16.);
-        assert_eq!(at_800.item_tall, 36.);
-        assert_eq!(button_spacing(800. / BASE_SCREEN_HEIGHT), 20.);
+        assert_eq!(at_800.item_tall, 43.);
         assert_eq!(at_800.title, vec2(126., 241.));
         assert_eq!(at_800.title2, vec2(126., 286.));
         assert_eq!(at_800.menu, vec2(126., 400.));
         assert_eq!(at_800.title_tall, 53.);
 
-        // High-DPI / Retina consistency: scale factor 2.0 at 800 logical height doubles spacing
+        // High-DPI / Retina consistency: scale factor 2.0 at 800 logical height is 1600 lines.
         let at_retina = layout.geometry_scaled(800., 2.0);
         assert_eq!(at_retina, layout.geometry(1600.));
-        assert_eq!(at_retina.font_tall, 37.);
-        assert_eq!(button_spacing(1600. / BASE_SCREEN_HEIGHT), 40.);
-        assert_eq!(at_retina.item_tall, 77.);
+        assert_eq!(at_retina.font_tall, 36.);
+        assert_eq!(at_retina.item_tall, 86.);
 
         // Verify row rects and text position helpers
         let rects = at_480.row_rects(3);
         assert_eq!(rects.len(), 3);
-        assert_eq!(rects[0], Rect::new(76., 240., 250., 28.));
-        assert_eq!(rects[1], Rect::new(76., 268., 250., 28.));
-        assert_eq!(at_480.row_text_pos(0), vec2(76., 246.));
-
-        // Regression assertion: 800p row rect height is 36. and text is centered with 20px spacing
+        assert_eq!(rects[0], Rect::new(76., 240., 250., 26.));
+        assert_eq!(rects[1], Rect::new(76., 266., 250., 26.));
+        assert_eq!(at_480.row_text_pos(0), vec2(76., 245.));
         let rects_800 = at_800.row_rects(2);
-        assert_eq!(rects_800[0].h, 36.);
-        assert_eq!(rects_800[1].h, 36.);
-        assert_eq!(at_800.row_text_pos(0), vec2(126., 410.));
+        assert_eq!(rects_800[0].h, 43.);
+        assert_eq!(rects_800[1].h, 43.);
+        assert_eq!(at_800.row_text_pos(0), vec2(126., 413.));
+    }
+
+    #[test]
+    fn installed_scheme_sizes_the_menu_like_retail_at_1080_lines() {
+        // hl2_complete resource/SourceScheme.res: one proportional GorDIN 12 record and
+        // MainMenu.MenuItemHeight 22. Retail draws 27 px text on 49 px rows at 1920x1080 (an
+        // owner capture of the native pause menu), where the platform base scheme's fixed
+        // Windows record (16 up to 1080 lines) gave half-size text.
+        let resource = source_assets::keyvalues::parse_resource(
+            br#"Scheme {
+            BaseSettings { MainMenu.MenuItemHeight 22 }
+            Fonts { MenuLarge { 1 { name GorDIN tall 12 weight 600 } } }
+        }"#,
+        )
+        .unwrap();
+        let mut layout = MenuLayout::default();
+        layout.apply_source_scheme(&resource[0]);
+        let at_1080 = layout.geometry(1080.);
+        assert_eq!((at_1080.font_tall, at_1080.item_tall), (27., 49.));
+        let at_720 = layout.geometry(720.);
+        assert_eq!((at_720.font_tall, at_720.item_tall), (18., 33.));
+
+        // ReloadFontGlyphs takes the first record that fits the screen height, unscaled when it
+        // has a range; MaxPropMenuItemHeight caps the scaled row height.
+        let resource = source_assets::keyvalues::parse_resource(
+            br#"Scheme {
+            BaseSettings { MainMenu.MenuItemHeight 22 MainMenu.MaxPropMenuItemHeight 40 }
+            Fonts { MenuLarge { 1 { tall 12 } 2 { tall 16 yres "1 1080" } } }
+        }"#,
+        )
+        .unwrap();
+        let mut layout = MenuLayout::default();
+        layout.apply_source_scheme(&resource[0]);
+        let at_1080 = layout.geometry(1080.);
+        assert_eq!((at_1080.font_tall, at_1080.item_tall), (27., 40.));
     }
 
     #[test]

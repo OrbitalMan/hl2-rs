@@ -1105,7 +1105,6 @@ impl OptionsDialog {
         };
         match pick {
             Some(Some(index)) => {
-                self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 let env = Self::make_env(&self.res, &self.modes, &self.recommendation);
                 combo.choice.select(&env, &mut self.draft, index);
             }
@@ -1267,27 +1266,20 @@ impl OptionsDialog {
         }
         match clicked {
             Some(Target::Tab(i)) => {
-                self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 self.select_tab(Tab::ALL[i]);
                 self.focus = Some(Target::Tab(i));
             }
             Some(Target::Ok) => {
-                self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 return self.ok();
             }
             Some(Target::Cancel) | Some(Target::Close) => {
-                self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 return OptionsOutcome::Close(None);
             }
             Some(Target::Apply) => {
-                self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 return self.apply();
             }
             Some(Target::Control(i)) => {
                 if let (Some(widget), Some(p)) = (list.get(i), pointer) {
-                    if !matches!(widget.binding, Some(Binding::Slider(_))) {
-                        self.sounds.push("ui/buttonclickrelease.wav".to_string());
-                    }
                     return self.activate(widget, p);
                 }
             }
@@ -1445,7 +1437,6 @@ impl OptionsDialog {
                 .key_press
                 .update(Some(focus), key, |k| input.held_keys.contains(&k))
             {
-                self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 return Some(match target {
                     Target::Ok => self.ok(),
                     // A sub-dialog's own Close (credits) closes the sub-dialog only.
@@ -1474,7 +1465,6 @@ impl OptionsDialog {
                     return None;
                 };
                 if let Some(next) = next {
-                    self.sounds.push("ui/buttonclickrelease.wav".to_string());
                     self.select_tab(Tab::ALL[next]);
                     self.focus = Some(Target::Tab(next));
                 }
@@ -1792,17 +1782,9 @@ impl OptionsDialog {
         let clicked = self.track(&list, &extra, pointer, input);
         self.update_tooltip(sub.panel(), &list, pointer, input, measure);
         match clicked {
-            Some(Target::Close) => {
-                self.sounds.push("ui/buttonclickrelease.wav".to_string());
-                self.command(Command::SubCancel)
-            }
+            Some(Target::Close) => self.command(Command::SubCancel),
             Some(Target::Control(i)) => match (list.get(i), pointer) {
-                (Some(widget), Some(p)) => {
-                    if !matches!(widget.binding, Some(Binding::Slider(_))) {
-                        self.sounds.push("ui/buttonclickrelease.wav".to_string());
-                    }
-                    self.activate(widget, p)
-                }
+                (Some(widget), Some(p)) => self.activate(widget, p),
                 _ => OptionsOutcome::None,
             },
             _ => OptionsOutcome::None,
@@ -1981,7 +1963,6 @@ impl OptionsDialog {
             return;
         }
         if let Some(Target::Close | Target::Cancel) = self.track(&[], &extra, pointer, input) {
-            self.sounds.push("ui/buttonclickrelease.wav".to_string());
             self.command(Command::SubCancel);
         }
     }

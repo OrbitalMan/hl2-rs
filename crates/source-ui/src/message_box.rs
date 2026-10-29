@@ -175,9 +175,6 @@ impl MessageBox {
         self.last_armed = self.armed;
         let enter_activated = enter.then_some(0);
         let final_activated = activated.or(enter_activated);
-        if final_activated.is_some() {
-            self.sounds.push("ui/buttonclickrelease.wav".to_string());
-        }
         match final_activated {
             Some(0) => Some(true),
             Some(_) => Some(false),
@@ -205,7 +202,6 @@ impl MessageBox {
         let activated = self
             .key_press
             .update(Some(self.focus), key, |k| input.held_keys.contains(&k))?;
-        self.sounds.push("ui/buttonclickrelease.wav".to_string());
         Some(activated == 0)
     }
 
@@ -334,7 +330,7 @@ mod tests {
             true,
             false,
         );
-        assert_eq!(quit.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+        assert_eq!(quit.take_sounds(), Vec::<String>::new());
 
         // 6. Press, move away, and release emits no release sound
         quit.input(&layout, center(layout.buttons[0]), true, true, false, false);
@@ -395,7 +391,7 @@ mod tests {
             false,
         );
         assert_eq!(outcome, Some(false), "Close button behaves like Cancel");
-        assert_eq!(msg_box.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+        assert_eq!(msg_box.take_sounds(), Vec::<String>::new());
     }
 
     #[test]

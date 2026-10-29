@@ -64,17 +64,14 @@ fn background_level_main_menu_navigation_new_game_and_quit_box() {
     };
     assert_eq!(
         click_btn(&mut console, layout.buttons[1]),
-        vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+        Vec::<Effect>::new()
     );
     assert!(console.confirm_box.is_none(), "Cancel closes the box");
     assert_eq!(console.mode(), Mode::MainMenu);
     click_row(&mut console, 6);
     assert_eq!(
         click_btn(&mut console, layout.buttons[0]),
-        vec![
-            Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-            Effect::Quit,
-        ]
+        vec![Effect::Quit,]
     );
 }
 
