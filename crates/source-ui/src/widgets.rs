@@ -29,6 +29,8 @@ use source_assets::keyvalues::Entry;
 
 /// Character-cell height of the scheme's `Default`/`DefaultBold` fonts at 1:1 scale.
 pub const FONT_TALL: f32 = 16.;
+pub use button::BUTTON_TEXT_INSET;
+mod button;
 
 /// Classification of interactive UI controls for sound and interaction behaviors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -979,35 +981,6 @@ impl Painter<'_> {
             (vec2(r.x + k, r.y + r.h - k), color),
             (vec2(r.x + cr, r.y + r.h), color),
         ]);
-    }
-
-    /// A push button drawn from [`Theme::button_style`]: raised border, sunken while pressed,
-    /// selection border when default, and the scheme's armed colors while hovered.
-    pub fn button(&self, rect: Rect, label: &str, state: ButtonState) {
-        let style = self.theme.button_style(state);
-        if style.bg.a > 0. {
-            self.fill(rect, style.bg);
-        }
-        match style.border {
-            ButtonBorder::Depressed => self.sunken(rect),
-            ButtonBorder::Raised => self.raised(rect),
-            ButtonBorder::KeyFocus => {
-                self.raised(rect);
-                let outer = Rect::new(rect.x - 1., rect.y - 1., rect.w + 2., rect.h + 2.);
-                self.border(
-                    outer,
-                    self.theme.border_selection,
-                    self.theme.border_selection,
-                );
-            }
-        }
-        let offset = style.text_offset;
-        let text_rect = Rect::new(rect.x + 6. + offset, rect.y + offset, rect.w - 12., rect.h);
-        if state.enabled {
-            self.text_in(label, text_rect, Align::Left, style.text, false);
-        } else {
-            self.label(label, text_rect, Align::Left, false);
-        }
     }
 
     /// `CheckButton`: a sunken box with a check mark, then the label.

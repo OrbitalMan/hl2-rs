@@ -1,5 +1,22 @@
 # MODLOG
 
+## 2026-10-29 Confirmation label sizing
+
+**Agent/model:** Codex desktop; GPT-6 family, exact model identifier not exposed. No subagents.
+
+**Changed:** Shared MessageBox sizing uses the push-button painter inset; Cancel uses its own width for placement. Extracted button painting into its own toolkit module.
+
+**Why:** Measured labels had 10 pixels of padding while painting reserved 12, clipping Quit and longer translations.
+
+**Tested how / Result:** `cargo test -p source-ui message_box --locked`: 5 passed, including unequal German and Japanese labels and dialog containment. `cargo test -p hl2-ui quit_box_uses_tokens --locked`: passed. `cargo clippy -p source-ui --all-targets --locked -- -D warnings`: passed.
+
+**Still broken or not tested:** Packaged dialog capture pending. Architecture check reports pre-existing size growth in unrelated functions/modules; no baseline growth accepted.
+
+**Next:** Caption overflow and console selection.
+
+**Checkpoint integration:** Extracted existing scheme loading, font-family discovery, HUD caption drawing, AI-disabled drawing, actor pose access and lifecycle tests to repair pre-existing architecture failures without accepting growth. Tightened the baseline. The viewmodel overlay now labels offset.x/y/z separately and sizes itself for every supplied row. A pre-change packaged capture already showed the triplet; the missing-value report was not reproduced at 1024x768. Workspace validation passed before the presentation-only row clarification; final packaged capture follows.
+
+
 ## 2026-10-29 Merge main into orbitalman/hl2-ui
 
 **Agent/model:** Antigravity, model Gemini 3.8 Flash (High). No subagents.

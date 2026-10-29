@@ -1,5 +1,10 @@
 # STATUS
 
+## UI repair checkpoint: confirmation sizing (2026-10-29)
+
+All confirmation callers retain the shared source-ui MessageBox layout. Button measurement now uses the same horizontal insets as painting; unequal Cancel labels center on their own width. Localized-label containment tests pass. Packaged visual validation is pending. Existing architecture growth in canvas presentation, console/font loading, HUD loading and simulation choreography/tests was repaired through bounded helper/module extraction; no baseline growth accepted. Viewmodel offsets now have separate named axes with dynamic row count; the original triplet was visible in the pre-change packaged capture. Live GitHub claims refresh unavailable (no gh; network DNS failure); local Claims reviewed.
+
+
 ## Merge main into orbitalman/hl2-ui (2026-10-29)
 
 - Merged upstream `main` (`b4f1c7d`: sessions 31-35 including NPC death ragdolls, particle operators, bullet/shotgun multidamage, crossbow wall/door pins, friendly immunity, ragdoll rest and fadeout) into `orbitalman/hl2-ui`.

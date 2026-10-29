@@ -40,21 +40,7 @@ pub(crate) fn load_ui_fonts(vfs: &Vfs, canvas: &Canvas) -> LoadedUiFonts {
     };
     // Retail CFontManager forces the families resource/FontInfo.kv maps to "freetype2"
     // (every GorDIN face in the installed game) onto CLinuxFont, also on Windows.
-    let freetype_families: Vec<String> = reader
-        .read("resource/FontInfo.kv")
-        .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
-        .and_then(|roots| roots.into_iter().next())
-        .map(|root| {
-            root.children()
-                .iter()
-                .filter(|e| {
-                    e.text()
-                        .is_some_and(|v| v.eq_ignore_ascii_case("freetype2"))
-                })
-                .map(|e| e.key.clone())
-                .collect()
-        })
-        .unwrap_or_default();
+    let freetype_families = freetype_families(&reader);
     let is_freetype = |bytes: &[u8]| {
         FontFileInfo::read(bytes)
             .is_some_and(|info| freetype_families.iter().any(|family| info.matches(family)))
@@ -191,4 +177,22 @@ pub(crate) fn load_title_fonts(console: &mut super::Console, vfs: &Vfs, canvas: 
         console.lostcoast_title_font = FontFace::load(&bytes, canvas.clone()).ok();
         console.lostcoast_title_face = console.lostcoast_title_font.as_ref().map(FontFace::face);
     }
+}
+
+fn freetype_families(reader: &crate::gameui::resources::Reader<'_>) -> Vec<String> {
+    reader
+        .read("resource/FontInfo.kv")
+        .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
+        .and_then(|roots| roots.into_iter().next())
+        .map(|root| {
+            root.children()
+                .iter()
+                .filter(|e| {
+                    e.text()
+                        .is_some_and(|v| v.eq_ignore_ascii_case("freetype2"))
+                })
+                .map(|e| e.key.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }

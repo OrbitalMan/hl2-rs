@@ -1,5 +1,15 @@
 # Design
 
+## UI repair and weapon blur checkpoints (2026-10-29)
+
+1. Size every confirmation button from its measured localized label and the shared painter insets; keep quit, return and video confirmation on source-ui MessageBox. Test unequal long labels and containment.
+2. Repair caption overflow using the authored viewport, scaled insets, cached reflow on size/font changes and line-based panning. Test long styled commentary at several scales before packaged captures.
+3. Add Unicode-safe selection and replacement to the toolkit console editor, use existing host clipboard transport, and paint the visible selection. Cover Shift navigation, select-all, copy, paste, completion and history interaction.
+4. Make the viewmodel overlay expose all three named offset axes and verify its actual draw path.
+5. Reproduce firing SMG transparency in the packaged Advanced blur path; isolate coverage loss with negative controls, preserve moving silhouettes and record performance before/after.
+
+Each checkpoint updates validation and limitations, runs owning-crate tests, formatting and strict Clippy, and is committed independently. Final validation includes workspace and Windows checks plus packaged regressions where available. Preserve unrelated working files and the active UI integration branch.
+
 ## Background projection independent of gameplay (2026-10-28)
 
 Correct the previous follow-up: stabilizing a saved gameplay FOV was the wrong menu policy.

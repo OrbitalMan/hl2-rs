@@ -1,5 +1,6 @@
 //! The PC HL2 HUD layout is read from the owned game's scheme and resource files.
 //! Bucket positioning and visibility follow CHudWeaponSelection, rather than a new UI design.
+mod captions;
 mod commentary;
 mod crosshair;
 mod font;
@@ -1162,10 +1163,7 @@ impl WeaponHud {
                 .collect();
             source_ui::native_font::load(&icon_font, &requests)?
         };
-        let mut corners = Vec::new();
-        for number in 1..=4 {
-            corners.push(texture(vfs, &format!("vgui/hud/8x800corner{number}"))?);
-        }
+        let corners = load_corners(vfs)?;
         let loc = commentary::load_localization(vfs);
         let commentary = commentary::CommentaryHud::load(vfs, layout);
         let captions = crate::closecaption::CaptionHud::load(
@@ -1255,46 +1253,6 @@ impl WeaponHud {
         self.commentary.draw(self, overlay, closecaption, time);
     }
 
-    /// The closed caption panel (CHudCloseCaption::Paint): its box through the HUD's rounded
-    /// panel background, then the text runs. Hidden while `closecaption` is off.
-    pub fn draw_captions(&self, settings: &crate::closecaption::Settings, time: f64) {
-        self.captions.tick(time);
-        if !settings.closecaption {
-            return;
-        }
-        let _frame = self.framed();
-        let size = (self.canvas.width(), self.canvas.height());
-        let Some((panel, paint)) = self.captions.paint(size, time) else {
-            return;
-        };
-        let color = |c: [f32; 4]| Color::new(c[0], c[1], c[2], c[3]);
-        if let Some((rect, background)) = paint.background {
-            self.rounded_box(
-                Rect::new(panel.x + rect[0], panel.y + rect[1], rect[2], rect[3]),
-                color(background),
-            );
-        }
-        let scale = crate::proportional::scale(vec2(size.0, size.1));
-        for run in &paint.runs {
-            let Some((face, tall)) = self.captions.face(run.style, scale) else {
-                continue;
-            };
-            let (x, y) = (panel.x + run.x, panel.y + run.y);
-            if let Some(highlight) = run.highlight {
-                self.canvas
-                    .rectangle(x, y, run.width, run.height, color(highlight));
-            }
-            face.draw_cell(&run.text, vec2(x, y), tall, color(run.color));
-        }
-    }
-
-    /// A ScreenFade message (DamageEffect or env_fade) on the game clock.
-    pub fn screen_fade(&self, fade: hl2_simulation::player_damage::ScreenFade, time: f64) {
-        self.fades.borrow_mut().add(fade, time);
-    }
-    pub fn clear_fades(&self) {
-        self.fades.borrow_mut().clear();
-    }
     /// ViewDrawFade over the 3D view, before the HUD. The modulate material's exact
     /// use of the fade alpha is engine code; here the frame is multiplied by the color
     /// blended toward white by (1 - alpha), which is inferred, not verified.
@@ -1824,6 +1782,12 @@ impl WeaponHud {
             self.canvas.additive(false);
         }
     }
+}
+
+fn load_corners(vfs: &Vfs) -> Result<Vec<Texture2D>> {
+    (1..=4)
+        .map(|number| texture(vfs, &format!("vgui/hud/8x800corner{number}")))
+        .collect()
 }
 
 #[cfg(test)]

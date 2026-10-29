@@ -9,6 +9,7 @@ mod effect;
 mod focus;
 mod fonts;
 mod loading;
+mod scheme;
 use fonts::load_ui_fonts;
 mod menu_flow;
 mod options_dialog;
@@ -24,7 +25,7 @@ use crate::gameui::{
 pub use effect::{Effect, GameMap};
 use glam::{vec2, Vec2};
 use serde::Serialize;
-use source_assets::{keyvalues, vpk::Vfs};
+use source_assets::vpk::Vfs;
 use source_ui::{
     canvas::{Canvas, Color, Texture2D, WHITE},
     console::panel::Style as ConsoleStyle,
@@ -388,75 +389,7 @@ impl Console {
             .set_placement(Placement::from_saved(console.config.dialogs.options));
         console.menu_metrics = fonts.menu_metrics;
         fonts::load_title_fonts(&mut console, vfs, &canvas);
-        // Installed desktop GameUI colors. Layout/window controls remain an initial implementation.
-        let scheme_reader = crate::gameui::resources::Reader::new(vfs);
-        if let Some(root) = scheme_reader
-            .read("resource/SourceSchemeBase.res")
-            .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
-            .and_then(|roots| roots.into_iter().next())
-        {
-            console.theme = Theme::from_scheme(&root);
-            if let Some(time) = root
-                .get("BaseSettings")
-                .and_then(|e| e.get("Frame.FocusTransitionEffectTime"))
-                .and_then(|e| e.text())
-                .and_then(|t| t.trim().parse::<f32>().ok())
-            {
-                console.shell.windows.fade_time = time;
-            }
-            console.style = Style {
-                menu: scheme_color(&root, "MainMenu.TextColor").unwrap_or(console.style.menu),
-                menu_armed: scheme_color(&root, "MainMenu.ArmedTextColor")
-                    .unwrap_or(console.style.menu_armed),
-                panel: scheme_color(&root, "Frame.BgColor").unwrap_or(console.style.panel),
-            };
-            let style = &mut console.shell.panel.style;
-            *style = ConsoleStyle {
-                entry: scheme_color(&root, "RichText.BgColor").unwrap_or(style.entry),
-                text: scheme_color(&root, "Console.TextColor").unwrap_or(style.text),
-                dev_text: scheme_color(&root, "Console.DevTextColor").unwrap_or(style.dev_text),
-                ..*style
-            };
-            console.menu_layout.apply_source_scheme(&root);
-        }
-        // The console and history colors from the installed source scheme (the base scheme it
-        // reads above is empty in the installed game). GameUI loads this scheme, so its
-        // MainMenu.MenuItemHeight and MenuLarge also size the menu (hl2_complete: 22 and a
-        // proportional GorDIN 12, where the platform base has a fixed 16 up to 1080 lines).
-        if let Some(root) = scheme_reader
-            .read("resource/SourceScheme.res")
-            .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
-            .and_then(|roots| roots.into_iter().next())
-        {
-            console.menu_layout.apply_source_scheme(&root);
-            for (name, color) in [
-                ("Console.TextColor", &mut console.shell.panel.style.text),
-                (
-                    "Console.DevTextColor",
-                    &mut console.shell.panel.style.dev_text,
-                ),
-                ("RichText.BgColor", &mut console.shell.panel.style.entry),
-                (
-                    "RichText.SelectedBgColor",
-                    &mut console.shell.panel.style.selected_bg,
-                ),
-                (
-                    "RichText.SelectedTextColor",
-                    &mut console.shell.panel.style.selected_text,
-                ),
-            ] {
-                if let Some(value) = scheme_color(&root, name) {
-                    *color = value;
-                }
-            }
-        }
-        if let Some(root) = scheme_reader
-            .read("resource/ClientScheme.res")
-            .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
-            .and_then(|roots| roots.into_iter().next())
-        {
-            console.menu_layout.apply_client_scheme(&root);
-        }
+        console.load_scheme(vfs);
         console
     }
 
@@ -629,7 +562,7 @@ impl Console {
     /// Draws the live viewmodel tuning values with their top edge at `top`; returns the bottom
     /// edge.
     pub fn draw_viewmodel_debug(&self, lines: &[String], top: f32) -> f32 {
-        self.draw_debug_lines_panel(lines, top, 5)
+        self.draw_debug_lines_panel(lines, top, lines.len())
     }
 
     /// Draws the live background visual debug values with their top edge at `top`; returns the bottom

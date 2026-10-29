@@ -327,10 +327,9 @@ fn draw_debug_overlays(
             format!("aspect_ratio: {}", profile.as_str()),
             format!("weapon: {}", sim.viewmodel_debug.weapon),
             format!("fov_offset: {:.2}    [ ]", value.fov_offset),
-            format!(
-                "offset: [{:.2}, {:.2}, {:.2}]    L/R:Y  U/D:Z  ,/.:X",
-                value.offset[0], value.offset[1], value.offset[2]
-            ),
+            format!("offset.x: {:.2}    ,/.", value.offset[0]),
+            format!("offset.y: {:.2}    L/R", value.offset[1]),
+            format!("offset.z: {:.2}    U/D", value.offset[2]),
             "Shift = 1.0  Alt = 0.01    hold to repeat    viewmodel_tweak_reset".to_owned(),
         ];
         stack_top = ui.source.draw_viewmodel_debug(&lines, stack_top) + OVERLAY_GAP;
@@ -424,19 +423,7 @@ pub fn present(
         game.spawn_overlay
             .panel(game.ai.enabled, game.ai.ignore_player)
     });
-    // CAI_BaseNPC::PreThink: "A.I. Disabled..." at (0.7, 0.65) while ai_disable is on
-    // (HUD message font not reproduced: the developer font).
-    if !game.ai.enabled
-        && let Some(font) = &hud.spawn_font
-    {
-        font.text(
-            &hud.source.canvas,
-            "A.I. Disabled...",
-            width * 0.7,
-            height * 0.65,
-            source_ui::canvas::WHITE,
-        );
-    }
+    draw_ai_disabled(&hud, &game, width, height);
     let hits = if let (Some(font), Some(panel)) = (&hud.spawn_font, &hud.spawn_panel) {
         let message = game
             .spawn_log
@@ -543,6 +530,22 @@ fn quad_mesh(quad: &Quad, viewport: Vec2) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors.to_vec());
     mesh.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
     mesh
+}
+
+fn draw_ai_disabled(hud: &Hud, game: &crate::gameplay::Gameplay, width: f32, height: f32) {
+    // CAI_BaseNPC::PreThink: "A.I. Disabled..." at (0.7, 0.65) while ai_disable is on
+    // (HUD message font not reproduced: the developer font).
+    if !game.ai.enabled
+        && let Some(font) = &hud.spawn_font
+    {
+        font.text(
+            &hud.source.canvas,
+            "A.I. Disabled...",
+            width * 0.7,
+            height * 0.65,
+            source_ui::canvas::WHITE,
+        );
+    }
 }
 
 #[cfg(test)]

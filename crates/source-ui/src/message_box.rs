@@ -3,7 +3,8 @@
 
 use crate::canvas::Rect;
 use crate::widgets::{
-    close_button_rect, ButtonState, ButtonTracker, Painter, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL,
+    close_button_rect, ButtonState, ButtonTracker, Painter, BUTTON_TEXT_INSET, CLIENT_INSET_X,
+    CLIENT_TOP, FONT_TALL,
 };
 use glam::{vec2, Vec2};
 
@@ -102,7 +103,7 @@ impl MessageBox {
         let text_w = lines.iter().map(|l| measure(l)).fold(0.0, f32::max).ceil();
         let button = |label: &str| {
             vec2(
-                (measure(label) + 10.).ceil().max(64.),
+                (measure(label) + 2. * BUTTON_TEXT_INSET).ceil().max(64.),
                 (FONT_TALL + 10.).max(24.),
             )
         };
@@ -132,7 +133,7 @@ impl MessageBox {
                     ok.y,
                 ),
                 Rect::new(
-                    (3. * right / 4. - ok.x / 2. + CLIENT_INSET_X).floor(),
+                    (3. * right / 4. - cancel.x / 2. + CLIENT_INSET_X).floor(),
                     y,
                     cancel.x,
                     cancel.y,
@@ -244,6 +245,26 @@ impl MessageBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn localized_buttons_fit_the_painter_insets_and_the_dialog() {
+        for (ok, cancel) in [
+            ("Quit", "Abbrechen und zurückkehren"),
+            ("Beenden und zum Desktop zurückkehren", "Nein"),
+            ("終了してデスクトップに戻る", "変更を取り消す"),
+        ] {
+            let measure = |s: &str| s.chars().count() as f32 * 9.25;
+            let message =
+                MessageBox::new("Title".into(), "?".into(), ok.into(), Some(cancel.into()));
+            let layout = message.layout(measure);
+            for (button, label) in layout.buttons.iter().zip([ok, cancel]) {
+                assert!(button.w - 2. * BUTTON_TEXT_INSET >= measure(label));
+                assert!(button.x >= CLIENT_INSET_X);
+                assert!(button.x + button.w <= layout.size.x - CLIENT_INSET_X);
+            }
+            assert!(layout.buttons[0].x + layout.buttons[0].w < layout.buttons[1].x);
+        }
+    }
 
     #[test]
     fn message_box_buttons_take_keyboard_focus() {
