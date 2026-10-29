@@ -140,24 +140,14 @@ pub(crate) fn load_title_fonts(console: &mut super::Console, vfs: &Vfs, canvas: 
                 .and_then(|root| std::fs::read(root.join("hl2/resource/halflife2.ttf")).ok())
         });
     if let Some(bytes) = title_bytes {
-        console.title_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
+        // Retail CWin32Font cells: the GDI size comes from the VDMX table (HL2EP2 tall 72 -> 75 px,
+        // halflife2 tall 48 -> 41 px, the owned 720p calibration's EM41).
+        console.title_metrics = CellMetrics::gdi(&bytes)
+            .or_else(|| CellMetrics::from_bytes(&bytes))
+            .unwrap_or_default();
         console.title_font = FontFace::load(&bytes, canvas.clone()).ok();
         console.title_face = console.title_font.as_ref().map(FontFace::face);
         if console.title_font.is_some() {
-            let is_hl2_logo_font = console
-                .title_face
-                .as_ref()
-                .is_some_and(|f| f.lookup_glyph_index('=') == 0);
-            if is_hl2_logo_font {
-                // Owned 720px retail capture + GDI probe for halflife2.ttf: requested cell48 -> EM41,
-                // native title baseline262 relative to ClientScheme panelY217.
-                // Other resolutions scale this measured GDI/label relation; font rasterization remains approximate.
-                console.title_metrics = CellMetrics {
-                    em_per_cell: 41. / 48.,
-                    ascent_per_cell: 45. / 48.,
-                    freetype: None,
-                };
-            }
             console.title = vfs
                 .read("gameinfo.txt")
                 .ok()
@@ -195,7 +185,9 @@ pub(crate) fn load_title_fonts(console: &mut super::Console, vfs: &Vfs, canvas: 
                 .and_then(|root| std::fs::read(root.join("lostcoast/resource/lostcoast.ttf")).ok())
         });
     if let Some(bytes) = lc_bytes {
-        console.lostcoast_title_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
+        console.lostcoast_title_metrics = CellMetrics::gdi(&bytes)
+            .or_else(|| CellMetrics::from_bytes(&bytes))
+            .unwrap_or_default();
         console.lostcoast_title_font = FontFace::load(&bytes, canvas.clone()).ok();
         console.lostcoast_title_face = console.lostcoast_title_font.as_ref().map(FontFace::face);
     }

@@ -314,6 +314,15 @@ pub fn viewmodel_animation_state<'a>(
     }
     let duration = clip.duration();
     let idle_clip = rig.clips.get(idle_animation);
+    // A finished sequence holds its last frame until the weapon sends another. With no idle clip
+    // to fade into (the gravity gun's ACT_VM_IDLE is "idle", not "idle01") the cross-fade would
+    // blend toward the bind pose, which threw the viewmodel across the screen after each punt.
+    if idle_clip.is_none() {
+        return ViewmodelAnimationState::Playing {
+            clip: animation,
+            time: elapsed.min(duration),
+        };
+    }
     let fade_time = if let Some(idle) = idle_clip {
         if clip.layer.fade_out > 0. && idle.layer.fade_in > 0. {
             clip.layer.fade_out.min(idle.layer.fade_in)
@@ -761,5 +770,26 @@ mod tests {
         let m_idle = viewmodel_state_matrices(&rig, &state_idle, &[]);
         let p_idle = m_idle[0].transform_point3(Vec3::ZERO);
         assert_eq!(p_idle.y, 10.0);
+
+        // 7. Without the idle clip (the gravity gun has no "idle01") a finished clip holds its
+        // last frame instead of fading toward the bind pose.
+        for after in [0.05, 0.3, 2.0] {
+            let held = viewmodel_animation_state(
+                &rig,
+                "attack",
+                0.0,
+                "idle01",
+                f64::from(duration) + after,
+            );
+            assert_eq!(
+                held,
+                ViewmodelAnimationState::Playing {
+                    clip: "attack",
+                    time: duration,
+                }
+            );
+            let p_held = viewmodel_state_matrices(&rig, &held, &[])[0].transform_point3(Vec3::ZERO);
+            assert_eq!(p_held.y, -10.0);
+        }
     }
 }

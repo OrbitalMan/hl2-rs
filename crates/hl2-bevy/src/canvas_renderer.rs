@@ -385,13 +385,18 @@ pub fn present(
         );
     }
     hud.source.draw_fade(time);
+    // While GameUI is up in a level (pause menu, console, dialogs) the engine hides the client's
+    // HUD panel: native pause captures (hl2_complete oracle, 2026-10-29) show no HUD or crosshair.
+    let hud_hidden = ui.source.paused() && !ui.source.background_level();
     // Closed captions (Options > Audio) also show behind the main menu, under GameUI.
     let captions = hl2_ui::closecaption::Settings::from_config(ui.source.config.audio.captions);
     let messages = std::mem::take(&mut game.caption_messages);
     hud.source.captions.emit(&messages, &captions, time);
-    hud.source.draw_captions(&captions, time);
+    if !hud_hidden {
+        hud.source.draw_captions(&captions, time);
+    }
     // Background levels behind the main menu draw no HUD.
-    if !ui.source.background_level() {
+    if !ui.source.background_level() && !hud_hidden {
         game_hud::draw(&hud, &game, &ui);
     }
     hud.observe_frame(clock.elapsed_secs_f64(), performance.is_some());

@@ -4,6 +4,12 @@ use crate::gameui::menu::MenuGeometry;
 use glam::{vec2, Vec2};
 use source_ui::{canvas::Color, font::TextOutline, windows::Layer};
 
+/// Native draws the title labels' GDI text 4 px below the Main.TitleN.Y cell at every
+/// resolution (hl2_complete oracle: HL2EP2 at 720p and 1080p, pause and main menu; the older
+/// halflife2.ttf 720p capture shows the same 4 px). CBasePanel::PerformLayout places the labels
+/// at the scaled TitleN.Y and vgui Label adds no inset, so the source of the offset is unfound.
+const TITLE_TEXT_DROP: f32 = 4.;
+
 impl Console {
     pub(super) fn draw_menu_buttons(
         &self,
@@ -147,7 +153,7 @@ impl Console {
         sub_outline: TextOutline,
     ) {
         let title = self.current_title();
-        let em = geometry.title_tall * self.title_metrics.em_per_cell;
+        let (em, _) = self.title_metrics.size_for(geometry.title_tall);
         for (line_idx, line) in title.lines().enumerate() {
             let mut pen = match line_idx {
                 0 => geometry.title,
@@ -159,7 +165,7 @@ impl Console {
                             (line_idx - 1) as f32 * (geometry.title2.y - geometry.title.y).max(1.),
                         )
                 }
-            };
+            } + vec2(0., TITLE_TEXT_DROP);
             if line_idx == 0 {
                 let mut chars = Vec::with_capacity(line.len());
                 for character in line.chars() {

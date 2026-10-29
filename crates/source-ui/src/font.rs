@@ -139,6 +139,107 @@ impl FreeTypeCell {
     }
 }
 
+/// Retail CWin32Font::Create cells: `CreateFontA(+tall)` lets GDI pick the largest pixel size
+/// whose VDMX row (yMax - yMin) fits `tall`, and that row's yMax is tmAscent (the baseline
+/// below the cell top). Probed with GDI: HL2EP2 tall 72 -> 75 px, ascent 69; tall 48 -> 50, 46;
+/// halflife2 tall 48 -> 41 px. Fonts without a VDMX row scale the OS/2 Windows metrics.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GdiCell {
+    /// (pixel size, ascent) for each requested height; 0 where VDMX has no fitting row.
+    cells: [(u8, u8); 256],
+    units_per_em: f32,
+    win_ascent: f32,
+    win_height: f32,
+}
+impl GdiCell {
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let face = ttf_parser::Face::parse(bytes, 0).ok()?;
+        let os2 = face.tables().os2?;
+        let win_ascent = f32::from(os2.windows_ascender());
+        let win_height = win_ascent + f32::from(os2.windows_descender()).abs();
+        let units_per_em = f32::from(face.units_per_em());
+        if win_height <= 0. || units_per_em <= 0. {
+            return None;
+        }
+        let rows = face
+            .raw_face()
+            .table(ttf_parser::Tag::from_bytes(b"VDMX"))
+            .map(vdmx_rows)
+            .unwrap_or_default();
+        Some(Self::from_rows(&rows, units_per_em, win_ascent, win_height))
+    }
+    /// Cells from VDMX (pixel size, yMax, yMin) rows and the OS/2 Windows metrics.
+    fn from_rows(
+        rows: &[(u8, i16, i16)],
+        units_per_em: f32,
+        win_ascent: f32,
+        win_height: f32,
+    ) -> Self {
+        let mut cells = [(0, 0); 256];
+        for (tall, cell) in cells.iter_mut().enumerate() {
+            // The tallest row that fits; of rows with that height GDI takes the smallest size
+            // (rows ascend by pixel size): HL2EP2 76 and 77 px are both 74 tall, CreateFont(74)
+            // gives 76 (probed advances).
+            let mut best: Option<(i32, u8, i16)> = None;
+            for &(pixels, y_max, y_min) in rows {
+                let height = i32::from(y_max) - i32::from(y_min);
+                if height <= tall as i32 && best.is_none_or(|(fit, ..)| height > fit) {
+                    best = Some((height, pixels, y_max));
+                }
+            }
+            if let Some((_, pixels, y_max)) = best {
+                *cell = (pixels, y_max.clamp(0, 255) as u8);
+            }
+        }
+        Self {
+            cells,
+            units_per_em,
+            win_ascent,
+            win_height,
+        }
+    }
+    /// The pixel size (EM) and baseline (pixels below the cell top) for a requested `tall`.
+    pub fn size_for(&self, tall: f32) -> (f32, f32) {
+        let tall = tall.round().max(1.);
+        if let Some(&(pixels, ascent)) = self.cells.get(tall as usize).filter(|cell| cell.0 > 0) {
+            return (f32::from(pixels), f32::from(ascent));
+        }
+        let em = (tall * self.units_per_em / self.win_height).floor().max(1.);
+        (em, (self.win_ascent * em / self.units_per_em).round())
+    }
+}
+
+/// The 1:1 (or default) VDMX ratio group as (pixel size, yMax, yMin) rows.
+fn vdmx_rows(data: &[u8]) -> Vec<(u8, i16, i16)> {
+    let u16_at = |at: usize| {
+        data.get(at..at + 2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+    };
+    let Some(ratios) = u16_at(4) else {
+        return Vec::new();
+    };
+    let ratios = usize::from(ratios);
+    // RatioRange: charSet, xRatio, yStartRatio, yEndRatio; 0:0 matches any aspect.
+    let group = (0..ratios).find(|&index| {
+        data.get(6 + 4 * index..10 + 4 * index)
+            .is_some_and(|r| (r[1] == 0 && r[2] == 0) || (r[1] == r[2] && r[1] == r[3]))
+    });
+    let Some(offset) = group.and_then(|index| u16_at(6 + 4 * ratios + 2 * index)) else {
+        return Vec::new();
+    };
+    let base = usize::from(offset);
+    let records = u16_at(base).map_or(0, usize::from);
+    (0..records)
+        .filter_map(|index| {
+            let at = base + 4 + 6 * index;
+            let pixels = u16_at(at)?;
+            let y_max = u16_at(at + 2)? as i16;
+            let y_min = u16_at(at + 4)? as i16;
+            Some((u8::try_from(pixels).ok()?, y_max, y_min))
+        })
+        .collect()
+}
+
 impl FontFace {
     pub fn load(bytes: &[u8], canvas: Canvas) -> Result<Self> {
         Self::load_with(bytes, canvas, CellBaseline::CapCentered)
@@ -552,6 +653,44 @@ mod tests {
         }
         assert_eq!(gordin.cell(22), (27, 22));
         assert_eq!(gordin.cell(23), (28, 23));
+    }
+
+    #[test]
+    fn gdi_cells_follow_the_vdmx_table_like_createfont() {
+        // HL2EP2 (hl2/resource/hl2ep2.ttf): 1000 units per EM, usWin 909/40, VDMX 1:1 rows.
+        // GDI probe: CreateFont(72) -> 75 px, tmAscent 69; 73 -> 75/69; 74 -> 76/70 (not 77, also
+        // 74 tall); 48 -> 50/46.
+        let mut table = vec![0, 0, 0, 1, 0, 1, 0, 1, 1, 1];
+        let rows: [(u16, i16, i16); 6] = [
+            (50, 46, -2),
+            (51, 47, -3),
+            (74, 68, -3),
+            (75, 69, -3),
+            (76, 70, -4),
+            (77, 70, -4),
+        ];
+        let group = (table.len() + 2) as u16;
+        table.extend(group.to_be_bytes());
+        table.extend((rows.len() as u16).to_be_bytes());
+        table.extend([50, 77]);
+        for (pixels, y_max, y_min) in rows {
+            table.extend(pixels.to_be_bytes());
+            table.extend(y_max.to_be_bytes());
+            table.extend(y_min.to_be_bytes());
+        }
+        let parsed = vdmx_rows(&table);
+        assert_eq!(parsed.len(), 6);
+        let cell = GdiCell::from_rows(&parsed, 1000., 909., 949.);
+        for (tall, expected) in [
+            (72., (75., 69.)),
+            (73., (75., 69.)),
+            (74., (76., 70.)),
+            (48., (50., 46.)),
+        ] {
+            assert_eq!(cell.size_for(tall), expected, "tall {tall}");
+        }
+        // Outside the table the Windows metrics scale: 30 -> floor(31.6) = 31 px, ascent 28.
+        assert_eq!(cell.size_for(30.), (31., 28.));
     }
 
     #[test]

@@ -154,12 +154,14 @@ pub struct Console {
 }
 
 /// Positive native font heights describe Windows character cells, not pixels per EM. Fonts
-/// that `resource/FontInfo.kv` forces to freetype2 (GorDIN) use retail CLinuxFont cells instead.
+/// that `resource/FontInfo.kv` forces to freetype2 (GorDIN) use retail CLinuxFont cells instead;
+/// faces with exact GDI cells (the menu titles) follow their VDMX table.
 #[derive(Clone, Copy)]
 pub(crate) struct CellMetrics {
     em_per_cell: f32,
     ascent_per_cell: f32,
     freetype: Option<source_ui::font::FreeTypeCell>,
+    gdi: Option<source_ui::font::GdiCell>,
 }
 impl Default for CellMetrics {
     fn default() -> Self {
@@ -167,6 +169,7 @@ impl Default for CellMetrics {
             em_per_cell: 1.,
             ascent_per_cell: 0.8,
             freetype: None,
+            gdi: None,
         }
     }
 }
@@ -196,6 +199,7 @@ impl CellMetrics {
             em_per_cell: units / height,
             ascent_per_cell: ascent / height,
             freetype: None,
+            gdi: None,
         })
     }
     /// Retail CLinuxFont cells for a FontInfo.kv freetype2 face.
@@ -204,6 +208,26 @@ impl CellMetrics {
             freetype: Some(source_ui::font::FreeTypeCell::from_bytes(bytes)?),
             ..Self::from_bytes(bytes)?
         })
+    }
+    /// Retail CWin32Font cells (GDI size from the VDMX table) for a GDI face.
+    pub(crate) fn gdi(bytes: &[u8]) -> Option<Self> {
+        Some(Self {
+            gdi: Some(source_ui::font::GdiCell::from_bytes(bytes)?),
+            ..Self::from_bytes(bytes)?
+        })
+    }
+    /// The pixel size (EM) and baseline below the cell top for a requested `tall`.
+    pub(crate) fn size_for(self, tall: f32) -> (f32, f32) {
+        if let Some(cell) = self.freetype {
+            cell.size_for(tall)
+        } else if let Some(cell) = self.gdi {
+            cell.size_for(tall)
+        } else {
+            (
+                (tall * self.em_per_cell).max(1.),
+                tall * self.ascent_per_cell,
+            )
+        }
     }
 }
 
@@ -216,13 +240,7 @@ fn draw_cell_text_outlined(
     color: Color,
     outline: TextOutline,
 ) {
-    let (em, ascent) = metrics.freetype.map_or(
-        (
-            (tall * metrics.em_per_cell).max(1.),
-            tall * metrics.ascent_per_cell,
-        ),
-        |ft| ft.size_for(tall),
-    );
+    let (em, ascent) = metrics.size_for(tall);
     let raster_size = em.round().clamp(1., 1024.);
     if let Some(font) = font {
         font.draw_baseline_outlined(
