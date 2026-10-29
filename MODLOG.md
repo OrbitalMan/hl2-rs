@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-29: audit unpublished retail layer, source and flex evidence
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Current material subagents: audit_static and audit_capture. Inherited BX/BY/BZ evidence records retail_overlay_layout, retail_animation_sources and retail_flex_fields, also GPT-6 family with exact identifiers unavailable. Claude's Rust implementation is separate.
+
+**Changed / Why:** Audited and sealed unpublished private layer/source/flex evidence before repeating native work. Added independent source-header/full-animation-descriptor checks, an explicit JSON-domain replay comparison and bounded authored-gesture correspondence. Reviewed and adopted the inherited research plan; recorded a new capture plan for remaining provenance/timing gaps. Only reviewed documentation enters Git.
+
+**Tested how / Result:** BX/BY/BZ static verifiers, controls and seals pass; independent CB finds 38 unique exact bodies and primary ancestry. CC source checks pass four header identities/17 exact descriptors/eight corruption controls. Normalized replay passes 4,512 samples/4,190 accepted/175,325 reads/27,095,808 bytes. CE verifies 191 gesture-layer matches plus two deferred records. CA/CB/CC seals pass63/2/6 files. Native screenshot visually reviewed; inherited owned game exited0/settings unchanged. No Rust edit/build.
+
+**Still broken or not tested / Next:** Original CA verifier's integer-key/JSON-key failure remains preserved. Scene clock is single-read; source graph precedes the series; local collector hashes at launch are absent. Three matched head-back samples have zero weight. Stored flex inputs/layer/source correspondence do not prove callback causality, final geometry, audiovisual fidelity, campaign completion or Rust parity. Next collect a fresh guarded window with loaded gesture tags and stronger source/clock provenance; first_map_finished:false.
+
 ## 2026-10-28 session 35: ragdolls rest, so post-death hits push again; merge to main prepared
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

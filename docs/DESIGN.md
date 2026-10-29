@@ -1,5 +1,17 @@
 # Design
 
+## Research audit and next capture: loaded gesture timing (2026-10-29)
+
+Audit the unpublished BX/BY/BZ/CA follow-up before repeating native work. Preserve CA's report-key comparison failure; compare its replayed result in the JSON wire domain in a separate audit root. Bind loaded header identity and full selected animation descriptors against owned bytes. Keep its single-read scene clock, earlier source-graph snapshot and missing local code hashes at launch explicit.
+
+For the next bounded fresh opening/endline capture, pin local collector sources before launch and check them after cleanup. Reread the choreography clock range, retain loaded gesture tag arrays and repeat the needed animation-source witnesses during selected gesture samples within the same native tick bracket. Use owned-process/window/input guards, finite raw-storage bounds and actual-source corruption controls. Loaded tags may be altered by native setup, so authored tag arrays alone cannot certify playback-cycle remapping. Field correspondence remains separate from callback causality, final pose, ordinary campaign completion and Rust parity.
+
+## Research plan: passive overlay, animation-source and flex state (2026-10-28)
+
+Continue past the sequence-map milestone toward the owner's five-hour usage checkpoint. Independently bind retail overlay record/vector fields, virtual-to-local animation source access, and named flex fields with exact bodies and PE bytes. Admit actual descriptors and primary ancestry before collecting a fresh natural opening/endline window. Use a content-independent reader with bounded raw file storage, explicit completion/cleanup, generation/vector rechecks and tick-race exclusions; validate its actual source against fixtures whose metadata ordering differs from virtual group order.
+
+Join recorded base and overlay values to loaded source/header witnesses and authored event intervals without treating correlation as callback causality. Flex weights remain separate from evaluated facial geometry; layer sequence/cycle/weight remains separate from final skeletal pose. Preserve failure diagnostics and stop an approach after two unsuccessful real attempts. Commit reviewed documentation at verified milestones, then continue independent native questions until near98% of the five-hour limit or an owner stop/blocker.
+
 ## Research plan: retail virtual sequence source mapping (2026-10-28)
 
 Resolve the nine base sequence IDs retained in the selected citizen's passive opening capture. Bind retail sequence lookup, virtual group/local-index selection and included-header access with exact pass14 identities and independent PE bytes. Read the selected owned model and its include dependencies in place, preserving source ranges and hashes. Keep an offline reconstruction distinct from an actual loaded virtual table; admit a runtime clip identity only with a guarded raw table/header witness. Preserve missing lookups and rejected assumptions in a new private root. Overlay, flex, root motion, final pose and Rust parity remain separate questions.

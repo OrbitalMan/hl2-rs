@@ -1,5 +1,13 @@
 # Sources and native research
 
+## Overlay, animation-source and facial-input audit (2026-10-29)
+
+Private BX/BY/BZ bind the citizen's primary CBaseAnimatingOverlay/CBaseFlex ancestry, named overlay layout, gesture index/sequence routing, virtual animation lookup and named flex storage. Independent CB verifies 38 unique exact retail bodies across the three roots, preserving the shared-constructor overlap. The source metadata remains distinct from blend evaluation and final bones.
+
+CA's retained passive run is revalidated by CC: 4,190 accepted samples out of 4,512, with every retained raw read replayed. Loaded source checks use checksum/name identity and independently ordered model metadata; 17 selected animation descriptors match all 100 owned bytes. Whole loaded headers and sequence descriptors differ from owned files at explicitly retained offsets. Root loaded48/owned44 is not proof of a converter invocation.
+
+Three head-gesture intervals yield 191 matching event-record/layer-index/owner/sequence observations; two earlier records retain deferred index -2. Matching is not callback causality or nonzero visual contribution. Four named head-input storage slots change; local inputs do not establish final head/face/eye motion. Original CA report equality fails because JSON stringifies integer dictionary keys; CC's explicit JSON-domain comparison passes without changing CA. Single-read choreography time, earlier source graph and absent local code hashes at launch limit stronger claims. Private roots: actor-layer-passive-20261028ca, actor-static-audit-20261029cb, actor-layer-audit-20261029cc and actor-layer-integration-20261029ce. No Rust or ordinary campaign completion claim.
+
 ## Retail virtual sequence source witnesses (2026-10-28)
 
 Exact retail bodies and independent PE bytes bind the selected citizen's base-animation header wrapper, virtual group/local-index lookup and cached-header descriptor access. A separate owned-file replay covers the root model and four includes, with1416 candidate entries and one retained duplicate-label decision. This offline replay remains a reference until corroborated by actual loaded state.

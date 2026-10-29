@@ -1,5 +1,13 @@
 # STATUS
 
+## Audited overlay, source and facial-input evidence (2026-10-29)
+
+The unpublished BX/BY/BZ research and CA passive run are now independently audited. Retail bytes bind the selected citizen's 76-byte overlay records, gesture scene-info/layer-index relationship, virtual animation-source lookup and 54 named model-local flex controllers within 96 allocated storage slots. The three static roots contain 38 unique exact bodies; their shared constructor must not be counted twice.
+
+CA retains 4,512 samples, 4,190 accepted after explicit race exclusions, and 175,325 reads/27,095,808 raw bytes. A separate CC audit admits four loaded header identities and 17 complete animation descriptors against owned content. It repairs the original verifier's final Python integer-key versus JSON string-key comparison by normalizing only the report's JSON domain; the original failing verifier is preserved. Three authored head-gesture intervals have 191 matching scene-info/layer observations and two deferred-index observations. Three matched head-back observations have zero weight. This is field correspondence, not callback execution or visible contribution.
+
+CA's scene clock has no explicit reread, source graph precedes its time series, and local collector hashes were not recorded at launch. Replay validates retained source against raw reads; it does not attest code at launch. Four changing local flex inputs are head_rightleft, head_updown, head_tilt and head_forwardback; facial geometry and general authored-track execution remain untested. The screenshot visibly shows the selected train scene, with asynchronous command latency and no pose-parity claim. CA/CB/CC are sealed privately. A new capture plan addresses these gaps before stronger timing/source claims. No Rust edits/builds; first_map_finished:false.
+
 ## Retail virtual sequence mapping and fresh raw graph (2026-10-28)
 
 The selected citizen's nine retained base sequence IDs now have actual retail virtual group/local-index witnesses. A fresh never-attached passive capture admits eight cached descriptors and their labels against owned model files. The remaining ID0 maps to group0/local0, whose cache slot is empty; the independently read direct-root header contains local0 `ragdoll`. Do not turn the earlier initialization value0 into ragdoll playback or treat the direct-root read as a filled group-cache witness.
