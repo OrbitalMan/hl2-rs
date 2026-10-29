@@ -1,5 +1,18 @@
 # MODLOG
 
+## 2026-10-29 Contain long captions and reflow on resize
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** Bound the animated caption box to the authored viewport, scale its top offset, reserve the text inset, invalidate cached wrapping on width/font-height changes and pan by visual lines so styling cannot alter the scroll rate. Extracted caption painting and tests into child modules. Long commentary previously sized the box to the entire stream and counted styled runs as lines.
+
+**Tested how / Result:** `cargo test -p hl2-ui closecaption --locked`: 14 passed, 1 owned-install test ignored. Tests cover three scales, long styled text, viewport containment, resize reflow and style-independent panning. Workspace validation and strict Windows check passed with these changes before checkpoint separation.
+
+**Still broken or not tested:** Packaged commentary visual comparison pending. Native runtime comparison not tested.
+
+**Next:** Commit console editing; verify the final packaged UI.
+
+
 ## 2026-10-29 Confirmation label sizing
 
 **Agent/model:** Codex desktop; GPT-6 family, exact model identifier not exposed. No subagents.
