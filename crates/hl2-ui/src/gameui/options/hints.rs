@@ -203,7 +203,7 @@ impl OptionsDialog {
             .as_ref()
             .or(self.closing_confirm.as_ref())
             .map(|confirm| {
-                let layout = confirm.layout(|t| base.text_width(t, false));
+                let layout = confirm.layout_at(base, scale);
                 let o = self
                     .confirm_placement
                     .place(&confirm_frame(canvas, layout.size))

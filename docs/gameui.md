@@ -68,6 +68,8 @@ portrait, odd dimensions, every HUD aspect frame and retained retail size refere
 
 ### Dialog Sizing & Content Containment
 
+- Confirmation buttons use the shared `MessageBox::layout_for` (or `layout_at`) with the target dialog scale. Width accounts for the font's whole-pixel raster size and leading glyph bearing while preserving the nominal minimum. Extend the button to fit; do not shrink or wrap its label to compensate for measurement differences. Input, drawing and occlusion must use the same fitted layout.
+
 - Sizing for fixed-content dialogs (such as 3rd-party technology credits) must be flexible and derived from wrapped content layout plus title/button margins, rather than using an arbitrary scroll view.
 - All labels, images, and buttons must stay strictly within dialog bounds without overlapping.
 - Display resolutions too small to fit dialogs must log a report to the console rather than arbitrarily clipping or reintroducing unwanted scrolling.

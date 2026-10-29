@@ -832,7 +832,7 @@ impl OptionsDialog {
         let local = |origin: Vec2| input.pointer.map(|p| (p - origin) / scale);
         if let Some(mut confirm) = self.confirm.take() {
             self.occlude(input);
-            let layout = confirm.layout(|t| measure.text_width(t, false));
+            let layout = confirm.layout_at(measure, scale);
             let frame = confirm_frame(canvas, layout.size);
             if self.confirm_placement.input(
                 &frame,
@@ -2191,7 +2191,7 @@ impl OptionsDialog {
         // 5. Draw confirmation box on top (if any).
         let confirm_to_draw = self.confirm.as_ref().or(self.closing_confirm.as_ref());
         if let Some(confirm) = confirm_to_draw {
-            let layout = confirm.layout(|t| p.text_width(t, false));
+            let layout = confirm.layout_for(&p);
             let cp = Painter {
                 canvas: base.canvas,
                 fonts: base.fonts,

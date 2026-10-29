@@ -1,5 +1,12 @@
 # STATUS
 
+## Scaled confirmation-button padding corrected (2026-10-29)
+
+The prior logical-inset fix did not account for whole-pixel font rasterization at the dialog scale. The owned Quit label reproduced 8.75 pixels left padding versus 5.25 right at 1.25x. Shared source-ui confirmation fitting now only extends widths using actual raster metrics and the leading glyph bearing; the same case measures 8.75 left versus 9 right. Drawing, input and occlusion use the fitted layout for quit, return and Options confirmations. Label drawing, glyph size and wrapping are unchanged.
+
+Verified: negative owned-font case before the fix; 15 owned-font scale/label combinations after it; 21 portable scale/label cases asserting unchanged glyph geometry and no width reduction; full workspace validation, strict Windows checks and the packaged 1600x900 Quit capture. Final return-menu and keep-video replay results are recorded in docs/validation.md. No Windows GPU runtime or native image-parity claim. Unrelated scratch files remain untouched.
+
+
 ## Non-retail feature documentation (2026-10-29)
 
 Added docs/non-retail-features.md as the current user-facing guide to Advanced/Ultra blur, all seven added aspect choices, the 15-second aspect-change keep/revert dialog, both FOV sliders and both console tuning/debug modes. README now has an overview table and GameUI notes link to the guide. Checked behavior against source, including the limitation that same-aspect resolution changes do not trigger the confirmation. Documentation-only: seven sections and five local links checked, whitelist/diff/architecture checks passed; no runtime change or gameplay rebuild.

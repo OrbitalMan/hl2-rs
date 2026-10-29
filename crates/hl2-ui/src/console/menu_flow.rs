@@ -441,8 +441,8 @@ impl Console {
     /// The quit / main-menu box's frame (centered, moveable, no close button).
     pub(super) fn quit_frame(&self, quit: &MessageBox) -> placement::Frame {
         let scale = crate::proportional::dialog_scale(self.canvas_size());
-        let measure = self.painter(Vec2::ZERO, 1.);
-        let size = quit.layout(|text| measure.text_width(text, false)).size;
+        let measure = self.painter(Vec2::ZERO, scale);
+        let size = quit.layout_for(&measure).size;
         let canvas = vec2(self.canvas.width(), self.canvas.height());
         placement::Frame {
             origin: ((canvas - size * scale) * 0.5).round(),
@@ -473,8 +473,8 @@ impl Console {
     /// Canvas origin, scale and layout of the open quit box (centered on the canvas).
     pub(super) fn quit_geometry(&self, quit: &MessageBox) -> (Vec2, f32, MessageBoxLayout) {
         let scale = crate::proportional::dialog_scale(self.canvas_size());
-        let measure = self.painter(Vec2::ZERO, 1.);
-        let layout = quit.layout(|text| measure.text_width(text, false));
+        let measure = self.painter(Vec2::ZERO, scale);
+        let layout = quit.layout_for(&measure);
         let origin = self.quit_placement.place(&self.quit_frame(quit)).origin;
         (origin, scale, layout)
     }

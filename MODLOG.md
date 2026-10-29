@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-29 Extend confirmation buttons for raster-scale text padding
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** Shared source-ui MessageBox fitting accounts for the actual whole-pixel font raster size and leading glyph bearing at the target scale, retaining the old width as a lower bound. The previous logical-padding fix missed font raster rounding: at 1.25x the owned Quit label had 8.75 pixels left padding versus 5.25 right. Extending the button changes that to 8.75 versus 9. Quit, return, Options confirmation drawing, input and occlusion share the fitted geometry. Text drawing is unchanged: no shrinking, repositioning within the button or wrapping.
+
+**Tested how / Result:** The owned-font negative control failed before the repair. `cargo test -p hl2-ui owned_confirmation_button_padding --locked -- --ignored --nocapture` passes 15 scale/label combinations using installed fonts, including long German and French labels. `cargo test -p source-ui confirmation_buttons_extend --locked` covers 21 combinations and asserts identical old/new glyph geometry plus no width reduction. `scripts/checks/validate.sh` passes (1,238 Rust tests passed, 105 ignored; 27 Python checks; strict Clippy, fmt and architecture). `scripts/checks/check_windows.sh` passes. Release package rebuilt; inspected the 1600x900 packaged Quit confirmation at 1.25x. `NO_BUILD=1 ONLY='return_menu video_keep' python3 scripts/checks/replays.py` passes both groups, zero failures, including keep, timeout and Escape paths.
+
+**Performance:** Metrics-only label fitting adds no rasterization, texture allocation, file reads or render pass; it runs for confirmation layout, not gameplay rendering.
+
+**Still broken or not tested:** Windows GPU runtime and native runtime image comparison not tested.
+
+**Next:** Ordinary interactive review of the extended button across display scales and translations.
+
+
 ## 2026-10-29 Document non-retail video controls and developer tools
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

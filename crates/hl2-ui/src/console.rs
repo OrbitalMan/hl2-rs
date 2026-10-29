@@ -689,3 +689,6 @@ mod background_debug_tests;
 mod tests;
 #[cfg(test)]
 mod viewmodel_tests;
+
+#[cfg(test)]
+mod button_padding_tests;

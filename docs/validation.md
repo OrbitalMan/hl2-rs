@@ -1,5 +1,21 @@
 # Local validation — 2026-10-05
 
+## Raster-scale confirmation padding (2026-10-29)
+
+Owned-font negative control: at 1.25x, Quit had 8.75 pixels of left padding and 5.25
+right. The extended button has 8.75 left and 9 right. The button fits actual raster
+metrics while retaining its old minimum width; label glyph drawing is unchanged.
+The owned-font regression covers three labels at five scales. A portable test covers
+three labels at seven scales and compares all glyph destination rectangles before
+and after fitting, proving no shrink, position change within the button or wrapping.
+Both pass, as do workspace validation, strict Windows checks and release packaging.
+The 1600x900 packaged capture confirms the visible spacing. No font file or generated
+capture is committed.
+
+`NO_BUILD=1 ONLY='return_menu video_keep' python3 scripts/checks/replays.py`
+passes both groups (including keep, timeout and Escape paths), zero failures.
+
+
 ## Confirmation, console and SMG repairs (2026-10-29)
 
 - Confirmation labels use the same measured text insets as the source-ui push-button painter. Quit, return-to-menu and keep-video already share MessageBox; unequal German and Japanese label tests with synthetic metrics cover fit and button containment. The packaged Quit capture shows the full label, and return-menu plus all three keep-video paths pass.

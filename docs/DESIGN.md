@@ -1,5 +1,9 @@
 # Design
 
+## Confirmation padding at raster scale (2026-10-29)
+
+The owned-font negative control at 1.25x shows 8.75 pixels left padding versus 5.25 right. Keep label drawing unchanged. Extend confirmation buttons from their actual whole-pixel raster font metrics at the target scale, including the leading glyph bearing, while retaining the existing width as a lower bound. Share the calculation in source-ui and use it consistently for drawing, input and occlusion of all MessageBox callers. Test actual glyph quad bounds at several scales and localized label lengths, then verify a packaged Quit capture, workspace/Windows checks and confirmation replays. No new render pass or frame allocation is needed. The owned-font and portable glyph-geometry controls pass; the 1.25x packaged capture and both confirmation replay groups pass, with all label drawing retained.
+
 ## UI repair and weapon blur checkpoints (2026-10-29)
 
 1. Size every confirmation button from its measured localized label and the shared painter insets; keep quit, return and video confirmation on source-ui MessageBox. Test unequal long labels and containment.

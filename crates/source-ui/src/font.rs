@@ -4,6 +4,7 @@ use crate::canvas::{
     draw_texture, draw_texture_ex, Canvas, Color, DrawTextureParams, FilterMode, MutexCell, Rect,
     Texture2D,
 };
+mod button;
 use anyhow::{Context, Result};
 use glam::{vec2, Vec2};
 use std::{collections::HashMap, sync::Arc};

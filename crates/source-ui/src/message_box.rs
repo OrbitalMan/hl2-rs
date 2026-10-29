@@ -93,6 +93,28 @@ impl MessageBox {
     /// the buttons plus 30; buttons sit at the quarter points, 15 above the client bottom (the SDK
     /// `vgui::MessageBox::PerformLayout` rules).
     pub fn layout(&self, measure: impl Fn(&str) -> f32) -> MessageBoxLayout {
+        self.layout_measured(&measure, &measure)
+    }
+
+    /// Confirmation geometry with buttons fitted to the target painter raster scale.
+    pub fn layout_for(&self, painter: &Painter) -> MessageBoxLayout {
+        self.layout_at(painter, painter.scale)
+    }
+
+    /// Fit at the dialog's scale when the caller supplies a base measurement painter.
+    pub fn layout_at(&self, painter: &Painter, scale: f32) -> MessageBoxLayout {
+        let painter = Painter { scale, ..*painter };
+        self.layout_measured(
+            |text| painter.text_width(text, false),
+            |label| painter.button_label_width(label),
+        )
+    }
+
+    fn layout_measured(
+        &self,
+        measure: impl Fn(&str) -> f32,
+        measure_button: impl Fn(&str) -> f32,
+    ) -> MessageBoxLayout {
         let lines: Vec<&str> = self
             .layout_text
             .as_deref()
@@ -103,7 +125,9 @@ impl MessageBox {
         let text_w = lines.iter().map(|l| measure(l)).fold(0.0, f32::max).ceil();
         let button = |label: &str| {
             vec2(
-                (measure(label) + 2. * BUTTON_TEXT_INSET).ceil().max(64.),
+                (measure_button(label) + 2. * BUTTON_TEXT_INSET)
+                    .ceil()
+                    .max(64.),
                 (FONT_TALL + 10.).max(24.),
             )
         };
