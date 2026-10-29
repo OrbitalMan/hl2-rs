@@ -55,6 +55,7 @@ fn override_selects_only_standard_artwork_and_matches_diagnostic_names() {
         console
             .background_texture("hl2", "background01", true)
             .unwrap()
+            .texture
             .size()
             .x,
         2.
@@ -63,6 +64,7 @@ fn override_selects_only_standard_artwork_and_matches_diagnostic_names() {
         console
             .background_texture("hl2", "background01", false)
             .unwrap()
+            .texture
             .size()
             .x,
         1.
@@ -76,6 +78,7 @@ fn override_selects_only_standard_artwork_and_matches_diagnostic_names() {
         console
             .background_texture("hl2", "background01", true)
             .unwrap()
+            .texture
             .size()
             .x,
         1.
@@ -111,5 +114,35 @@ fn debug_toggle_uses_the_saved_cvar_and_defers_normal_host_application() {
     assert!(!console.config.video.background_force_default_blur);
     assert!(
         matches!(console.tick(2.).as_slice(), [Effect::ApplyConfig(config)] if !config.video.background_force_default_blur)
+    );
+}
+
+#[test]
+fn selected_artwork_retains_its_authored_aspect_including_missing_wide_fallback() {
+    let mut console = Console::default();
+    console.background_textures.insert(
+        ("hl2".into(), "background01".into()),
+        Texture2D::from_rgba8(1, 1, &[255; 4]),
+    );
+    let fallback = console
+        .background_texture("hl2", "background01", true)
+        .unwrap();
+    assert!(!fallback.widescreen);
+    console.background_textures.insert(
+        ("hl2".into(), "background01_widescreen".into()),
+        Texture2D::from_rgba8(1, 1, &[255; 4]),
+    );
+    assert!(
+        console
+            .background_texture("hl2", "background01", true)
+            .unwrap()
+            .widescreen
+    );
+    console.config.video.background_force_default_blur = true;
+    assert!(
+        !console
+            .background_texture("hl2", "background01", true)
+            .unwrap()
+            .widescreen
     );
 }

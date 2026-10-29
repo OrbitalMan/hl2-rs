@@ -1,5 +1,9 @@
 # Local validation — 2026-10-05
 
+## Normal artwork center-crop (2026-10-29)
+
+The normal-artwork 16:9 negative control failed with a full 512x512 source instead of the centered 512x384 span. Shared crop tests now cover both authored variants at portrait, square, 5:4, 4:3, 16:10, 16:9, 21:9 and 32:9, independent of encoded bitmap dimensions; assertions check equal margins, bounds and aspect-preserving ray extents. Emitted menu/loading quads fill the canvas using the cropped source. Texture selection retains normal metadata when forced or when wide is missing. `scripts/checks/validate.sh`, `scripts/checks/check_windows.sh` and `scripts/build-bevy.sh` pass. Isolated muted packaged captures at 1280x720 and 2560x720 show forced normal artwork at full opacity; wide artwork captured as control. Reports/captures remain in ignored artifacts. Camera projection is unchanged in this checkpoint; matching it to the override is requested next. Windows GPU runtime not tested.
+
 ## Saved normal-background-blur override (2026-10-29)
 
 `background_force_default_blur` defaults to 0 in new and legacy configs, uses the

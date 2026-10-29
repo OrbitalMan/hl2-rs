@@ -2889,7 +2889,7 @@ fn test_console_background_texture_resolution() {
     let width = |game, map, wide| {
         console
             .background_texture(game, map, wide)
-            .map(|t| t.width())
+            .map(|t| t.texture.width())
     };
     assert_eq!(width("hl2", "background01", false), Some(2.0));
     assert_eq!(width("hl2", "background01.bsp", true), Some(4.0));

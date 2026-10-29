@@ -197,7 +197,8 @@ temporary settings, and current limits.
 
 `background_force_default_blur 1` always selects the normal menu/loading blur
 texture, even on wide frames; `0` restores aspect-based selection (the default).
-It is saved independently of debug mode. While background debug is enabled, `-`
+Normal artwork keeps its authored 4:3 proportions by cropping the top and bottom
+on wide frames. It is saved independently of debug mode. While background debug is enabled, `-`
 toggles it and the overlay shows its state.
 
 ## Implemented so far

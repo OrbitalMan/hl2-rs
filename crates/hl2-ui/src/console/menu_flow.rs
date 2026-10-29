@@ -2,12 +2,12 @@
 //! after a level, and the quit / return-to-menu box.
 
 use super::{ConfirmKind, Console, Effect, GameMap, Mode};
+use crate::gameui::loading::BackgroundTexture;
 use crate::gameui::menu::GameMenu;
 use crate::gameui::menu::MenuOutcome;
 use glam::vec2;
 use glam::Vec2;
 use source_ui::canvas::Rect;
-use source_ui::canvas::Texture2D;
 use source_ui::input::Input;
 use source_ui::input::Key;
 use source_ui::message_box::MessageBox;
@@ -21,18 +21,26 @@ impl Console {
         game: &str,
         map: &str,
         widescreen: bool,
-    ) -> Option<&Texture2D> {
+    ) -> Option<BackgroundTexture<'_>> {
         let key = |name: String| (game.to_owned(), name);
         let map = crate::gameui::resources::blur(map);
-        self.config
-            .video
-            .background_uses_widescreen(widescreen)
-            .then(|| {
-                self.background_textures
-                    .get(&key(format!("{map}_widescreen")))
+        if self.config.video.background_uses_widescreen(widescreen) {
+            if let Some(texture) = self
+                .background_textures
+                .get(&key(format!("{map}_widescreen")))
+            {
+                return Some(BackgroundTexture {
+                    texture,
+                    widescreen: true,
+                });
+            }
+        }
+        self.background_textures
+            .get(&key(map.to_owned()))
+            .map(|texture| BackgroundTexture {
+                texture,
+                widescreen: false,
             })
-            .flatten()
-            .or_else(|| self.background_textures.get(&key(map.to_owned())))
     }
 
     /// Checks whether the primary title font contains glyphs for all non-whitespace characters in `line`.

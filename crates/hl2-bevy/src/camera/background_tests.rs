@@ -39,7 +39,7 @@ fn projection_rays_match_authored_artwork_crop() {
     let reference_tan = (crate::video::vertical_fov_for(75., 4. / 3.) * 0.5).tan();
     for aspect in TESTED_ASPECTS {
         let canvas = glam::vec2(aspect * 900., 900.);
-        let crop = background_source(canvas, glam::Vec2::ONE);
+        let crop = background_source(canvas, glam::Vec2::ONE, aspect > 4. / 3. + 1e-3);
         let base_aspect = if aspect > 4. / 3. + 1e-3 {
             16. / 9.
         } else {

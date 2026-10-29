@@ -1,5 +1,9 @@
 # STATUS
 
+## Normal blur artwork crop (2026-10-29)
+
+Normal menu/loading artwork now center-crops against its authored 4:3 aspect, including forced-normal and missing-wide fallback cases. Square VTF dimensions no longer cause wide-frame stretching. Widescreen artwork retains its 16:9 crop. Regression failed before the fix; geometry invariants, emitted menu/loading quads and fallback metadata pass. Workspace validation, strict Windows checks and release build pass. Isolated packaged 16:9 and 32:9 captures inspected at 100% blur. Camera matching for the override is the next requested checkpoint; projection is unchanged here. Windows GPU runtime not tested.
+
 ## Persisted standard background blur override (2026-10-29)
 
 Added the independent stored cvar `background_force_default_blur [0|1]`: 0 is the default aspect-based selection, 1 always selects normal pre-blurred artwork, including wide frames. Menu and loading paths share the same policy. Background debug Minus (also keypad subtract) toggles once per press through the normal save/apply path; the overlay shows the flag and key hint and refreshes the effective texture name. Opening the console suspends the hotkey. External changes synchronize this hidden flag into open Options drafts without discarding pending edits.

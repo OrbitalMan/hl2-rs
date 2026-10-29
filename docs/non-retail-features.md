@@ -104,7 +104,9 @@ project's `crates/hl2-ui/assets/ui/tuning.json` to retain authored changes.
 debug mode. **0** (the default) selects widescreen blur artwork on wide aspect
 ratios, with the normal existing fallback when that artwork is unavailable. **1**
 always selects the normal blur texture, even on wide frames. The choice applies to
-menu and loading backgrounds and survives restarting the game. Query it by entering
+menu and loading backgrounds and survives restarting the game. Both variants fill
+the frame by center-cropping against their authored aspect (normal 4:3, wide 16:9),
+so normal artwork loses top/bottom portions on wide frames without stretching. Query it by entering
 `background_force_default_blur` without an argument.
 
 

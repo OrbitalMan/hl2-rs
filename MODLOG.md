@@ -1,5 +1,17 @@
 # MODLOG
 
+## 2026-10-29 Center-crop normal background artwork on wide frames
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** Carry actual selected artwork metadata into shared menu/loading drawing, including missing-wide fallback. Center-crop against normal 4:3 or wide 16:9 rather than guessing from square bitmap dimensions. Normal artwork keeps 75% of its height at 16:9 and 37.5% at 32:9. Extracted shared drawing into a child module.
+
+**Tested how / Result:** Negative control returned the entire texture instead of the expected middle 75%. New tests cover both variants, portrait through 32:9, encoded dimensions, equal margins, undistorted rays, actual menu/loading quads and missing-wide fallback. Workspace validation, strict Windows checks and release packaging pass. Inspected isolated muted packaged 16:9 and 32:9 forced-normal captures and captured ordinary wide artwork as control.
+
+**Performance:** Same cached textures and draw pass, constant crop arithmetic; no new allocation, asset read or pass. Frame-time benchmarking not run for this geometry-only change.
+
+**Still broken or not tested / Next:** Camera matching under the override is the next requested checkpoint. Windows GPU runtime and native parity not tested.
+
 ## 2026-10-29 Persist standard background blur selection and add debug toggle
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

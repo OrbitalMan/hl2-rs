@@ -6,6 +6,11 @@
 //! - Progress bar (x: 20, y: 64, w: 340, h: 24) with sunken depressed border, transparent background,
 //!   and segmented chunks (width 8, gap 4, inset 4 per Source SDK `ProgressBar.cpp`).
 
+mod background;
+pub use background::{
+    background_source, draw_background_texture, draw_background_texture_alpha, BackgroundTexture,
+};
+
 use crate::gameui::localize::Localization;
 use glam::Vec2;
 use source_ui::{
@@ -389,77 +394,6 @@ pub struct LoadingDialog {
     pub transition: BackgroundTransitionState,
 }
 
-/// The part of a pre-blurred background texture to draw on a `canvas`, in texture pixels
-/// (`texture` is its size). The 4:3 texture on screens narrower than 16:10 keeps the full height
-/// and crops the sides when narrower than 4:3; the 16:9 widescreen texture crops the sides on 16:10,
-/// and crops the top and bottom on screens wider than 16:9 ([`crate::tuning::widest_design_aspect`]),
-/// so the blurred image does not stretch relative to the background camera's 3D projection.
-pub fn background_source(canvas: glam::Vec2, texture: glam::Vec2) -> source_ui::canvas::Rect {
-    let aspect = canvas.x / canvas.y.max(1.);
-    let tex_aspect = texture.x / texture.y.max(1.);
-    let base_aspect = if tex_aspect >= 1.5 {
-        16. / 9.
-    } else if tex_aspect > 1.05 {
-        4. / 3.
-    } else if aspect > 4. / 3. + 1e-3 {
-        16. / 9.
-    } else {
-        4. / 3.
-    };
-    let widest = crate::tuning::widest_design_aspect();
-    if aspect < base_aspect {
-        let kept = aspect / base_aspect;
-        source_ui::canvas::Rect::new(
-            texture.x * (1. - kept) * 0.5,
-            0.,
-            texture.x * kept,
-            texture.y,
-        )
-    } else if aspect > widest {
-        let kept = widest / aspect;
-        source_ui::canvas::Rect::new(
-            0.,
-            texture.y * (1. - kept) * 0.5,
-            texture.x,
-            texture.y * kept,
-        )
-    } else {
-        source_ui::canvas::Rect::new(0., 0., texture.x, texture.y)
-    }
-}
-
-/// Draws a pre-blurred background texture over the whole canvas ([`background_source`]).
-pub fn draw_background_texture(
-    canvas: &source_ui::canvas::Canvas,
-    texture: &source_ui::canvas::Texture2D,
-) {
-    draw_background_texture_alpha(canvas, texture, 1.0);
-}
-
-/// Draws a pre-blurred background texture with custom alpha opacity over the canvas.
-pub fn draw_background_texture_alpha(
-    canvas: &source_ui::canvas::Canvas,
-    texture: &source_ui::canvas::Texture2D,
-    alpha: f32,
-) {
-    let size = glam::vec2(canvas.width(), canvas.height());
-    let color = source_ui::canvas::Color::new(1., 1., 1., alpha.clamp(0., 1.));
-    source_ui::canvas::draw_texture_ex(
-        canvas,
-        texture,
-        0.,
-        0.,
-        color,
-        source_ui::canvas::DrawTextureParams {
-            source: Some(background_source(
-                size,
-                glam::vec2(texture.width(), texture.height()),
-            )),
-            dest_size: Some(size),
-        },
-    );
-}
-
 impl LoadingDialog {
     /// Creates a new loading dialog for the given map name.
     pub fn new(map: impl Into<String>) -> Self {
@@ -627,7 +561,7 @@ impl LoadingDialog {
     pub fn draw_background_overlay(
         &self,
         canvas: &source_ui::canvas::Canvas,
-        bg_texture: Option<&source_ui::canvas::Texture2D>,
+        bg_texture: Option<BackgroundTexture<'_>>,
     ) {
         if !self.is_background() || !self.transition.is_active() {
             return;
@@ -712,7 +646,13 @@ mod tests {
             (5120., 1440., 2., 1.),
         ] {
             canvas.resize(w, h);
-            draw_background_texture(&canvas, &texture);
+            draw_background_texture(
+                &canvas,
+                BackgroundTexture {
+                    texture: &texture,
+                    widescreen: w / h > 4. / 3. + 1e-3,
+                },
+            );
             let quads = canvas.drain();
             assert_eq!(quads.len(), 1);
             assert_eq!(
@@ -734,26 +674,26 @@ mod tests {
         let texture = vec2(512., 512.);
         for canvas in [vec2(1024., 768.), vec2(1920., 1080.)] {
             assert_eq!(
-                background_source(canvas, texture),
+                background_source(canvas, texture, canvas.x / canvas.y > 4. / 3. + 1e-3),
                 source_ui::canvas::Rect::new(0., 0., 512., 512.),
                 "{canvas}: whole texture"
             );
         }
-        let five_four = background_source(vec2(1280., 1024.), texture);
+        let five_four = background_source(vec2(1280., 1024.), texture, false);
         assert!((five_four.x - 16.).abs() < 1e-3 && (five_four.w - 480.).abs() < 1e-3);
         assert_eq!(five_four.h, 512.);
 
-        let sixteen_ten = background_source(vec2(1920., 1200.), texture);
+        let sixteen_ten = background_source(vec2(1920., 1200.), texture, true);
         assert!((sixteen_ten.x - 25.6).abs() < 1e-3 && (sixteen_ten.w - 460.8).abs() < 1e-3);
         assert_eq!(sixteen_ten.h, 512.);
-        let square = background_source(vec2(1080., 1080.), texture);
+        let square = background_source(vec2(1080., 1080.), texture, false);
         assert_eq!(square.h, 512.);
         assert!(
             (square.w - 384.).abs() < 1e-3,
             "{square:?}: 3/4 of the width"
         );
         assert!((square.x - 64.).abs() < 1e-3, "centred");
-        let portrait = background_source(vec2(1080., 1920.), texture);
+        let portrait = background_source(vec2(1080., 1920.), texture, false);
         assert!(
             (portrait.w - 512. * 0.5625 * 0.75).abs() < 1e-3,
             "{portrait:?}"
@@ -762,7 +702,7 @@ mod tests {
             (portrait.x * 2. + portrait.w - 512.).abs() < 1e-3,
             "centred"
         );
-        let ultrawide = background_source(vec2(3440., 1440.), texture);
+        let ultrawide = background_source(vec2(3440., 1440.), texture, true);
         assert_eq!((ultrawide.x, ultrawide.w), (0., 512.));
         assert!(
             (ultrawide.h - 512. * (16. / 9.) / (3440. / 1440.)).abs() < 1e-3,
@@ -772,7 +712,7 @@ mod tests {
             (ultrawide.y * 2. + ultrawide.h - 512.).abs() < 1e-3,
             "centred"
         );
-        let super_ultrawide = background_source(vec2(5120., 1440.), texture);
+        let super_ultrawide = background_source(vec2(5120., 1440.), texture, true);
         assert_eq!(
             super_ultrawide,
             source_ui::canvas::Rect::new(0., 128., 512., 256.),
@@ -1389,7 +1329,13 @@ mod tests {
 
         // With background texture: queues the textured background quad then the backdrop rectangle
         let bg_tex = source_ui::canvas::Texture2D::from_rgba8(2, 2, &[200; 16]);
-        dialog.draw_background_overlay(&canvas, Some(&bg_tex));
+        dialog.draw_background_overlay(
+            &canvas,
+            Some(BackgroundTexture {
+                texture: &bg_tex,
+                widescreen: false,
+            }),
+        );
         let quads = canvas.drain();
         assert_eq!(quads.len(), 2);
         assert!(quads[0].texture.is_some());
@@ -1402,7 +1348,16 @@ mod tests {
 
         // When transition is inactive: nothing drawn
         dialog.transition.finish();
-        dialog.draw_background_overlay(&canvas, Some(&bg_tex));
+        dialog.draw_background_overlay(
+            &canvas,
+            Some(BackgroundTexture {
+                texture: &bg_tex,
+                widescreen: false,
+            }),
+        );
         assert!(canvas.drain().is_empty());
     }
 }
+
+#[cfg(test)]
+mod crop_tests;

@@ -1,5 +1,9 @@
 # Design
 
+## Crop selected background artwork to its authored aspect (2026-10-29)
+
+Normal and widescreen images can both be stored as square VTFs, so canvas/bitmap dimensions cannot identify the selected artwork. Carry the actual normal/wide variant from cached texture selection into the shared background drawing code. Center-crop each image against its own authored aspect (4:3 or 16:9): crop sides below that aspect, top and bottom above it. Cover forced normal and missing-wide fallback in menu/loading paths, verify crop geometry and draw quads, and compare packaged 16:9/ultrawide captures while retaining camera behavior. No new render pass, asset read or per-frame allocation.
+
 ## Persisted standard-background-blur override (2026-10-29)
 
 Add default-false video.background_force_default_blur through the existing stored-cvar registry, independent of debug mode. Share the effective wide/normal predicate between texture lookup and diagnostic names, covering menu backgrounds and gameplay/background loading. Preserve the existing image crop/presentation and camera policy; the requested deviation selects the normal installed asset. Debug Minus toggles through the same saved command path once per press, with a live flag row in the overlay. Cover legacy config loading, persistence, command validation, texture/fallback choices and held-key behavior; verify packaged save/restart and debug captures. No new assets, file reads on render frames or render pass.
