@@ -2176,3 +2176,22 @@ fn add_output_keyvalue_form_overrides_physdamagescale() {
     );
     assert_eq!(scene.keyvalue_overrides.len(), 1);
 }
+#[test]
+fn a_ragdolled_actor_draws_its_physics_pose() {
+    use modkit_core::animation::Rig;
+    let w = World {
+        entities: vec![entity("npc_metropolice", "cop", &[])],
+        ..Default::default()
+    };
+    let rig = Rig::default();
+    let mut scene = Scene::new(&w);
+    let animated = scene.pose_signature(0);
+    // ragdolls.rs publishes the physics skin; skinning and pose caching must use it.
+    let pose = vec![Mat4::from_translation(Vec3::new(1., 2., 3.))];
+    scene.ragdoll_matrices.insert(0, pose.clone());
+    assert_eq!(scene.actor_matrices(&rig, 0), pose);
+    let first = scene.pose_signature(0);
+    assert_ne!(first, animated);
+    scene.ragdoll_frame += 1;
+    assert_ne!(scene.pose_signature(0), first);
+}

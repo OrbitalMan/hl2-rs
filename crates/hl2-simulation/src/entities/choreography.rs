@@ -375,6 +375,9 @@ impl Scene {
     }
 
     pub fn actor_matrices(&self, rig: &modkit_core::animation::Rig, id: usize) -> Vec<glam::Mat4> {
+        if let Some(ragdoll) = self.ragdoll_matrices.get(&id) {
+            return ragdoll.clone();
+        }
         let Some(state) = self.states.get(id) else {
             return rig.matrices("", 0.);
         };
@@ -426,6 +429,9 @@ impl Scene {
 
     /// Changes whenever an actor's composed pose inputs change; zero for plain base clips.
     pub fn pose_signature(&self, id: usize) -> u64 {
+        if self.ragdoll_matrices.contains_key(&id) {
+            return self.ragdoll_frame | 1 << 63;
+        }
         let mut hash = self.gestures.signature(id);
         let mix = |hash: u64, v: f32| {
             (hash ^ v.to_bits() as u64)
