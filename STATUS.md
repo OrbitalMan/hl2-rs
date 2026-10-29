@@ -1,5 +1,12 @@
 # STATUS
 
+## Viewmodel debug command and newest tuning log ordering (2026-10-29)
+
+The mode command is now `viewmodel_debug_mode 0|1`; runtime dispatch, usage/error text, completion registry, README and current feature/GameUI documentation use the new name. The separate `viewmodel_tweak_reset` command is unchanged. Each tuning update removes the previous snapshot and appends the latest one after intervening ordinary output. Shared toolkit bookkeeping remaps cached wrapping and selections and keeps scrolled-back ordinary content anchored, including filtered/wrapped and full-buffer cases.
+
+Verified: ordering regression failed before the fix; toolkit and host tests pass, including registry rejection of the old mode name. Workspace validation, strict Windows checks and release packaging pass. A live packaged run accepted the new command, generated two portrait-weapon resets with an intervening echo, and ended with exactly one compact snapshot as the last console entry. The packaged console replay passes. Detailed evidence: docs/validation.md. Unrelated scratch files remain untouched.
+
+
 ## Compact viewmodel snapshot defaults corrected (2026-10-29)
 
 The console snapshot formatter now treats omitted FOV/offset fields as zero, matching the tuning loader, rather than adding explicit zero FOV fields to untouched compact profiles. All-zero partial profiles and empty weapon entries are omitted; zero components remain in nonzero arrays. Both new regression tests failed before the fix and pass after it, including stable repeated compaction and the supplied RPG/shotgun/SMG cases. Workspace validation and strict Windows checks pass. The rebuilt isolated package generated a live console snapshot after a portrait SMG reset: untouched RPG/shotgun offsets are preserved with no zero FOV fields, and the zeroed SMG entry is absent. No authored tuning values were changed.

@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-29 Rename viewmodel debug mode and append the latest tuning snapshot
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** Renamed the mode command to `viewmodel_debug_mode`, including its host effect/dispatch, help, logs and current documentation. The reset command retains its existing name. Shared console snapshot replacement removes the old entry and appends the new one after intervening output, so it no longer stays buried at its original position. Cache indices and ordinary-row selections move with their lines; removal adjusts scrolled-back history rather than forcing the reader to the bottom. The existing bounded output limit is retained. Extracted snapshot bookkeeping and its tests into a toolkit child module, moved the HL2 wiring regression into its own test module, and tightened the architecture baseline.
+
+**Tested how / Result:** The ordering regression failed before the change. Toolkit tests cover interleaved output, cached wrapping, selected ordinary rows, selected snapshot removal, wrapped/filtered scroll anchors and full-buffer eviction. Host tests verify the renamed registry and dispatch and reject the old command name. `scripts/checks/validate.sh`, `scripts/checks/check_windows.sh` and release packaging pass. A muted isolated headless packaged run accepted the new command and generated two resets with ordinary output between them: exactly one compact snapshot remains, at the last console entry. `NO_BUILD=1 ONLY='console' python3 scripts/checks/replays.py`: passed.
+
+**Performance:** Snapshot-update-only bookkeeping; cached ordinary wrapping is moved without rewrapping/cloning history. No new per-frame work or render pass.
+
+**Still broken or not tested:** Interactive desktop scrolling and Windows GPU runtime not retested; toolkit scroll/selection behavior and the live packaged emission path are verified.
+
+**Next:** Use the renamed command; each subsequent tuning edit brings its snapshot to the end without accumulating stale copies.
+
+
 ## 2026-10-29 Omit implicit zero defaults from viewmodel console snapshots
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

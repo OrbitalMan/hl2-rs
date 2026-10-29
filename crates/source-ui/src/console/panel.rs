@@ -5,6 +5,7 @@
 //! command table, and turns the panel's [`Action`]s into what they do.
 
 mod entry;
+mod snapshot;
 use super::command::{self, Context, Spec};
 use super::complete::{self, Completer};
 use super::dialog::{wrap, DialogLayout, Scaling, Selection, MIN_SIZE};
@@ -54,7 +55,7 @@ pub enum Level {
     Normal,
     /// Developer output (`DevMsg`, mirrored engine log): scheme `Console.DevTextColor`.
     Developer,
-    /// A snapshot the app replaces in place ([`ConsolePanel::replace_snapshot`]) instead of
+    /// A snapshot the app replaces at the end ([`ConsolePanel::replace_snapshot`]) instead of
     /// growing the scrollback.
     Snapshot,
     Warning,
@@ -308,30 +309,6 @@ impl ConsolePanel {
             ascii_advances: Mutex::default(),
             font: None,
             style: Style::default(),
-        }
-    }
-
-    /// Replaces the latest [`Level::Snapshot`] line instead of growing the scrollback (prints
-    /// one when there is none).
-    pub fn replace_snapshot(&mut self, canvas: &Canvas, text: impl Into<String>) {
-        let text = text.into();
-        if let Some((index, _)) = self
-            .output
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, line)| line.level == Level::Snapshot)
-        {
-            let number = self.output_start + index as u64;
-            if let Some(line) = self.output.get_mut(index) {
-                line.text = text;
-                line.time = self.clock;
-            }
-            if let Ok(mut wrapped) = self.wrapped.lock() {
-                wrapped.remove(&number);
-            }
-        } else {
-            self.print(canvas, Level::Snapshot, text);
         }
     }
 
@@ -1071,15 +1048,15 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_line_is_replaced_in_place() {
+    fn a_snapshot_line_moves_after_interleaved_output() {
         let canvas = Canvas::default();
         let mut panel = ConsolePanel::new(SCALING);
         panel.print(&canvas, Level::Normal, "a");
         panel.replace_snapshot(&canvas, "tuning 1");
         panel.print(&canvas, Level::Normal, "b");
         panel.replace_snapshot(&canvas, "tuning 2");
-        assert_eq!(texts(&panel), ["a", "tuning 2", "b"]);
-        assert_eq!(panel.output[1].level, Level::Snapshot);
+        assert_eq!(texts(&panel), ["a", "b", "tuning 2"]);
+        assert_eq!(panel.output[2].level, Level::Snapshot);
     }
 
     #[test]

@@ -192,7 +192,7 @@ temporary settings, and current limits.
 | 15-second keep/revert confirmation | Applying a different aspect-ratio choice, including Fit Display; same-aspect resolution changes currently do not prompt. |
 | Vertical FOV slider | Options > Video > Advanced: Auto or an explicit gameplay vertical angle. |
 | Viewmodel FOV slider | Options > Video > Advanced: the weapon camera's base FOV. |
-| Viewmodel tweak mode | Console: `viewmodel_tweak_mode 1`; tune weapon FOV and position offsets for the current aspect profile. |
+| Viewmodel debug mode | Console: `viewmodel_debug_mode 1`; tune weapon FOV and position offsets for the current aspect profile. |
 | Menu background debug mode | Console from the main menu: `background_debug_mode 1`; compare background FOV, blur opacity and chapter artwork. |
 
 ## Implemented so far

@@ -692,3 +692,6 @@ mod viewmodel_tests;
 
 #[cfg(test)]
 mod button_padding_tests;
+
+#[cfg(test)]
+mod snapshot_tests;

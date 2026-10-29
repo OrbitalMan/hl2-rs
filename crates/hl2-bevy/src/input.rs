@@ -728,7 +728,7 @@ mod tests {
     use super::*;
     use source_ui::keys::NAMED_KEYS;
 
-    /// What `controls` does the frame after `viewmodel_tweak_mode 1`.
+    /// What `controls` does the frame after `viewmodel_debug_mode 1`.
     fn enable_viewmodel_debug(
         debug: &mut crate::simulation::ViewmodelDebug,
         weapon: &str,

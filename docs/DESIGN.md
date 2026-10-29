@@ -1,5 +1,9 @@
 # Design
 
+## Viewmodel debug command and newest snapshot ordering (2026-10-29)
+
+Rename the mode command and host dispatch to viewmodel_debug_mode; keep the existing reset command. Each tuning update removes the prior toolkit snapshot and appends the replacement after ordinary output. Remap affected cached row numbers and history selection endpoints, preserve scrolled-back ordinary content, and retain normal bounded-buffer eviction. Cover interleaved output, wrapped/filter rows, selection and full-buffer updates; verify the renamed command and live packaged console ordering.
+
 ## Confirmation padding at raster scale (2026-10-29)
 
 The owned-font negative control at 1.25x shows 8.75 pixels left padding versus 5.25 right. Keep label drawing unchanged. Extend confirmation buttons from their actual whole-pixel raster font metrics at the target scale, including the leading glyph bearing, while retaining the existing width as a lower bound. Share the calculation in source-ui and use it consistently for drawing, input and occlusion of all MessageBox callers. Test actual glyph quad bounds at several scales and localized label lengths, then verify a packaged Quit capture, workspace/Windows checks and confirmation replays. No new render pass or frame allocation is needed. The owned-font and portable glyph-geometry controls pass; the 1.25x packaged capture and both confirmation replay groups pass, with all label drawing retained.
@@ -1102,7 +1106,7 @@ Packaged visual comparison on an actual portrait display remains not tested.
 
 ## Viewmodel tuning overlay (2026-10-22)
 
-`viewmodel_tweak_mode 1|0` (console) toggles a runtime-only viewmodel tuning mode, only while a gameplay map is loaded; a map load, a return to the main menu or a background level ends it. F5 and F6 are not bound. Its debug overlay reports the current aspect
+`viewmodel_debug_mode 1|0` (console) toggles a runtime-only viewmodel tuning mode, only while a gameplay map is loaded; a map load, a return to the main menu or a background level ends it. F5 and F6 are not bound. Its debug overlay reports the current aspect
 profile, active weapon classname, and direct profile `fov_offset` / `[forward, left, up]` offsets.
 `[`/`]` adjust FOV, `,`/`.` adjust forward X, Up/Down adjust Z, and Left/Right adjust lateral Y;
 Shift changes each step from 0.1 to 1.0 and Alt/Option to 0.01. Adjust keys autorepeat while held, using the same delay
@@ -1138,9 +1142,9 @@ shortcut to avoid duplicating the normal action path. Validate with the host inp
 plus the full strict check suite; packaged firing/reload animation observation remains needed.
 
 Console output correction: mark live `tuning.json` snapshots as replaceable console output. On each
-adjustment, update the most recent tuning snapshot line in place (including its timestamp and cached
-wrapping), or append the first one if none remains. Preserve unrelated console output and submitted
-command history. Validate that repeated snapshots occupy one line entry while other output remains.
+adjustment, remove the previous tuning snapshot and append the latest one after intervening output.
+Remap cached wrapping and selection indices while preserving scrolled-back ordinary content and
+submitted command history. Validate that snapshots occupy one entry at the end while other output remains.
 
 ## Closed captions (2026-10-17)
 

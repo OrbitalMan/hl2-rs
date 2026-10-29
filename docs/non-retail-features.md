@@ -69,9 +69,9 @@ value makes the weapon appear smaller and exposes more of the model. Zoom and
 per-weapon/aspect framing adjustments still apply. The value is saved with the
 video settings.
 
-## Viewmodel tweak mode
+## Viewmodel debug mode
 
-Load a gameplay map, open the developer console and enter `viewmodel_tweak_mode 1`.
+Load a gameplay map, open the developer console and enter `viewmodel_debug_mode 1`.
 This runtime tool shows the active weapon, aspect profile, FOV offset and separate
 X/Y/Z offsets. It cannot start on a menu background or while a map is loading.
 
@@ -84,7 +84,7 @@ X/Y/Z offsets. It cannot start on a menu background or while a map is loading.
 | Shift | Use a 1.0 step instead of the default 0.1. |
 | Alt / Option | Use a 0.01 step. |
 | `viewmodel_tweak_reset` | Zero the current weapon/profile's FOV and position offsets. |
-| `viewmodel_tweak_mode 0` | End the session and discard its temporary edits. |
+| `viewmodel_debug_mode 0` | End the session and discard its temporary edits. |
 
 Adjustment keys repeat while held. Normal movement, aiming, firing, reloading and
 weapon selection remain available. Pause and Options suspend adjustment without
@@ -92,8 +92,8 @@ ending the session, allowing aspect changes between comparisons. Edits are retai
 by weapon and aspect profile within that session; a map load or return to the main
 menu ends it. F5 and F6 are not bound to this tool.
 
-Each adjustment updates one replaceable console snapshot of the complete tuning
-JSON. Zero FOV offsets and entirely zero offset arrays are omitted, including in
+Each adjustment removes the previous tuning snapshot and appends the latest complete
+tuning JSON at the end of the console log, after any intervening ordinary output. Zero FOV offsets and entirely zero offset arrays are omitted, including in
 untouched profiles. Zero components remain in nonzero arrays, for example
 `"standard": {"offset": [0.0, 0.0, 0.2]}`. The tool does not save its edits automatically: copy that JSON into the
 project's `crates/hl2-ui/assets/ui/tuning.json` to retain authored changes.

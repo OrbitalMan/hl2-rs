@@ -90,13 +90,13 @@ fn console_cvar(
     Ok(None)
 }
 
-pub(super) fn viewmodel_tweak_mode(
+pub(super) fn viewmodel_debug_mode(
     _console: &mut Console,
     spec: &'static Spec,
     args: &[String],
 ) -> Outcome {
     match args {
-        [value] => Ok(Some(Effect::ViewmodelTweakMode(
+        [value] => Ok(Some(Effect::ViewmodelDebugMode(
             boolean(value).ok_or_else(|| spec.usage())?,
         ))),
         _ => Err(spec.usage()),

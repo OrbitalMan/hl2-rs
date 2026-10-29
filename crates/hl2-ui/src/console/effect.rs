@@ -31,9 +31,9 @@ pub enum Effect {
     ApplyConfig(Box<crate::config::Config>),
     /// Load a game's main-menu background map and show the main menu over it.
     MainMenuMap(GameMap),
-    /// viewmodel_tweak_mode: the host enables or disables the tuning overlay, or refuses with its
+    /// viewmodel_debug_mode: the host enables or disables the tuning overlay, or refuses with its
     /// reason.
-    ViewmodelTweakMode(bool),
+    ViewmodelDebugMode(bool),
     /// `impulse 100`: the flashlight toggles (CBasePlayer::ImpulseCommands).
     Flashlight,
     /// viewmodel_tweak_reset: the host zeroes the selected weapon's framing, if the mode is on.

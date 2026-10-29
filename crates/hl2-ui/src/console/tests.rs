@@ -608,27 +608,6 @@ fn dragging_over_history_rows_selects_them_for_copy() {
 }
 
 #[test]
-fn live_viewmodel_tuning_log_replaces_its_snapshot_and_keeps_other_output() {
-    let mut console = Console::default();
-    console.shell.panel.clear_output();
-    console.log("before snapshot");
-    console.log_viewmodel_tuning("{\"fov_offset\": 0.1}");
-    console.log("unrelated output");
-    console.log_viewmodel_tuning("{\"fov_offset\": 0.2}");
-
-    assert_eq!(console.shell.panel.output.len(), 3);
-    assert_eq!(console.shell.panel.output[0].text, "before snapshot");
-    assert_eq!(console.shell.panel.output[1].level, Level::Snapshot);
-    assert_eq!(console.shell.panel.output[1].text, "{\"fov_offset\": 0.2}");
-    assert_eq!(console.shell.panel.output[2].text, "unrelated output");
-
-    console.shell.panel.clear_output();
-    console.log_viewmodel_tuning("{\"fov_offset\": 0.3}");
-    assert_eq!(console.shell.panel.output.len(), 1);
-    assert_eq!(console.shell.panel.output[0].text, "{\"fov_offset\": 0.3}");
-}
-
-#[test]
 fn scrolled_back_history_stays_put_while_output_arrives() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);

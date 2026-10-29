@@ -182,14 +182,14 @@ pub const COMMANDS: &[Spec] = &[
         cheats::noclip,
     ),
     command(
-        "viewmodel_tweak_mode",
-        "viewmodel_tweak_mode <0|1>: toggle the runtime viewmodel tuning overlay (gameplay map only)",
+        "viewmodel_debug_mode",
+        "viewmodel_debug_mode <0|1>: toggle the runtime viewmodel tuning overlay (gameplay map only)",
         &[Arg::Values(&["0", "1"])],
-        developer::viewmodel_tweak_mode,
+        developer::viewmodel_debug_mode,
     ),
     command(
         "viewmodel_tweak_reset",
-        "viewmodel_tweak_reset: zero the selected weapon's framing offsets (viewmodel_tweak_mode 1 only)",
+        "viewmodel_tweak_reset: zero the selected weapon's framing offsets (viewmodel_debug_mode 1 only)",
         &[],
         developer::viewmodel_tweak_reset,
     ),

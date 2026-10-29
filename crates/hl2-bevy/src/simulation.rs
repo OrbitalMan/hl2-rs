@@ -310,29 +310,29 @@ impl Simulation {
             self.player = Player::new(self.eye);
         }
     }
-    /// `viewmodel_tweak_mode`: only while a gameplay map is loaded.
-    fn viewmodel_tweak_mode(&mut self, ui: &mut crate::ui_host::Console, on: bool) {
+    /// `viewmodel_debug_mode`: only while a gameplay map is loaded.
+    fn viewmodel_debug_mode(&mut self, ui: &mut crate::ui_host::Console, on: bool) {
         if !on {
             self.viewmodel_debug = ViewmodelDebug::default();
-            ui.source.log("viewmodel_tweak_mode 0");
+            ui.source.log("viewmodel_debug_mode 0");
         } else if self.loading || self.background_level {
             ui.source
-                .log("viewmodel_tweak_mode needs a loaded gameplay map; start or load one first.");
+                .log("viewmodel_debug_mode needs a loaded gameplay map; start or load one first.");
         } else {
             self.background_debug.enabled = false;
             ui.source.background_debug_mode = false;
             self.viewmodel_debug.enabled = true;
-            ui.source.log("viewmodel_tweak_mode 1");
+            ui.source.log("viewmodel_debug_mode 1");
         }
     }
-    /// `viewmodel_tweak_reset`: only while `viewmodel_tweak_mode` is on.
+    /// `viewmodel_tweak_reset`: only while `viewmodel_debug_mode` is on.
     fn viewmodel_tweak_reset(&mut self, ui: &mut crate::ui_host::Console) {
         if self.viewmodel_debug.enabled {
             self.viewmodel_debug.reset_pending = true;
             ui.source.log("viewmodel_tweak_reset");
         } else {
             ui.source
-                .log("viewmodel_tweak_reset needs viewmodel_tweak_mode 1.");
+                .log("viewmodel_tweak_reset needs viewmodel_debug_mode 1.");
         }
     }
     fn apply_background_debug_effect(
@@ -481,7 +481,7 @@ impl Simulation {
                     self.player = Player::new(self.eye);
                     ui.source.log(format!("noclip {}", u8::from(self.fly)));
                 }
-                Effect::ViewmodelTweakMode(on) => self.viewmodel_tweak_mode(ui, on),
+                Effect::ViewmodelDebugMode(on) => self.viewmodel_debug_mode(ui, on),
                 Effect::Flashlight => self.flashlight_toggles += 1,
                 Effect::ViewmodelTweakReset => self.viewmodel_tweak_reset(ui),
                 Effect::BackgroundDebugMode(_)
@@ -1594,7 +1594,7 @@ mod tests {
 
     #[test]
     fn viewmodel_tweak_commands_follow_the_gameplay_map_state() {
-        use hl2_ui::console::Effect::{ViewmodelTweakMode, ViewmodelTweakReset};
+        use hl2_ui::console::Effect::{ViewmodelDebugMode, ViewmodelTweakReset};
         let mut sim = Simulation::new(&World::default(), glam::Vec3::ZERO, 0., 0., false, vec![]);
         let mut game = crate::gameplay::Gameplay::synthetic(World::default());
         let mut ui = crate::ui_host::Console::new(Default::default());
@@ -1604,27 +1604,27 @@ mod tests {
         run(&mut sim, ViewmodelTweakReset);
         assert!(!sim.viewmodel_debug.reset_pending);
         sim.background_level = true;
-        run(&mut sim, ViewmodelTweakMode(true));
+        run(&mut sim, ViewmodelDebugMode(true));
         assert!(!sim.viewmodel_debug.enabled);
         sim.background_level = false;
         sim.loading = true;
-        run(&mut sim, ViewmodelTweakMode(true));
+        run(&mut sim, ViewmodelDebugMode(true));
         assert!(!sim.viewmodel_debug.enabled);
         sim.loading = false;
-        run(&mut sim, ViewmodelTweakMode(true));
+        run(&mut sim, ViewmodelDebugMode(true));
         assert!(sim.viewmodel_debug.enabled);
         run(&mut sim, ViewmodelTweakReset);
         assert!(sim.viewmodel_debug.reset_pending);
         sim.change_map(&World::default(), glam::Vec3::ZERO, true);
         assert!(!sim.viewmodel_debug.enabled && !sim.viewmodel_debug.reset_pending);
-        run(&mut sim, ViewmodelTweakMode(true));
-        run(&mut sim, ViewmodelTweakMode(false));
+        run(&mut sim, ViewmodelDebugMode(true));
+        run(&mut sim, ViewmodelDebugMode(false));
         assert!(!sim.viewmodel_debug.enabled);
     }
 
     #[test]
     fn background_and_viewmodel_debug_modes_mutually_exclusive() {
-        use hl2_ui::console::Effect::{BackgroundDebugMode, ViewmodelTweakMode};
+        use hl2_ui::console::Effect::{BackgroundDebugMode, ViewmodelDebugMode};
         let mut sim = Simulation::new(&World::default(), glam::Vec3::ZERO, 0., 0., false, vec![]);
         let mut game = crate::gameplay::Gameplay::synthetic(World::default());
         let mut ui = crate::ui_host::Console::new(Default::default());
@@ -1637,7 +1637,7 @@ mod tests {
         assert!(!sim.viewmodel_debug.enabled);
 
         sim.background_level = false;
-        run(&mut sim, ViewmodelTweakMode(true));
+        run(&mut sim, ViewmodelDebugMode(true));
         assert!(sim.viewmodel_debug.enabled);
         assert!(!sim.background_debug.enabled);
 

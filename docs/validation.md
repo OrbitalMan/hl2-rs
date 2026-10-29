@@ -1,5 +1,23 @@
 # Local validation — 2026-10-05
 
+## Viewmodel debug rename and snapshot log order (2026-10-29)
+
+`viewmodel_debug_mode` is registered and dispatches to the host; the former mode
+name is absent from the registry. The reset command remains `viewmodel_tweak_reset`.
+The snapshot-order negative control originally produced `a, tuning 2, b` instead
+of `a, b, tuning 2`. Shared toolkit and HL2 wiring tests now pass, including cached
+row reindexing, selections spanning or targeting the removed snapshot, filtered and
+wrapped scroll anchors, full-buffer replacement and ordinary eviction.
+
+Workspace validation, strict Windows checks and release packaging pass. A live
+isolated packaged run enables the renamed mode, resets the portrait SMG, prints an
+echo marker, selects the pistol and resets again. Its report contains exactly one
+snapshot after that marker, at the final console entry, with both session edits
+accumulated and zero-default omission preserved. The standard packaged `console`
+replay also passes. Reports and emitted JSON remain in ignored artifacts.
+Interactive desktop scrolling and Windows GPU runtime were not retested.
+
+
 ## Compact viewmodel snapshots (2026-10-29)
 
 Two new formatter regressions fail before the repair and pass afterward. They cover
