@@ -78,9 +78,9 @@ impl BackgroundDebug {
                 "blur_opacity: {}%  (left: 0  right: 100  ,: -1%  .: +1%)",
                 self.blur_opacity
             ),
-            format!("fov: {:.2}°  (D/U  0: reset)", fov),
+            format!("fov: {:.2}°  (up: +0.1  down: -0.1  0: reset)", fov),
             "1-4: hl2/ep1/ep2/lc    [/]: prev/next chapter bg".to_owned(),
-            "Shift = 1.0  Alt = 0.01    hold to repeat    background_debug_mode 0".to_owned(),
+            "Shift = 1.0  Alt = 0.01    hold to repeat".to_owned(),
         ]
     }
 
