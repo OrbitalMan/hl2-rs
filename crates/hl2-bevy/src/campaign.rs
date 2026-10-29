@@ -4,7 +4,6 @@ use bevy::{
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
-use std::sync::{Arc, Mutex};
 
 #[derive(Component)]
 pub(crate) struct MapOwned;
@@ -28,8 +27,10 @@ struct Request {
     background: bool,
 }
 mod loading;
+#[cfg(test)]
+mod loading_owned_tests;
 
-type ResultSlot = Arc<Mutex<Option<Result<assets::LoadedMap, String>>>>;
+type ResultSlot = assets::work::Work<assets::LoadedMap>;
 struct Job {
     request: Request,
     result: ResultSlot,
@@ -37,6 +38,7 @@ struct Job {
 }
 #[derive(Resource, Default)]
 pub struct Campaign {
+    audio_reuse: std::sync::Arc<crate::audio::reuse::AudioReuse>,
     job: Option<Job>,
     pub metadata: serde_json::Value,
     /// The currently active, fully loaded map and its game.
@@ -66,7 +68,7 @@ impl Campaign {
         self.job.is_none() && self.loaded_map.is_some()
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"loading":self.job.as_ref().map(|j|&j.request.map),"loading_frames":self.loading_frames,
+        serde_json::json!({"loading":self.job.as_ref().map(|j|&j.request.map),"loading_frames":self.loading_frames,"audio_reuse":self.audio_reuse.report(),
             "active_map":self.metadata["map"],"loaded_map":self.loaded_map.as_ref().map(|m| &m.map),"loaded_game":self.loaded_map.as_ref().map(|m| &m.game),"gameplay_ready":self.is_gameplay_ready(),"last_event":self.last_event.as_ref().map(|e| &e.map),"last_event_game":self.last_event.as_ref().map(|e| &e.game),"failures":self.failures,
             "limitations":"landmark eye, inventory and global-state transfer; saved entity/AI state, full player transfer and complete campaign remain unfinished"})
     }
@@ -77,6 +79,8 @@ type Host<'w> = (
     ResMut<'w, ui_host::Console>,
     ResMut<'w, gameplay::Gameplay>,
     ResMut<'w, simulation::Simulation>,
+    Option<Res<'w, crate::audio::deferred::PendingAudio>>,
+    Option<Res<'w, crate::audio::Audio>>,
 );
 fn next_map_request(
     options: &Options,
@@ -116,7 +120,7 @@ fn next_map_request(
 
 pub fn poll(
     mut commands: Commands,
-    (options, mut campaign, mut ui, mut game, mut sim): Host,
+    (options, mut campaign, mut ui, mut game, mut sim, pending_audio, audio): Host,
     mut assets: StartupAssets,
     old_draws: Query<Entity, With<MapOwned>>,
     mut windows: Query<&mut CursorOptions, With<PrimaryWindow>>,
@@ -129,23 +133,23 @@ pub fn poll(
         let Some(request) = next_map_request(&options, &campaign, &mut ui, &mut game) else {
             return;
         };
-        if loading::reuse_background(&request, &campaign, &mut ui, &mut sim) {
+        if !loading::activate_request(
+            request,
+            &options,
+            &mut campaign,
+            &mut ui,
+            &mut sim,
+            (audio.as_deref(), pending_audio.as_deref()),
+        ) {
             return;
-        }
-        match loading::begin(request, &options, &mut ui, &mut sim) {
-            Ok(job) => campaign.job = Some(job),
-            Err(error) => {
-                ui.source.log(&error);
-                ui.source.loading_failed(&error);
-                campaign.failures.push(error);
-                sim.loading_failed();
-                return;
-            }
         }
     }
     let Some((job, result)) = loading::completed(&mut campaign, &mut ui) else {
         return;
     };
+    if job.result.cancel.cancelled() {
+        return;
+    }
     if loading::superseded(&job.request, &mut ui) {
         if let Err(error) = result {
             ui.source.log(&error);
@@ -156,32 +160,14 @@ pub fn poll(
     let mut loaded = match result {
         Ok(loaded) => loaded,
         Err(error) => {
-            loading::log_debug_load_finish(&job.request, false, &mut sim, &mut ui);
-            if job.request.background {
-                let warning = format!(
-                    "Warning: background map {} failed: {error}",
-                    job.request.map
-                );
-                ui.source.log(&warning);
-                campaign.failures.push(warning);
-                sim.loading_failed();
-                ui.source.background_load_failed_for_map(
-                    &job.request.game,
-                    &job.request.map,
-                    &error,
-                );
-                return;
-            }
-            let error = format!("Map transition failed for {}: {error}", job.request.map);
-            ui.source.log(&error);
-            ui.source.loading_failed(&error);
-            campaign.failures.push(error.clone());
-            sim.loading_failed();
-            if !options.map_dependent.is_empty() && options.map.as_deref() == Some(&job.request.map)
-            {
-                eprintln!("{error}");
-                std::process::exit(1);
-            }
+            loading::failed(
+                &job.request,
+                error,
+                &options,
+                &mut campaign,
+                &mut ui,
+                &mut sim,
+            );
             return;
         }
     };
@@ -203,18 +189,7 @@ pub fn poll(
     loaded.gameplay.consume_attacks();
     campaign.history.push(serde_json::json!({"from":game.world.name,"to":loaded.world.name,"direct":job.request.direct,"landmark":job.request.landmark,
         "previous_eye":previous_eye.to_array(),"arrival_eye":eye.to_array(),"inventory":loaded.gameplay.inventory,"previous_time":game.scene.time}));
-    campaign.metadata = assets::map_metadata(&loaded);
-    campaign.metadata["loading_ms"]["request_to_worker_ms"] =
-        (job.started.elapsed().as_secs_f64() * 1000.).into();
-    campaign.loaded_map = Some(hl2_ui::console::GameMap::new(
-        &loaded.game,
-        &loaded.world.name,
-    ));
-    campaign.last_event = Some(MapLoaded {
-        game: loaded.game.clone(),
-        map: loaded.world.name.clone(),
-        background: job.request.background,
-    });
+    loading::record_loaded(&mut campaign, &loaded, &job);
     for entity in &old_draws {
         commands.entity(entity).try_despawn();
     }
@@ -269,7 +244,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::window::WindowResolution;
 
-    fn test_options(game: &std::path::Path) -> crate::Options {
+    pub(super) fn test_options(game: &std::path::Path) -> crate::Options {
         let args = [
             "--no-setup".to_owned(),
             "--game".to_owned(),
@@ -288,12 +263,7 @@ mod tests {
         let game = source_assets::install::discover().expect("owned install");
         let mut app = App::new();
         let options = test_options(&game);
-        app.init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<crate::rendering::SourceMaterial>>()
-            .init_resource::<Assets<Image>>()
-            .init_resource::<Assets<bevy::audio::AudioSource>>()
-            .init_resource::<Assets<crate::effects::EffectMaterial>>()
-            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+        super::loading_owned_tests::init_map_assets(&mut app)
             .init_resource::<crate::Status>()
             .insert_resource(options)
             .insert_resource(Campaign {
@@ -594,12 +564,7 @@ mod tests {
         let game = source_assets::install::discover().expect("owned install");
         let mut app = App::new();
         let options = test_options(&game);
-        app.init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<crate::rendering::SourceMaterial>>()
-            .init_resource::<Assets<Image>>()
-            .init_resource::<Assets<bevy::audio::AudioSource>>()
-            .init_resource::<Assets<crate::effects::EffectMaterial>>()
-            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+        super::loading_owned_tests::init_map_assets(&mut app)
             .init_resource::<crate::Status>()
             .insert_resource(options)
             .insert_resource(Campaign {
@@ -734,12 +699,7 @@ mod tests {
             let _ = std::fs::write(path, b"fixture");
         }
         let options = test_options(&temp);
-        app.init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<crate::rendering::SourceMaterial>>()
-            .init_resource::<Assets<Image>>()
-            .init_resource::<Assets<bevy::audio::AudioSource>>()
-            .init_resource::<Assets<crate::effects::EffectMaterial>>()
-            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+        super::loading_owned_tests::init_map_assets(&mut app)
             .init_resource::<crate::Status>()
             .insert_resource(options)
             .insert_resource(Campaign {

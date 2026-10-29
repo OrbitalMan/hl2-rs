@@ -1,7 +1,10 @@
 //! Read owned Source assets before constructing the Bevy app; no system performs file I/O.
 mod faces;
-mod loading;
+pub(crate) mod loading;
+mod loading_auxiliary;
 mod names;
+pub(crate) mod reuse;
+pub(crate) mod work;
 #[cfg(test)]
 use names::rendered_material_names;
 pub(crate) use names::visible_entity;
@@ -42,6 +45,7 @@ pub struct LoadedMap {
     pub gameplay: crate::gameplay::Gameplay,
     pub hud: hl2_ui::hud::WeaponHud,
     pub audio: crate::audio::PreparedAudio,
+    pub pending_audio: Option<work::Work<crate::audio::PreparedAudio>>,
     pub sky: Option<source_assets::sky::Skybox>,
     pub effects: crate::effects::PreparedEffects,
     pub gaze: BTreeMap<String, source_assets::eyes::Gaze>,

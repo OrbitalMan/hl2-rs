@@ -13,6 +13,7 @@ pub(super) fn install_view(
 ) {
     sim.change_map(&loaded.world, eye, request.direct);
     sim.background_level = request.background;
+    sim.background_audio_pending = loaded.pending_audio.is_some();
     if request.direct {
         if let Some(yaw) = options.yaw {
             sim.yaw = yaw;
@@ -29,14 +30,54 @@ pub(super) fn install_view(
     }
 }
 
+pub(super) fn activate_request(
+    request: Request,
+    options: &crate::Options,
+    campaign: &mut super::Campaign,
+    ui: &mut ui_host::Console,
+    sim: &mut crate::simulation::Simulation,
+    (audio, pending): (
+        Option<&crate::audio::Audio>,
+        Option<&crate::audio::deferred::PendingAudio>,
+    ),
+) -> bool {
+    if reuse_background(
+        &request,
+        campaign,
+        ui,
+        sim,
+        audio.is_some_and(crate::audio::Audio::is_ready),
+    ) {
+        return false;
+    }
+    if let Some(pending) = pending {
+        pending.cancel();
+    }
+    match begin(request, options, ui, sim, campaign.audio_reuse.clone()) {
+        Ok(job) => {
+            campaign.job = Some(job);
+            true
+        }
+        Err(error) => {
+            ui.source.log(&error);
+            ui.source.loading_failed(&error);
+            campaign.failures.push(error);
+            sim.loading_failed();
+            false
+        }
+    }
+}
+
 pub(super) fn begin(
     request: Request,
     options: &crate::Options,
     ui: &mut ui_host::Console,
     sim: &mut crate::simulation::Simulation,
+    reuse: std::sync::Arc<crate::audio::reuse::AudioReuse>,
 ) -> Result<super::Job, String> {
+    sim.background_audio_pending = false;
     let started = std::time::Instant::now();
-    let result = spawn_worker(&request, options, ui)?;
+    let result = spawn_worker(&request, options, ui, reuse)?;
     log_debug_load_start(&request, sim, ui);
     start(&request, ui);
     sim.loading = true;
@@ -51,30 +92,34 @@ pub(super) fn spawn_worker(
     request: &Request,
     options: &crate::Options,
     ui: &ui_host::Console,
+    audio_reuse: std::sync::Arc<crate::audio::reuse::AudioReuse>,
 ) -> Result<super::ResultSlot, String> {
-    let result: super::ResultSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let output = result.clone();
     let map = request.map.clone();
     let map_game = request.game.clone();
     let root = options.game.clone();
     let canvas = ui.source.canvas.clone();
     let new_game = request.direct;
+    let background = request.background;
     let config = ui.source.config.clone();
     let progress = ui.source.loading_progress();
-    std::thread::Builder::new()
-        .name("hl2-owned-map-loader".into())
-        .spawn(move || {
-            let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                crate::assets::load_with_progress(
-                    &root, &map_game, &map, canvas, new_game, &config, &progress,
-                )
-            }))
-            .map_err(|_| "owned map loader panicked".to_owned())
-            .and_then(|r| r.map_err(|e| format!("{e:#}")));
-            *output.lock().expect("map loader result") = Some(value);
-        })
-        .map(|_| result)
-        .map_err(|error| format!("Cannot start map loader: {error}"))
+    super::assets::work::Work::spawn("hl2-owned-map-loader", move |cancel| {
+        crate::assets::loading::load(
+            crate::assets::loading::LoadInput {
+                root: &root,
+                game: &map_game,
+                map: &map,
+                canvas,
+                new_game,
+                config: &config,
+                progress: &progress,
+            },
+            crate::assets::loading::LoadMode {
+                background,
+                cancel,
+                audio_reuse,
+            },
+        )
+    })
 }
 
 pub(super) fn start(request: &Request, ui: &mut ui_host::Console) {
@@ -124,8 +169,10 @@ pub(super) fn reuse_background(
     campaign: &super::Campaign,
     ui: &mut ui_host::Console,
     sim: &mut crate::simulation::Simulation,
+    audio_ready: bool,
 ) -> bool {
-    if !request.background
+    if !audio_ready
+        || !request.background
         || !campaign.last_event.as_ref().is_some_and(|event| {
             event.background && event.game == request.game && event.map == request.map
         })
@@ -144,7 +191,16 @@ pub(super) fn completed(
 ) -> Option<(super::Job, Result<crate::assets::LoadedMap, String>)> {
     campaign.loading_frames += 1;
     ui.source.update_loading();
-    let result = campaign.job.as_ref()?.result.try_lock().ok()?.take()?;
+    if let Some(job) = &campaign.job
+        && job.request.background
+        && ui.map_request.is_some()
+        && !(ui.background_request
+            && ui.map_request.as_deref() == Some(&job.request.map)
+            && ui.map_request_game.as_deref() == Some(&job.request.game))
+    {
+        job.result.cancel.cancel();
+    }
+    let result = campaign.job.as_ref()?.result.poll()?;
     Some((campaign.job.take().expect("completed map job"), result))
 }
 
@@ -259,6 +315,54 @@ pub(super) fn carry_state(
     }
 }
 
+pub(super) fn failed(
+    request: &Request,
+    error: String,
+    options: &crate::Options,
+    campaign: &mut super::Campaign,
+    ui: &mut ui_host::Console,
+    sim: &mut crate::simulation::Simulation,
+) {
+    log_debug_load_finish(request, false, sim, ui);
+    if request.background {
+        let warning = format!("Warning: background map {} failed: {error}", request.map);
+        ui.source.log(&warning);
+        campaign.failures.push(warning);
+        sim.loading_failed();
+        ui.source
+            .background_load_failed_for_map(&request.game, &request.map, &error);
+        return;
+    }
+    let error = format!("Map transition failed for {}: {error}", request.map);
+    ui.source.log(&error);
+    ui.source.loading_failed(&error);
+    campaign.failures.push(error.clone());
+    sim.loading_failed();
+    if !options.map_dependent.is_empty() && options.map.as_deref() == Some(&request.map) {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
+}
+
+pub(super) fn record_loaded(
+    campaign: &mut super::Campaign,
+    loaded: &crate::assets::LoadedMap,
+    job: &super::Job,
+) {
+    campaign.metadata = crate::assets::map_metadata(loaded);
+    campaign.metadata["loading_ms"]["request_to_worker_ms"] =
+        (job.started.elapsed().as_secs_f64() * 1000.).into();
+    campaign.loaded_map = Some(hl2_ui::console::GameMap::new(
+        &loaded.game,
+        &loaded.world.name,
+    ));
+    campaign.last_event = Some(super::MapLoaded {
+        game: loaded.game.clone(),
+        map: loaded.world.name.clone(),
+        background: job.request.background,
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Request, preserve_gameplay_request, superseded, ui_host};
@@ -335,17 +439,57 @@ mod tests {
             &request(true),
             &campaign,
             &mut ui,
-            &mut sim
+            &mut sim,
+            true
         ));
         assert!(!sim.loading);
         assert!(!ui.source.is_background_loading());
         assert!(!ui.source.is_loading());
+        sim.loading = true;
+        assert!(
+            !super::reuse_background(&request(true), &campaign, &mut ui, &mut sim, false),
+            "a cancelled or failed late-audio result requires a fresh load, not permanent silent reuse"
+        );
+        assert!(sim.loading);
         campaign.last_event.as_mut().unwrap().background = false;
         assert!(!super::reuse_background(
             &request(true),
             &campaign,
             &mut ui,
-            &mut sim
+            &mut sim,
+            true
         ));
+    }
+    #[test]
+    fn newer_background_and_gameplay_requests_cancel_active_background_work() {
+        use std::{sync::mpsc, time::Duration};
+        for background in [true, false] {
+            let (started_tx, started_rx) = mpsc::channel();
+            let (finished_tx, finished_rx) = mpsc::channel();
+            let work = crate::assets::work::Work::spawn("superseded-map-test", move |cancel| {
+                started_tx.send(()).unwrap();
+                while cancel.check().is_ok() {
+                    std::thread::yield_now();
+                }
+                finished_tx.send(()).unwrap();
+                cancel.check()?;
+                unreachable!()
+            })
+            .unwrap();
+            let token = work.cancel.clone();
+            started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            let mut campaign = crate::campaign::Campaign::default();
+            campaign.job = Some(crate::campaign::Job {
+                request: request(true),
+                result: work,
+                started: std::time::Instant::now(),
+            });
+            let mut ui = queued(background, "ep2", "ep2_background01");
+            let _ = super::completed(&mut campaign, &mut ui);
+            assert!(token.cancelled());
+            finished_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert_eq!(ui.map_request.as_deref(), Some("ep2_background01"));
+            assert!(campaign.failures.is_empty());
+        }
     }
 }

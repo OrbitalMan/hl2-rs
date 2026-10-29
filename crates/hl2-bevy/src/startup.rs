@@ -94,13 +94,8 @@ pub(crate) fn load_stub(root: &std::path::Path, game: &str) -> Result<crate::ass
     let canvas = source_ui::canvas::Canvas::default();
     let hud = hl2_ui::hud::WeaponHud::load(&vfs, canvas)?;
     let world = Arc::new(modkit_core::World::default());
-    let gameplay = crate::gameplay::Gameplay::load_with_campaign(
-        modkit_core::World::default(),
-        &vfs,
-        0,
-        true,
-    )?;
-    let audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
+    let gameplay = crate::gameplay::Gameplay::synthetic(modkit_core::World::default());
+    let audio = crate::audio::PreparedAudio::silent();
     let effects = crate::effects::PreparedEffects::load(&vfs, &world);
     let bsp = source_assets::bsp::Bsp::empty();
     let shadow_receivers = Arc::new(hl2_simulation::shadows::receivers::Receivers::new(
@@ -114,6 +109,7 @@ pub(crate) fn load_stub(root: &std::path::Path, game: &str) -> Result<crate::ass
         gameplay,
         hud,
         audio,
+        pending_audio: None,
         sky: None,
         effects,
         gaze: std::collections::BTreeMap::new(),

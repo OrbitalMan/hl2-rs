@@ -1,10 +1,12 @@
 //! Preload owned cue alternatives before App::run; systems use only memory/assets.
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use bevy::{audio::AudioSinkPlayback, prelude::*};
 use hl2_simulation::sounds::{AmbientControl, Library, SoundRequest};
 use hl2_simulation::soundscapes::{Command as SoundscapeCommand, Definitions, Playback};
 use source_assets::vpk::Vfs;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+#[cfg(test)]
+use std::collections::BTreeSet;
+use std::collections::{BTreeMap, HashMap};
 
 const MAX_PRELOADED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_PLAYERS: usize = 256;
@@ -26,7 +28,11 @@ struct Vox {
     rng: u64,
 }
 impl Vox {
-    fn load(vfs: &Vfs) -> Self {
+    fn load(
+        vfs: &Vfs,
+        reuse: &reuse::AudioReuse,
+        cancel: &crate::assets::work::Cancellation,
+    ) -> Result<Self> {
         let mut vox = Self {
             rng: 0x6a09_e667_f3bc_c909,
             ..Self::default()
@@ -36,7 +42,7 @@ impl Vox {
             other => {
                 vox.errors
                     .insert("scripts/sentences.txt".into(), format!("{:?}", other.err()));
-                return vox;
+                return Ok(vox);
             }
         };
         for (name, line) in source_assets::vox::sentences(&text) {
@@ -53,19 +59,8 @@ impl Vox {
                 if vox.words.contains_key(&word.wave) || vox.errors.contains_key(&word.wave) {
                     continue;
                 }
-                let decoded = (|| -> Result<std::sync::Arc<[f32]>> {
-                    let encoded = vfs
-                        .read(&format!("sound/{}", word.wave))?
-                        .context("owned sentence word absent")?;
-                    let (data, _) = hl2_simulation::sounds::decode(&word.wave, encoded)?;
-                    let (channels, rate, samples) = hl2_simulation::sounds::wav_samples(&data)?;
-                    let channels = usize::from(channels.max(1));
-                    let mono: Vec<f32> = samples
-                        .chunks(channels)
-                        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-                        .collect();
-                    Ok(resample(&mono, 1, rate, BACKEND_RATE).into())
-                })();
+                cancel.check()?;
+                let decoded = reuse.mono(vfs, &word.wave, cancel);
                 match decoded {
                     Ok(samples) => {
                         vox.words.insert(word.wave.clone(), samples);
@@ -81,7 +76,7 @@ impl Vox {
                 .push(name.clone());
             vox.sentences.insert(name, words);
         }
-        vox
+        Ok(vox)
     }
     fn random(&mut self) -> u64 {
         self.rng ^= self.rng << 13;
@@ -164,7 +159,7 @@ struct Ambient {
 }
 pub struct PreparedAudio {
     library: Library,
-    waves: Vec<(String, Vec<u8>)>,
+    waves: Vec<(String, std::sync::Arc<[u8]>)>,
     /// Every ambient_generic with a message, by entity index.
     ambient: HashMap<usize, Ambient>,
     soundscapes: Definitions,
@@ -172,208 +167,20 @@ pub struct PreparedAudio {
     cues: usize,
     /// Speech phoneme data (wave path, sentence, seconds) for lip sync.
     pub sentences: Vec<(String, source_assets::sentence::Sentence, f32)>,
+    ready: bool,
+    preparation_ms: f64,
     vox: Vox,
 }
-impl PreparedAudio {
-    pub fn load(vfs: &Vfs, game: &crate::gameplay::Gameplay) -> Self {
-        let mut library = Library::new(vfs);
-        let mut cues = BTreeSet::new();
-        let mut ambient = HashMap::new();
-        let origin_of = |entity: &modkit_core::Entity| {
-            entity
-                .get("origin")
-                .and_then(modkit_core::parse_vec3)
-                .map_or(glam::Vec3::ZERO, |v| glam::Vec3::from_array(v.to_array()))
-        };
-        for (id, entity) in game.world.entities.iter().enumerate() {
-            if entity.class() != "ambient_generic" {
-                continue;
-            }
-            let Some(name) = entity.get("message").filter(|name| !name.is_empty()) else {
-                continue;
-            };
-            cues.insert(name.to_owned());
-            let flags = entity
-                .get("spawnflags")
-                .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(0);
-            let number = |key: &str| entity.get(key).and_then(|s| s.trim().parse::<f32>().ok());
-            // volrun = clamp(health * 10, 0, 100); m_iHealth defaults to 0 (silent).
-            let volume = (number("health").unwrap_or(0.) * 10.).clamp(0., 100.) / 100.;
-            if volume <= 0. {
-                continue;
-            }
-            let pitch = number("pitch")
-                .filter(|p| *p > 0.)
-                .unwrap_or(100.)
-                .min(255.);
-            let radius = number("radius").unwrap_or(0.);
-            // A raw wave's soundlevel comes from its radius (40 dB at 36 units); a sound
-            // script keeps its own soundlevel (SDK EmitAmbientSound).
-            let soundlevel = if name.to_ascii_lowercase().contains(".wav")
-                || name.to_ascii_lowercase().contains(".mp3")
-            {
-                if radius > 0. && flags & 1 == 0 {
-                    (40. + 20. * (radius / 36.).log10()).trunc()
-                } else {
-                    0.
-                }
-            } else {
-                library.params(name).soundlevel
-            };
-            let source = entity
-                .get("SourceEntityName")
-                .filter(|n| !n.is_empty())
-                .and_then(|n| {
-                    game.world
-                        .entities
-                        .iter()
-                        .find(|e| e.get("targetname") == Some(n))
-                })
-                .unwrap_or(entity);
-            ambient.insert(
-                id,
-                Ambient {
-                    request: name.into(),
-                    looped: flags & 32 == 0,
-                    // SDK CAmbientGeneric: only looping sounds that do not start silent play at
-                    // spawn; others wait for PlaySound.
-                    at_spawn: flags & (16 | 32) == 0,
-                    volume,
-                    pitch,
-                    spatial: (origin_of(source), soundlevel),
-                },
-            );
-        }
-        cues.extend(
-            game.scene
-                .required_sound_requests(&game.world)
-                .into_iter()
-                .map(|r| r.name),
-        );
-        cues.extend(
-            game.impacts
-                .required_sound_requests()
-                .into_iter()
-                .map(|r| r.name),
-        );
-        // PhysBreakSound: every surfaceprop's break cue (a prop can break on any map).
-        cues.extend(
-            game.world
-                .surface_materials
-                .values()
-                .filter_map(|m| m.break_sound.clone()),
-        );
-        for weapon in game.weapons.values() {
-            cues.extend(weapon.sounds.values().cloned());
-        }
-        // Player-ally speech (talker response rules: scene speak sounds, die sounds).
-        cues.extend(game.ai.speech_cues());
-        // Studio client sound events: viewmodels and NPC sequences (5004 sounds and
-        // CL_EVENT_FOOTSTEP names).
-        for rig in game.world.rigs.values() {
-            cues.extend(hl2_simulation::sounds::animation_sound_names(rig));
-        }
-        cues.extend(
-            cues::FIXED
-                .iter()
-                .copied()
-                .chain(hl2_simulation::ai::zombie::SOUNDS.iter().copied())
-                .chain(hl2_simulation::fire::SOUNDS.iter().copied())
-                .map(str::to_owned),
-        );
-        let mut paths = BTreeSet::new();
-        let mut looped: BTreeSet<String> = ambient
-            .values()
-            .filter(|a| a.looped)
-            .filter_map(|a| library.all_alternatives(&a.request.name).ok())
-            .flatten()
-            .collect();
-        // Every wave the map's soundscapes can play; their loops use the looping conversion.
-        let soundscapes = Definitions::load(vfs, &game.world.name);
-        let names: Vec<&str> = game
-            .world
-            .entities
-            .iter()
-            .filter(|e| e.class().starts_with("env_soundscape"))
-            .filter_map(|e| e.get("soundscape"))
-            .collect();
-        let (loops, randoms) = soundscapes.waves_by_kind(names);
-        looped.extend(loops.iter().cloned());
-        paths.extend(loops);
-        paths.extend(randoms);
-        for (index, error) in soundscapes.errors.iter().enumerate() {
-            library
-                .errors
-                .insert(format!("soundscapes {index}"), error.clone());
-        }
-        for cue in &cues {
-            match library.all_alternatives(cue) {
-                Ok(variants) => paths.extend(variants),
-                Err(error) => {
-                    library.errors.insert(cue.clone(), format!("{error:#}"));
-                }
-            }
-        }
-        let mut waves = vec![];
-        let mut bytes = 0usize;
-        let mut sentences = Vec::new();
-        for path in paths {
-            let decoded = (|| -> Result<_> {
-                let encoded = vfs
-                    .read(&format!("sound/{path}"))?
-                    .context("owned sound absent")?;
-                let sentence = match source_assets::sentence::vdat_chunk(&encoded) {
-                    Ok(Some(chunk)) => Some(source_assets::sentence::Sentence::parse(chunk)?),
-                    _ => None,
-                };
-                let (data, summary) = hl2_simulation::sounds::decode(&path, encoded)?;
-                let mixes = if library.distance_variant(&path) {
-                    distance_variant_mixes(&data)?
-                } else {
-                    None
-                };
-                let data = match mixes {
-                    Some(mixes) => mixes,
-                    None => vec![(path.clone(), backend_wav(data, looped.contains(&path))?)],
-                };
-                let size = data.iter().map(|(_, d)| d.len()).sum::<usize>();
-                if size > MAX_PRELOADED_BYTES.saturating_sub(bytes) {
-                    bail!("owned audio preload exceeds 512 MiB budget");
-                }
-                Ok((data, summary, sentence))
-            })();
-            match decoded {
-                Ok((data, summary, sentence)) => {
-                    if let Some(sentence) = sentence {
-                        sentences.push((path.clone(), sentence, summary.seconds() as f32));
-                    }
-                    library.decoded.insert(path.clone(), summary);
-                    for (key, data) in data {
-                        bytes += data.len();
-                        waves.push((key.replace("{path}", &path), data));
-                    }
-                }
-                Err(error) => {
-                    library.errors.insert(path, format!("{error:#}"));
-                }
-            }
-        }
-        Self {
-            library,
-            waves,
-            ambient,
-            soundscapes,
-            bytes,
-            cues: cues.len(),
-            sentences,
-            vox: Vox::load(vfs),
-        }
-    }
-}
+pub(crate) mod deferred;
+#[cfg(test)]
+mod deferred_tests;
+mod preparation;
+pub(crate) mod reuse;
 
 #[derive(Resource)]
 pub struct Audio {
+    ready: bool,
+    preparation_ms: f64,
     library: Library,
     handles: HashMap<String, Handle<AudioSource>>,
     bytes: usize,
@@ -415,6 +222,9 @@ pub struct Audio {
 /// `soundpatch_captionlength`: looping sound patches caption for this long.
 const SOUND_PATCH_CAPTION_LENGTH: f32 = 2.;
 impl Audio {
+    pub(crate) fn is_ready(&self) -> bool {
+        self.ready
+    }
     /// The CloseCaption message of an emitted sound (CSoundEmitterSystem::EmitCloseCaption):
     /// its sound script name for `duration` (the chosen wave's length unless given), unless the
     /// sound plays at an `origin` beyond the caption radius of the `player`. Raw waves,
@@ -665,7 +475,7 @@ impl Audio {
         Some(path)
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"preloaded_waves":self.handles.len(),"preloaded_bytes":self.bytes,"referenced_cues":self.cues,
+        serde_json::json!({"ready":self.ready,"preparation_ms":self.preparation_ms,"preloaded_waves":self.handles.len(),"preloaded_bytes":self.bytes,"referenced_cues":self.cues,
             "requested":self.requested,"started_sinks":self.started,"failed_requests":self.failed,"capacity_rejections":self.capacity_rejections,
             "pending_sinks":self.pending_sinks,"active_sinks":self.active_sinks,"paused_sinks":self.paused_sinks,
             "pause_changes":self.pause_changes,"resume_changes":self.resume_changes,"spatial":self.spatial,
@@ -687,16 +497,11 @@ pub fn install(
     let handles = prepared
         .waves
         .into_iter()
-        .map(|(path, bytes)| {
-            (
-                path,
-                sources.add(AudioSource {
-                    bytes: bytes.into(),
-                }),
-            )
-        })
+        .map(|(path, bytes)| (path, sources.add(AudioSource { bytes })))
         .collect();
     let mut audio = Audio {
+        ready: prepared.ready,
+        preparation_ms: prepared.preparation_ms,
         library: prepared.library,
         handles,
         bytes: prepared.bytes,
@@ -823,13 +628,42 @@ fn update_player(
     }
 }
 
+fn apply_output_settings(
+    audio: &mut Audio,
+    ui: Option<&crate::ui_host::Console>,
+    forced: bool,
+    unfocused: bool,
+) {
+    let (music_vol, mute_losefocus, video_playing) = ui.map_or((0., false, false), |u| {
+        (
+            u.source.config.audio.music_volume.clamp(0., 1.),
+            u.source.config.audio.mute_losefocus,
+            u.source.is_video_playing(),
+        )
+    });
+    audio.music_volume = music_vol;
+    audio.muted = output_muted(forced, mute_losefocus, unfocused) || video_playing;
+}
+
+fn update_pause_state(audio: &mut Audio, paused: bool) {
+    if paused != audio.paused {
+        if paused {
+            audio.pause_changes += 1;
+        } else {
+            audio.resume_changes += 1;
+        }
+        audio.paused = paused;
+    }
+}
+
 pub fn queue(
     mut commands: Commands,
     mut audio: ResMut<Audio>,
     mut game: ResMut<crate::gameplay::Gameplay>,
-    (simulation, mut trace): (
+    (simulation, mut trace, mut pending): (
         Res<crate::simulation::Simulation>,
         Option<ResMut<AudioTrace>>,
+        Option<ResMut<deferred::PendingAudio>>,
     ),
     mut players: Query<(
         Entity,
@@ -840,33 +674,22 @@ pub fn queue(
     mut sources: ResMut<Assets<AudioSource>>,
     (global, ui, windows, forced_mute): MixInputs,
 ) {
-    let (music_vol, mute_losefocus, video_playing) =
-        ui.as_deref().map_or((0., false, false), |u| {
-            (
-                u.source.config.audio.music_volume.clamp(0., 1.),
-                u.source.config.audio.mute_losefocus,
-                u.source.is_video_playing(),
-            )
-        });
-    audio.music_volume = music_vol;
-    audio.muted = output_muted(
+    if let Some(pending) = pending.as_deref_mut().filter(|p| p.waiting()) {
+        pending.defer(&mut game);
+        return;
+    }
+    apply_output_settings(
+        &mut audio,
+        ui.as_deref(),
         forced_mute.is_some_and(|m| m.0),
-        mute_losefocus,
         windows.single().is_ok_and(|w| !w.focused),
-    ) || video_playing;
+    );
     let listener = glam::Vec3::from_array(simulation.view_origin().to_array());
     audio.listener = listener;
     // Caption radius checks measure from the player (its eye stands in for its origin).
     let player = glam::Vec3::from_array(simulation.eye().to_array());
     let paused = !simulation.world_running();
-    if paused != audio.paused {
-        if paused {
-            audio.pause_changes += 1;
-        } else {
-            audio.resume_changes += 1;
-        }
-        audio.paused = paused;
-    }
+    update_pause_state(&mut audio, paused);
     let mut count = 0;
     audio.spatial.clear();
     let mut owned = Vec::new();
@@ -1267,7 +1090,7 @@ mod tests {
     fn installed_hev_sentences_match_their_authored_lengths() {
         let root = source_assets::install::discover().unwrap();
         let vfs = Vfs::mount(&root).unwrap();
-        let mut vox = Vox::load(&vfs);
+        let mut vox = Vox::load(&vfs, &Default::default(), &Default::default()).unwrap();
         let text = String::from_utf8(vfs.read("scripts/sentences.txt").unwrap().unwrap()).unwrap();
         let mut checked = 0;
         for (name, line) in source_assets::vox::sentences(&text) {

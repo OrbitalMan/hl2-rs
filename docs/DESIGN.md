@@ -1,12 +1,14 @@
+# Design
+
 ## Shorten background and shared map loading critical paths (2026-10-29)
 
 Measure worker stages, world installation and request-to-visible timing before changing policy. Keep equivalent outputs and errors, map identity, stale-result protection and authored first-view handoff. First extract the serial loader into bounded modules with diagnostic timings, retain a packaged baseline, and measure background01, an expansion background and a gameplay map. Then overlap independent preparation using bounded scoped workers and remove confirmed duplicate work. Separate audio planning from expensive decoding so background visuals can install first and audio can arrive through an owned asynchronous result, safely discarded on map replacement; preserve speech timing and avoid losing gameplay one-shot requests. Reuse shared improvements for gameplay without deferring correctness-critical physics/simulation resources. No new dependencies or unbounded thread fanout. Add concurrency/lifecycle tests, run full portable/Windows checks and packaged regressions, and compare repeated alternating prior/current runs and frame costs with raw ranges. No fidelity/quality reduction or fixed loading delay.
 
+Implemented: resource-free startup placeholders; authored-only background entities (no hidden F4 pool); overlapping visual auxiliaries/materials and bounded parallel audio; a background visual-ready handoff with synchronized late audio/script start; cooperative cancellation and map-install owner guards; exact-content audio reuse with 192 MiB wave/256 MiB VOX budgets. An initial 32 MiB VOX trial evicted most of the working set and is retained as a rejected cache-sizing experiment. Sky preparation moved off the serial tail; GPU sky caching is deferred pending an isolated benefit measurement. Portable, owned lifecycle and packaged evidence are recorded with the completed checkpoint.
+
 ## Match forced-normal camera projection to artwork (2026-10-29)
 
 When the saved override is enabled, cap the background camera's horizontal span at the normal artwork's authored 75-degree 4:3 view: crop vertically above 4:3. Keep the disabled path numerically unchanged, including debug arrow/manual adjustments and gameplay FOV. Apply at startup and live config changes, and use the same baseline for debug readout/reset/aspect changes. Toggling the artwork option resets temporary debug FOV so stale tuning cannot mask the new baseline. Test rays against artwork, disabled equivalence, live toggles, startup and first-frame presentation; compare packaged blur-free captures with disabled controls. No new pass, allocation or asset read.
-
-# Design
 
 ## Crop selected background artwork to its authored aspect (2026-10-29)
 

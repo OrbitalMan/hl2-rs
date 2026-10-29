@@ -116,6 +116,7 @@ pub(crate) fn install_map(
         loaded.sky.as_ref(),
     ));
     effects::adopt(loaded.effects.sprites, commands);
+    audio::deferred::stage(commands, loaded.pending_audio);
     commands.insert_resource(loaded.gameplay);
     // Studio decal draws went with the old map; its entity indices now name the new map's.
     commands.queue(|world: &mut World| {

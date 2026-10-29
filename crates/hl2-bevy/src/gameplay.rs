@@ -1,4 +1,5 @@
 //! Bevy resource bridge for retained gameplay. Owned file reads occur before App::run.
+mod empty;
 use anyhow::Result;
 use bevy::prelude::Resource;
 use glam::Vec3;
@@ -401,57 +402,6 @@ impl Gameplay {
                 });
         }
     }
-    #[cfg(test)]
-    pub(crate) fn synthetic(world: World) -> Self {
-        Self {
-            scene: Scene::new(&world),
-            world: Arc::new(world),
-            inventory: Inventory::default(),
-            weapons: BTreeMap::new(),
-            selection: Selection::new(),
-            npcs: Controller::new(None, Default::default()),
-            projectiles: Projectiles::default(),
-            gibs: Default::default(),
-            ragdolls: Default::default(),
-            phys_explosions: Default::default(),
-            impacts: Default::default(),
-            primary: false,
-            secondary: false,
-            actions: vec![],
-            queued_primary: false,
-            queued_secondary: false,
-            primary_consumed: false,
-            secondary_consumed: false,
-            unplayed_sounds: 0,
-            sound_cues: vec![],
-            sound_requests: vec![],
-            captions: vec![],
-            caption_messages: vec![],
-            weapon_sounds: Default::default(),
-            entity_sounds: Default::default(),
-            footsteps: Default::default(),
-            player_damage: Default::default(),
-            damage_messages: Vec::new(),
-            suit: Default::default(),
-            skill: 2,
-            skill_config: None,
-            ai: hl2_simulation::ai::runtime::AiRuntime::new(&World::default(), None),
-            player_impulse: glam::Vec3::ZERO,
-            spawn_overlay: Default::default(),
-            spawn_console: Default::default(),
-            spawn_log: Vec::new(),
-            shot_effects: Vec::new(),
-            shot_serial: 0,
-            stunstick_glows: Vec::new(),
-            spawn_counts: Default::default(),
-            render_spawns: Vec::new(),
-            runtime_entities: Vec::new(),
-            despawned_draws: Default::default(),
-            world_copies: 0,
-            prop_requests: Vec::new(),
-            model_draws: Vec::new(),
-        }
-    }
     pub fn load_with_campaign(
         mut world: World,
         vfs: &Vfs,
@@ -480,54 +430,19 @@ impl Gameplay {
         spawn_overlay.set_usable(spawn_usable_weapons(&world, &ai));
         // The Props tab: every installed (and map pak) model with a .phy.
         spawn_overlay.set_props(vfs.physics_prop_models());
-        Ok(Self {
-            ai,
-            player_impulse: glam::Vec3::ZERO,
-            spawn_overlay,
-            spawn_console: Default::default(),
-            spawn_log: Vec::new(),
-            shot_effects: Vec::new(),
-            shot_serial: 0,
-            stunstick_glows: Vec::new(),
-            spawn_counts: Default::default(),
-            render_spawns: Vec::new(),
-            runtime_entities: Vec::new(),
-            despawned_draws: Default::default(),
-            world_copies: 0,
-            prop_requests: Vec::new(),
-            model_draws: Vec::new(),
-            player_damage,
-            damage_messages: Vec::new(),
-            suit: Default::default(),
-            skill: 2,
-            skill_config: skill,
-            impacts,
-            world: Arc::new(world),
-            scene,
-            inventory: Inventory::default(),
-            weapons,
-            selection: Selection::new(),
-            npcs,
-            projectiles: Projectiles::default(),
-            gibs: Default::default(),
-            ragdolls: Default::default(),
-            phys_explosions: Default::default(),
-            primary: false,
-            secondary: false,
-            actions: vec![],
-            queued_primary: false,
-            queued_secondary: false,
-            primary_consumed: false,
-            secondary_consumed: false,
-            unplayed_sounds: 0,
-            sound_cues: vec![],
-            sound_requests: vec![],
-            captions: vec![],
-            caption_messages: vec![],
-            weapon_sounds: Default::default(),
-            entity_sounds: Default::default(),
-            footsteps: Default::default(),
-        })
+        Ok(Self::from_prepared(
+            world,
+            empty::PreparedGameplay {
+                ai,
+                spawn_overlay,
+                player_damage,
+                skill_config: skill,
+                impacts,
+                scene,
+                weapons,
+                npcs,
+            },
+        ))
     }
     /// An npc_create request (F4 Enter or the console): CC_NPC_Create placement from
     /// the eye along the aim, then a new entity copied from the class's hidden template

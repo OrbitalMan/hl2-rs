@@ -70,6 +70,8 @@ pub struct Simulation {
     /// The loaded map is a main-menu background level (from the console, every frame): like
     /// retail, its world keeps running behind the menu while player input is ignored.
     pub background_level: bool,
+    /// Visuals are installed; defer background script/audio clocks together until audio is ready.
+    pub background_audio_pending: bool,
     /// The active point_viewcontrol's view (from the latest world tick); the player keeps
     /// its own eye, which still selects the soundscape (SDK `EarPosition`).
     pub view_control: Option<hl2_simulation::view_control::View>,
@@ -134,6 +136,7 @@ impl Simulation {
             fly,
             paused: false,
             background_level: false,
+            background_audio_pending: false,
             view_control: None,
             zoom_fov: None,
             loading: false,
@@ -220,7 +223,9 @@ impl Simulation {
     /// Whether the world (entities, sounds, effects, the player) advances: in gameplay, and
     /// behind the menu of a background level, never while a map loads.
     pub fn world_running(&self) -> bool {
-        !self.loading && (!self.paused || self.background_level)
+        !self.loading
+            && !(self.background_level && self.background_audio_pending)
+            && (!self.paused || self.background_level)
     }
     /// The player takes no input: a menu background level, or a point_viewcontrol with
     /// `SF_CAMERA_PLAYER_TAKECONTROL`.

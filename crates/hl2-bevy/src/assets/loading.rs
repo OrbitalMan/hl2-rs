@@ -1,7 +1,7 @@
 //! Off-thread map preparation and stage diagnostics.
 use super::{
-    FRAG_RIGID_BODY, LoadedMap, MAX_MATERIALS, MaterialData, add_static_decals, faces,
-    load_material, load_sky, names, normalize_bsp_render_winding,
+    FRAG_RIGID_BODY, LoadedMap, MAX_MATERIALS, MaterialData, add_static_decals, load_material,
+    names, normalize_bsp_render_winding,
 };
 use anyhow::{Context, Result, bail};
 use modkit_core::World;
@@ -38,6 +38,22 @@ impl Timings {
     }
 }
 
+pub(crate) struct LoadInput<'a> {
+    pub root: &'a Path,
+    pub game: &'a str,
+    pub map: &'a str,
+    pub canvas: source_ui::canvas::Canvas,
+    pub new_game: bool,
+    pub config: &'a hl2_ui::config::Config,
+    pub progress: &'a hl2_ui::gameui::loading::ProgressReport,
+}
+#[derive(Default)]
+pub(crate) struct LoadMode {
+    pub background: bool,
+    pub cancel: super::work::Cancellation,
+    pub audio_reuse: Arc<crate::audio::reuse::AudioReuse>,
+}
+
 pub fn load_with_progress(
     root: &Path,
     game: &str,
@@ -47,42 +63,58 @@ pub fn load_with_progress(
     config: &hl2_ui::config::Config,
     progress: &hl2_ui::gameui::loading::ProgressReport,
 ) -> Result<LoadedMap> {
+    load(
+        LoadInput {
+            root,
+            game,
+            map,
+            canvas,
+            new_game,
+            config,
+            progress,
+        },
+        LoadMode::default(),
+    )
+}
+
+pub(crate) fn load(input: LoadInput<'_>, mode: LoadMode) -> Result<LoadedMap> {
+    let LoadInput {
+        root,
+        game,
+        map,
+        canvas,
+        new_game,
+        config,
+        progress,
+    } = input;
+    mode.cancel.check()?;
     let map = map.trim_end_matches(".bsp");
     let mut timing = Timings::new();
     let root_lod = config.video.advanced.model_detail.root_lod();
     let picmip = config.video.advanced.texture_detail.picmip();
     let hdr = config.video.hdr.is_hdr();
     let (vfs, bsp) = mount(root, game, map, hdr, progress, &mut timing)?;
+    let vfs = Arc::new(vfs);
     progress.report(0.35, "LoadingProgress_PrecacheWorld");
-    let mut world = bsp.world(map).context("decode Source world")?;
-    world.warnings.extend(vfs.warnings.iter().cloned());
-    normalize_bsp_render_winding(&mut world);
-    // Static infodecals land on world brush faces only, before static props are merged.
-    let mut decal_errors = Vec::new();
-    add_static_decals(&mut world, &vfs, &mut decal_errors);
-    // F4 / npc_create spawn pool: hidden NPCs every load-time system builds.
-    hl2_simulation::ai::spawn::append_pool(&mut world);
-    // CNPC_Citizen::SelectModel (citizen types, random heads), before models load.
-    hl2_simulation::citizens::select_models(&mut world, hl2_simulation::ai::spawn::POOL_KEY);
-    let commentary_enabled = config.gameplay.commentary;
-    if commentary_enabled {
-        hl2_simulation::commentary::append_world_commentary(&mut world, &vfs, map);
-    }
-    timing.mark("world");
-    let (model_report, weapon_models) = prepare_models(&mut world, &vfs, root_lod);
-    timing.mark("models");
+    let PreparedWorld {
+        world,
+        model_report,
+        weapon_models,
+        decal_errors,
+    } = prepare_world(&bsp, &vfs, map, config, &mut timing, &mode)?;
     progress.report(0.50, "LoadingProgress_SignonDataLocal");
-    let mut gameplay =
-        crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
+    let mut gameplay = prepare_gameplay(world, &vfs, bsp.revision, new_game, config)?;
     let world = gameplay.world.clone();
-    hl2_simulation::commentary::CommentaryState::spawn_init(
-        &mut gameplay.scene,
-        &world,
-        commentary_enabled,
-        hdr,
-        new_game,
-    );
     timing.mark("gameplay");
+    mode.cancel.check()?;
+    let (audio_work, aux_work) = parallel_resources(
+        vfs.clone(),
+        &gameplay,
+        canvas,
+        mode.audio_reuse.clone(),
+        hdr,
+    )?;
+    timing.mark("parallel_plan");
     let effects = crate::effects::PreparedEffects::load_with_lod(&vfs, &world, root_lod);
     timing.mark("effects");
     let (materials, mut texture_errors) = materials(
@@ -91,30 +123,31 @@ pub fn load_with_progress(
         (&effects, &weapon_models, &gameplay),
         decal_errors,
         (picmip, hdr),
-        progress,
+        (progress, &mode.cancel),
     )?;
+    mode.cancel.check()?;
     timing.mark("materials");
     progress.report(0.90, "LoadingProgress_SignonLocal");
-    let faces = faces::load(&vfs, &world, &mut texture_errors);
-    timing.mark("faces");
-    let hud = hl2_ui::hud::WeaponHud::load(&vfs, canvas)?;
-    timing.mark("hud");
-    let mut audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
-    for (wave, sentence, seconds) in audio.sentences.drain(..) {
-        gameplay
-            .scene
-            .lipsync
-            .add_sentence(&wave, sentence, seconds);
-    }
+    let super::loading_auxiliary::Auxiliary {
+        hud,
+        faces,
+        sky,
+        cookie: flashlight_cookie,
+        errors,
+        timings: aux_timings,
+    } = aux_work.wait()?;
+    texture_errors.extend(errors);
+    timing.mark("aux_wait");
+    let (audio, pending_audio) = complete_audio(audio_work, mode.background, &mut gameplay)?;
     timing.mark("audio");
-    let sky = load_sky(&vfs, &world, hdr, &mut texture_errors);
-    timing.mark("sky");
     progress.report(1.0, "LoadingProgress_SignonLocal");
     let shadow_receivers = Arc::new(crate::shadows::receivers(&world, &materials));
-    let flashlight_cookie = crate::flashlight::load_cookie(&vfs).map(Arc::new);
     timing.mark("shadows_cookie");
+    mode.cancel.check()?;
+    let mut load_timings = timing.finish();
+    load_timings.extend(aux_timings);
     Ok(LoadedMap {
-        load_timings: timing.finish(),
+        load_timings,
         shadow_receivers,
         flashlight_cookie,
         game: game.to_owned(),
@@ -124,6 +157,7 @@ pub fn load_with_progress(
         flexes: faces.flexes,
         sky,
         audio,
+        pending_audio,
         hud,
         gameplay,
         revision: bsp.revision,
@@ -132,7 +166,121 @@ pub fn load_with_progress(
         materials,
         texture_errors,
         models: serde_json::to_value(model_report)?,
-        vfs: Arc::new(vfs),
+        vfs,
+    })
+}
+
+fn prepare_gameplay(
+    world: World,
+    vfs: &Vfs,
+    revision: u32,
+    new_game: bool,
+    config: &hl2_ui::config::Config,
+) -> Result<crate::gameplay::Gameplay> {
+    let mut gameplay =
+        crate::gameplay::Gameplay::load_with_campaign(world, vfs, revision, new_game)?;
+    let world = gameplay.world.clone();
+    hl2_simulation::commentary::CommentaryState::spawn_init(
+        &mut gameplay.scene,
+        &world,
+        config.gameplay.commentary,
+        config.video.hdr.is_hdr(),
+        new_game,
+    );
+    Ok(gameplay)
+}
+
+type MapAudio = (
+    crate::audio::PreparedAudio,
+    Option<super::work::Work<crate::audio::PreparedAudio>>,
+);
+fn complete_audio(
+    audio_work: super::work::Work<crate::audio::PreparedAudio>,
+    background: bool,
+    gameplay: &mut crate::gameplay::Gameplay,
+) -> Result<MapAudio> {
+    let (mut audio, pending_audio) = if background {
+        (crate::audio::PreparedAudio::silent(), Some(audio_work))
+    } else {
+        (audio_work.wait()?, None)
+    };
+    for (wave, sentence, seconds) in audio.sentences.drain(..) {
+        gameplay
+            .scene
+            .lipsync
+            .add_sentence(&wave, sentence, seconds);
+    }
+    Ok((audio, pending_audio))
+}
+
+fn parallel_resources(
+    vfs: Arc<Vfs>,
+    gameplay: &crate::gameplay::Gameplay,
+    canvas: source_ui::canvas::Canvas,
+    audio_reuse: Arc<crate::audio::reuse::AudioReuse>,
+    hdr: bool,
+) -> Result<(
+    super::work::Work<crate::audio::PreparedAudio>,
+    super::work::Work<super::loading_auxiliary::Auxiliary>,
+)> {
+    let plan = crate::audio::PreparedAudio::plan(&vfs, gameplay);
+    let audio_vfs = vfs.clone();
+    let audio_work = super::work::Work::spawn("hl2-audio-preparation", move |cancel| {
+        plan.decode(&audio_vfs, &cancel, &audio_reuse)
+    })
+    .map_err(anyhow::Error::msg)?;
+    let world = gameplay.world.clone();
+    let aux_work = super::work::Work::spawn("hl2-visual-auxiliary", move |cancel| {
+        super::loading_auxiliary::load(&vfs, &world, canvas, hdr, &cancel)
+    })
+    .map_err(anyhow::Error::msg)?;
+    Ok((audio_work, aux_work))
+}
+
+struct PreparedWorld {
+    world: World,
+    model_report: models::ModelReport,
+    weapon_models: Vec<String>,
+    decal_errors: Vec<String>,
+}
+fn prepare_world(
+    bsp: &Bsp,
+    vfs: &Vfs,
+    map: &str,
+    config: &hl2_ui::config::Config,
+    timing: &mut Timings,
+    mode: &LoadMode,
+) -> Result<PreparedWorld> {
+    mode.cancel.check()?;
+    let mut world = bsp.world(map).context("decode Source world")?;
+    world.warnings.extend(vfs.warnings.iter().cloned());
+    normalize_bsp_render_winding(&mut world);
+    // Static infodecals land on world brush faces only, before static props are merged.
+    let mut decal_errors = Vec::new();
+    add_static_decals(&mut world, vfs, &mut decal_errors);
+    // F4 / npc_create spawn pool: hidden NPCs every load-time system builds.
+    if !mode.background {
+        hl2_simulation::ai::spawn::append_pool(&mut world);
+    }
+    // CNPC_Citizen::SelectModel (citizen types, random heads), before models load.
+    hl2_simulation::citizens::select_models(&mut world, hl2_simulation::ai::spawn::POOL_KEY);
+    let commentary_enabled = config.gameplay.commentary;
+    if commentary_enabled {
+        hl2_simulation::commentary::append_world_commentary(&mut world, vfs, map);
+    }
+    timing.mark("world");
+    let (model_report, weapon_models) = prepare_models(
+        &mut world,
+        vfs,
+        config.video.advanced.model_detail.root_lod(),
+    );
+    mode.cancel.check()?;
+    timing.mark("models");
+    Ok(PreparedWorld {
+        world,
+        model_report,
+        weapon_models,
+        decal_errors,
     })
 }
 
@@ -246,7 +394,10 @@ fn materials(
     ),
     decal_errors: Vec<String>,
     (picmip, hdr): (i32, bool),
-    progress: &hl2_ui::gameui::loading::ProgressReport,
+    (progress, cancel): (
+        &hl2_ui::gameui::loading::ProgressReport,
+        &super::work::Cancellation,
+    ),
 ) -> Result<(BTreeMap<String, MaterialData>, Vec<String>)> {
     let names = names::map_material_names(world, effects, weapon_models, gameplay);
     if names.len() > MAX_MATERIALS {
@@ -259,6 +410,7 @@ fn materials(
     let mut frame_cache = BTreeMap::new();
     let total_materials = names.len().max(1);
     for (i, name) in names.into_iter().enumerate() {
+        cancel.check()?;
         if i % 10 == 0 || i + 1 == total_materials {
             let frac = 0.55 + 0.30 * (i as f32 / total_materials as f32);
             progress.report(frac, "LoadingProgress_LoadResources");

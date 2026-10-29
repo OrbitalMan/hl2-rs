@@ -141,6 +141,15 @@ def pair_environment(retail, advanced):
             "both_baselines_quiet": all(r["hardware"].get("quiet_baseline_observed") is True for r in (retail, advanced))}
 
 
+def quiet_sample(sample):
+    counters = [(sample.get("cpu_busy_percent"), 20), (sample.get("gpu_busy_percent"), 15)]
+    return (all(isinstance(value, (int, float)) and math.isfinite(value) and value <= limit
+                for value, limit in counters)
+            and sample.get("memory_pressure_level") == 1
+            and not sample.get("competing_build_processes", 0)
+            and not sample.get("other_game_processes", 0))
+
+
 class Monitor:
     def __init__(self, executable, interval=1.):
         if not math.isfinite(interval) or not 0 < interval <= 5:
@@ -186,10 +195,7 @@ class Monitor:
             self.stop.wait(self.interval)
             self.baseline.append(self.sample())
             recent = self.baseline[-2:]
-            quiet = len(recent) == 2 and all(
-                s.get("cpu_busy_percent", 101) <= 20 and s.get("gpu_busy_percent", 101) <= 15
-                and s.get("memory_pressure_level", 1) == 1 and not s.get("competing_build_processes", 0)
-                and not s.get("other_game_processes", 0) for s in recent)
+            quiet = len(recent) == 2 and all(quiet_sample(s) for s in recent)
             if quiet or time.monotonic() >= deadline or type(self.probe) is Unavailable:
                 break
         self.baseline_history = self.baseline

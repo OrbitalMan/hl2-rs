@@ -5,7 +5,9 @@ use source_assets::{
     sounds::{ActorGender, ActorRegistry, Wave},
     vpk::Vfs,
 };
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+#[cfg(test)]
+use std::collections::BTreeSet;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, ErrorKind};
 use symphonia::core::{
     audio::SampleBuffer, codecs::DecoderOptions, errors::Error as DecodeError,
@@ -158,7 +160,7 @@ fn ms_adpcm_header(data: &[u8]) -> Result<Option<MsAdpcmHeader>> {
     Ok(None)
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub struct AudioSummary {
     codec: String,
     channels: u16,
@@ -696,21 +698,9 @@ fn script_params(entry: &source_assets::keyvalues::Entry) -> ScriptParams {
     params
 }
 
-pub struct Library {
-    names: BTreeMap<String, Vec<Wave>>,
-    /// Playback paths of waves marked CHAR_DISTVARIANT ('^').
-    distance_variants: BTreeSet<String>,
-    params: BTreeMap<String, ScriptParams>,
-    actors: ActorRegistry,
-    available: HashMap<String, Vec<bool>>,
-    rng: u64,
-    /// Separate stream for volume/pitch draws so wave selection is unchanged.
-    param_rng: u64,
-    pub variants_played: BTreeMap<String, usize>,
-    pub decoded: BTreeMap<String, AudioSummary>,
-    pub errors: BTreeMap<String, String>,
-    pub played: usize,
-}
+mod library_state;
+pub use library_state::Library;
+
 impl Library {
     /// Precache every registered variant, including unresolved actor genders.
     /// Runtime emission still uses alternatives/resolve's exact actor policy.

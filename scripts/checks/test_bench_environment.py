@@ -11,6 +11,14 @@ from bench_environment_macos import Probe, cpu_percent, cpu_seconds, gpu_stats, 
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_unavailable_cpu_or_gpu_reading_is_not_a_quiet_baseline(self):
+        from bench_environment import quiet_sample
+        sample = {"cpu_busy_percent": 0, "gpu_busy_percent": 0, "memory_pressure_level": 1}
+        self.assertTrue(quiet_sample(sample))
+        for key in ("cpu_busy_percent", "gpu_busy_percent", "memory_pressure_level"):
+            self.assertFalse(quiet_sample({**sample, key: None}))
+        self.assertFalse(quiet_sample({**sample, "cpu_busy_percent": float("nan")}))
+
     def test_preflight_distinguishes_known_workloads_from_moderate_utilisation(self):
         self.assertEqual(known_interference([{"cpu_busy_percent": 40, "gpu_busy_percent": 35}]), [])
         self.assertEqual(known_interference([{"other_game_processes": None}, {}]), [])
