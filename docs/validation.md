@@ -1,8 +1,33 @@
-# Caption viewport repair (2026-10-29)
-
-`cargo test -p hl2-ui closecaption --locked`: 15 passed, one owned-install test ignored; the owned Episode One resource/font check also passed when run explicitly. Long styled streams stay within the authored panel at 1x, 1.5x and 2x; resizing reflows cached work and style boundaries do not increase the panning step count. The style-boundary negative control failed before the fix: the first bold glyph began at x=24 with width=7 in a 24-pixel line. It now wraps before that glyph. Packaged visual capture pending final package.
-
 # Local validation — 2026-10-05
+
+## Confirmation, console and SMG repairs (2026-10-29)
+
+- Confirmation labels use the same measured text insets as the source-ui push-button painter. Quit, return-to-menu and keep-video already share MessageBox; unequal German and Japanese label tests with synthetic metrics cover fit and button containment. The packaged Quit capture shows the full label, and return-menu plus all three keep-video paths pass.
+- The viewmodel triplet was visible in the original 1024x768 packaged capture. X, Y and Z now have explicit rows; the panel uses the actual row count. The new 1280x720 capture includes every axis and the tuning footer. The reported missing-value state itself was not reproduced.
+- Console selection is Unicode character based. Toolkit tests cover reversed selection, collapsing, empty input frames, copy transport, paste replacement, deletion and history/submission resets; the host modifier test covers platform select-all, copy and paste intents. Packaged captures show the highlight and replacement of `echo café 日本` with `echo λ; help`. Interactive desktop clipboard roundtrip is **not tested**.
+- SMG reconstruction now retains foreground coverage when rejecting another weapon surface's motion/color. An isolated original-shader diagnostic found 32,629 interior translucent pixels at no AA and 25,216 at 4x AA in the first frame; fixed nine-frame bursts have zero at both AA settings, with positive opaque controls. The durable `check_weapon_opacity.py` restores the coverage rejection in its private negative control and requires that it fail; it only tests fully covered footprints so legitimate silhouette fading remains allowed.
+
+Completed checks: `scripts/checks/validate.sh`, `scripts/checks/check_windows.sh`, release packaging,
+the owned Episode One caption resource/font test, and
+`NO_BUILD=1 ONLY='console captions commentary return_menu video_keep motion_blur_options viewmodel_motion_blur coverage' python3 scripts/checks/replays.py`
+(8 groups, zero failures). `NO_BUILD=1 python3 scripts/checks/check_weapon_blur.py` passes
+pistol, switch, reload and SMG cases at no AA and 4x AA. `NO_BUILD=1 python3 scripts/checks/check_weapon_opacity.py` also passes all four candidate/control cases. It detects no borrowed motion or
+missing gathered coverage. The existing silhouette test still observes trails outside the
+current weapon outline; disabled, retail, paused, still and switch states retain their gates.
+
+All captures/probes use isolated muted headless copies of the package on Metal. The sandboxed
+GPU launch was rejected by device discovery; the authorized GPU-enabled run succeeded. The
+first private capture also used an input filename colliding with its report and was rejected;
+these are capture failures, not accepted evidence. The console `quit` command exits immediately
+and did not finish its capture script; a subsequent actual menu-button capture verifies the
+confirmation. Reports, captures and rejected-attempt summaries remain under ignored artifacts. Windows runtime and
+native runtime image parity are **not tested**. Short exploratory timing pairs are documented
+in performance.md; no sustained speed or FPS claim follows.
+
+## Caption viewport repair (2026-10-29)
+
+`cargo test -p hl2-ui closecaption --locked`: 16 passed, one owned-install test ignored; the owned Episode One resource/font check also passed when run explicitly. Long styled streams stay within the authored panel at 1x, 1.5x and 2x; resizing reflows cached work and style boundaries do not increase the panning step count. The style-boundary negative control failed before the fix: the first bold glyph began at x=24 with width=7 in a 24-pixel line. It now wraps before that glyph. Packaged Lost Coast commentary at 1280x720 shows the paragraph contained in its background; an idle-queue regression verifies that fully faded captions emit no background geometry.
+
 
 ## Background projection independence and Fit Display (2026-10-28)
 

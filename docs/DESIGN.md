@@ -10,6 +10,8 @@
 
 Each checkpoint updates validation and limitations, runs owning-crate tests, formatting and strict Clippy, and is committed independently. Final validation includes workspace and Windows checks plus packaged regressions where available. Preserve unrelated working files and the active UI integration branch.
 
+Outcome: confirmation sizing shares painter padding; captions use a bounded viewport, line-based panning and size-dependent cached wrapping; console selection lives in the toolkit and platform shortcuts at the host edge; the overlay names each offset axis. SMG opacity loss was reproduced in opaque interior footprints: rejected foreground motion samples now retain coverage and current-surface color, while actual background samples still shape the blurred outline. No new render pass, resource or texture fetch is needed. Validation details and limitations are in docs/validation.md and docs/performance.md.
+
 ## Background projection independent of gameplay (2026-10-28)
 
 Correct the previous follow-up: stabilizing a saved gameplay FOV was the wrong menu policy.

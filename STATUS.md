@@ -1,5 +1,18 @@
 # STATUS
 
+## UI and Advanced SMG blur repairs verified (2026-10-29)
+
+All five requested reports are addressed on the UI integration branch. Confirmation labels share measured source-ui painter padding; offset X/Y/Z have explicit rows; long captions stay inside the authored viewport and reflow on resize; console input supports Shift selection, platform select-all, copy and replacement paste; SMG blur preserves opaque interior coverage while retaining silhouette trails.
+
+Checkpoints: `2df8327` (confirmations and overlay, prerequisite architecture repair), `d5a9128` (caption viewport), `2d32045` (console editing), `32c899b` (caption style boundary and borrowed console spans), `0f956c6` (SMG opacity). The final validation checkpoint also preserves the idle-caption no-draw fast path.
+
+Verified: workspace validation (1,237 Rust tests passed, 104 ignored; 27 Python tests; strict Clippy, formatting and architecture), strict Windows cross-target checks, explicit owned Episode One caption resource/font check, release packaging, eight targeted replay groups, eight weapon-surface cases and four SMG opacity/control cases. The final packaged captions group also passes after the idle fast-path repair. Captures include the Quit-button confirmation, named offset axes, selected console input, paste replacement and long Lost Coast commentary. Detailed commands and evidence: docs/validation.md; exploratory timings: docs/performance.md.
+
+The original offset triplet was visible in the pre-change capture; the reported missing state was not reproduced. Interactive desktop clipboard roundtrip, Windows GPU runtime, native runtime image parity and sustained thermally controlled performance are **not tested**. Rejected capture attempts are recorded with their successful replacements. Unrelated scratch files remain untouched.
+
+Next bounded verification: ordinary interactive play and clipboard roundtrip on each supported desktop platform.
+
+
 ## Console input selection (2026-10-29)
 
 source-ui owns character-based selection with Shift with arrows, Home or End, platform select-all, selection replacement and highlighted visible spans. The Bevy edge translates Cmd+A, Cmd+C and Cmd+V on macOS and Ctrl+A, Ctrl+C and Ctrl+V elsewhere, using the existing clipboard resource. Copy prefers input selection and retains output-row copy when no input selection exists. Unit tests cover Unicode copy/replacement, empty-frame retention, reversed selection, collapse, deletion, submission/history reset and input transport. Final package/desktop clipboard roundtrip pending.

@@ -32,6 +32,9 @@ impl CloseCaption {
         let line_height = measure.tall().max(6.);
         let (visible, total, growing_down) =
             self.prepare(available_width, available_height, layout, measure, time);
+        if visible.is_empty() && self.current_alpha == 0. {
+            return Paint::default();
+        }
         let mut paint = Paint::default();
         let bottom = h;
         let top = bottom - self.current_height - 2. * inset;
@@ -81,14 +84,7 @@ impl CloseCaption {
                 if y < box_top + inset || y + unit.height > window_bottom - inset {
                     continue;
                 }
-                let (color, highlight) = if item.valid {
-                    (rgba(unit.color, line_alpha), None)
-                } else {
-                    (
-                        rgba([255; 4], line_alpha),
-                        Some(rgba([100, 100, 40, 255], line_alpha)),
-                    )
-                };
+                let (color, highlight) = run_colors(unit.color, item.valid, line_alpha);
                 paint.runs.push(Run {
                     text: unit.text.clone(),
                     x,
@@ -194,4 +190,15 @@ fn rgba(c: [u8; 4], a: f32) -> [f32; 4] {
         f32::from(c[2]) / 255.,
         f32::from(c[3]) / 255. * a,
     ]
+}
+
+fn run_colors(color: [u8; 4], valid: bool, alpha: f32) -> ([f32; 4], Option<[f32; 4]>) {
+    if valid {
+        (rgba(color, alpha), None)
+    } else {
+        (
+            rgba([255; 4], alpha),
+            Some(rgba([100, 100, 40, 255], alpha)),
+        )
+    }
 }

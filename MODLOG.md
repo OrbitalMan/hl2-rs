@@ -1,5 +1,18 @@
 # MODLOG
 
+## 2026-10-29 Final UI validation and idle-caption fast path
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** Preserve the pre-existing no-draw behavior after an empty caption queue finishes fading, with a focused regression test. Recorded final packaged visual evidence, commands, rejected captures and limits; updated console shortcut documentation. Shared confirmation layout remains in source-ui for every caller.
+
+**Tested how / Result:** `scripts/checks/validate.sh`: 1,237 Rust tests passed, 104 ignored, 27 Python tests, strict Clippy/fmt/architecture passed. `scripts/checks/check_windows.sh`: passed. Explicit owned Episode One caption resource/font check: passed. `scripts/build-bevy.sh`: release package rebuilt. Eight focused replay groups, eight weapon-surface cases and four SMG opacity/control cases pass; `NO_BUILD=1 ONLY='captions' python3 scripts/checks/replays.py` passes again with the final idle-caption change. Inspected packaged Quit, console selection, offset-axis and long-commentary captures; reports verify paste replaces selection. Toolkit has 134 passing tests; caption group has 16 passing and one ignored, with that owned-install case also checked separately.
+
+**Still broken or not tested:** Interactive desktop clipboard roundtrip, Windows GPU runtime, native runtime image parity and sustained thermally controlled timing are not tested. The earlier offset triplet was visible in a baseline capture; missing values were not reproduced. The shared layout now names and retains every axis explicitly.
+
+**Next:** Ordinary interactive platform playtesting; all requested implementation checkpoints are committed. Unrelated scratch files were not changed.
+
+
 ## 2026-10-29 Preserve opaque weapon interiors during Advanced blur
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

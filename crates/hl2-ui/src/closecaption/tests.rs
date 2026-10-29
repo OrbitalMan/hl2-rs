@@ -428,3 +428,15 @@ fn a_style_boundary_at_the_right_edge_wraps_before_the_next_glyph() {
         assert!(run.x + run.width <= 24., "{run:?}");
     }
 }
+
+#[test]
+fn an_idle_caption_queue_emits_no_invisible_background() {
+    let mut cc = CloseCaption::new();
+    for time in [1., 1.25, 1.5] {
+        cc.paint((500., 136.), 1., &Layout::default(), &Fixed, [0.; 4], time);
+    }
+    assert_eq!(
+        cc.paint((500., 136.), 1., &Layout::default(), &Fixed, [0.; 4], 2.),
+        Paint::default()
+    );
+}
