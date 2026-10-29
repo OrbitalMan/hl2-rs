@@ -4,9 +4,11 @@
 //! drawing. The app runs the commands: it hands the panel its canvas, scaling, texts, look and
 //! command table, and turns the panel's [`Action`]s into what they do.
 
+mod entry;
 use super::command::{self, Context, Spec};
 use super::complete::{self, Completer};
 use super::dialog::{wrap, DialogLayout, Scaling, Selection, MIN_SIZE};
+use super::editing::edit_input;
 use super::editor::LineEditor;
 use crate::canvas::{Canvas, Color, Rect, WHITE};
 use crate::font::FontFace;
@@ -14,7 +16,7 @@ use crate::input::{Input, Key};
 use crate::placement::{self, Placement};
 use crate::widgets::{
     close_button_rect, ButtonState, ButtonTracker, Fonts, FrameSpec, Painter, ScrollAccumulator,
-    ScrollBarLayout, ScrollBarState, ScrollMode, TextInputModel, Theme, SCROLLBAR_WIDTH,
+    ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
 };
 use glam::{vec2, Vec2};
 use serde::Serialize;
@@ -374,76 +376,19 @@ impl ConsolePanel {
             }
         }
         let ctrl_key = |name: &str| input.ctrl && input.binding_keys.iter().any(|k| k == name);
-        let editor = &mut self.editor;
-        if !input.ctrl {
-            let typed: String = input
-                .text
-                .chars()
-                .filter(|c| *c != '`' && *c != '~')
-                .collect();
-            editor.insert(&typed);
-        }
-        if let Some(paste) = &input.paste {
-            editor.paste(paste);
-        }
-        if ctrl_key("KeyR") {
-            editor.search_back();
-        }
-        if ctrl_key("KeyU") {
-            editor.kill_to_start();
-        }
-        if ctrl_key("KeyK") {
-            editor.kill_to_end();
-        }
-        if ctrl_key("KeyW") {
-            editor.delete_word_back();
-        }
-        if ctrl_key("KeyA") {
-            editor.home();
-        }
-        if ctrl_key("KeyE") {
-            editor.end();
-        }
-        if input.pressed(Key::Backspace) {
-            if input.ctrl {
-                editor.delete_word_back();
-            } else {
-                editor.backspace();
-            }
-        }
-        if input.pressed(Key::Delete) {
-            if input.ctrl {
-                editor.delete_word_forward();
-            } else {
-                editor.delete();
-            }
-        }
-        if input.pressed(Key::Left) {
-            if input.ctrl {
-                editor.word_left();
-            } else {
-                editor.left();
-            }
-        }
-        if input.pressed(Key::Right) {
-            if input.ctrl {
-                editor.word_right();
-            } else {
-                editor.right();
-            }
-        }
+        edit_input(&mut self.editor, input);
         if input.pressed(Key::Home) {
             if input.ctrl {
                 self.scroll = self.history_rows(canvas).len();
             } else {
-                self.editor.home();
+                self.editor.navigate(Key::Home, false, input.shift);
             }
         }
         if input.pressed(Key::End) {
             if input.ctrl {
                 self.scroll = 0;
             } else {
-                self.editor.end();
+                self.editor.navigate(Key::End, false, input.shift);
             }
         }
         if input.pressed(Key::PageUp) {
@@ -455,10 +400,18 @@ impl ConsolePanel {
         // Completion follows the edited line before Tab/Up/Down step through it.
         self.editor.refresh(completer);
         if input.pressed(Key::Up) {
-            self.editor.step(true, false);
+            if input.shift {
+                self.editor.navigate(Key::Up, false, true);
+            } else {
+                self.editor.step(true, false);
+            }
         }
         if input.pressed(Key::Down) {
-            self.editor.step(false, false);
+            if input.shift {
+                self.editor.navigate(Key::Down, false, true);
+            } else {
+                self.editor.step(false, false);
+            }
         }
         if input.pressed(Key::Tab) {
             self.editor.step(input.shift, true);
@@ -468,7 +421,11 @@ impl ConsolePanel {
             self.clear_output();
         }
         if input.copy {
-            self.copied = self.selected_text();
+            self.copied = self
+                .editor
+                .selected_text()
+                .map(str::to_owned)
+                .or_else(|| self.selected_text());
         }
         if input.pressed(Key::Enter) {
             let line = self.editor.submit();
@@ -553,7 +510,11 @@ impl ConsolePanel {
             }
         }
         if let Some(p) = point {
+            if input.click && layout.entry.contains(p) {
+                self.selection = None;
+            }
             if input.click && hovered.is_none() && view.text.contains(p) {
+                self.editor.clear_selection();
                 self.selecting = true;
                 self.selection = view
                     .row_at(p.y, false)
@@ -837,50 +798,8 @@ impl ConsolePanel {
             self.history_bar.pressed(),
         );
 
-        // The entry (`TextEntry`), or the reverse history search in its place.
-        let entry_focused = !self.placement.active();
-        let model = TextInputModel::new(look.focused, entry_focused);
-        painter.text_entry_frame(layout.entry, model.should_draw_focus_edge());
-        let (line, cursor) = match self.editor.search() {
-            Some((query, found)) => {
-                let line = format!(
-                    "({})`{query}': {}",
-                    look.reverse_search,
-                    found.unwrap_or_default()
-                );
-                let cursor = line.chars().count();
-                (line, cursor)
-            }
-            None => (self.editor.text().to_owned(), self.editor.cursor()),
-        };
+        self.draw_entry(&painter, &layout, look, time, &text);
         let entry = layout.canvas(layout.entry);
-        let inner_x = entry.x + (3. * scale).round();
-        let inner_w = entry.w - (6. * scale).round();
-        let chars: Vec<char> = line.chars().collect();
-        let width = |from: usize, to: usize| {
-            self.text_width(&chars[from..to].iter().collect::<String>(), scale)
-        };
-        let mut start = 0;
-        while start < cursor && width(start, cursor) > inner_w - 2. * scale {
-            start += 1;
-        }
-        let mut end = cursor;
-        while end < chars.len() && width(start, end + 1) <= inner_w {
-            end += 1;
-        }
-        let shown: String = chars[start..end].iter().collect();
-        let row_top = entry.y + ((entry.h - CONSOLE_ROW * scale) * 0.5).round();
-        text(
-            &shown,
-            inner_x,
-            row_top + (CONSOLE_ROW - CONSOLE_DESCENT) * scale,
-            painter.theme.text,
-        );
-        if model.should_draw_caret(time) {
-            let caret_x = inner_x + width(start, cursor) + 1.;
-            let dialog_x = (caret_x - painter.origin.x) / scale;
-            painter.caret(layout.entry, dialog_x);
-        }
         painter.button(
             layout.submit,
             look.submit,
@@ -1259,6 +1178,57 @@ mod tests {
             panel.input(&canvas, &release(vec2(1., 1.)), &Nothing),
             Action::None
         );
+    }
+
+    #[test]
+    fn input_selection_copy_and_paste_use_the_toolkit_editor() {
+        let canvas = Canvas::default();
+        let mut panel = ConsolePanel::new(SCALING);
+        panel.input(&canvas, &typed("héllo 日本"), &Nothing);
+        panel.input(
+            &canvas,
+            &Input {
+                select_all: true,
+                ..Default::default()
+            },
+            &Nothing,
+        );
+        panel.input(
+            &canvas,
+            &Input {
+                copy: true,
+                ..Default::default()
+            },
+            &Nothing,
+        );
+        assert_eq!(panel.take_copied().as_deref(), Some("héllo 日本"));
+        panel.input(
+            &canvas,
+            &Input {
+                paste: Some("λ\nβ".into()),
+                ..Default::default()
+            },
+            &Nothing,
+        );
+        assert_eq!(panel.editor.text(), "λ; β");
+        panel.input(
+            &canvas,
+            &Input {
+                keys: [Key::Left].into(),
+                shift: true,
+                ..Default::default()
+            },
+            &Nothing,
+        );
+        panel.input(
+            &canvas,
+            &Input {
+                copy: true,
+                ..Default::default()
+            },
+            &Nothing,
+        );
+        assert_eq!(panel.take_copied().as_deref(), Some("β"));
     }
 
     #[test]

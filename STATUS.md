@@ -1,5 +1,10 @@
 # STATUS
 
+## Console input selection (2026-10-29)
+
+source-ui owns character-based selection with Shift with arrows, Home or End, platform select-all, selection replacement and highlighted visible spans. The Bevy edge translates Cmd+A, Cmd+C and Cmd+V on macOS and Ctrl+A, Ctrl+C and Ctrl+V elsewhere, using the existing clipboard resource. Copy prefers input selection and retains output-row copy when no input selection exists. Unit tests cover Unicode copy/replacement, empty-frame retention, reversed selection, collapse, deletion, submission/history reset and input transport. Final package/desktop clipboard roundtrip pending.
+
+
 ## Caption viewport repair (2026-10-29)
 
 Long caption backgrounds stay within the authored viewport, top offsets scale proportionally, cached wrapping invalidates when width/font height changes, and panning advances by visual lines rather than style/color runs. Existing and new unit checks: 14 passed, one owned-install check not yet run. Packaged commentary/caption captures pending final package.

@@ -9,6 +9,7 @@
 //! hides the list, Ctrl+R searches the history backwards, and word and line editing keys.
 
 use super::complete::{Candidate, Completer};
+mod selection;
 
 /// SDK `CConsolePanel::MAX_HISTORY_ITEMS`.
 pub const HISTORY_MAX: usize = 100;
@@ -33,6 +34,7 @@ pub struct LineEditor {
     text: String,
     /// Cursor position in characters.
     cursor: usize,
+    anchor: Option<usize>,
     history: Vec<String>,
     history_changed: bool,
     list: Option<List>,
@@ -100,6 +102,7 @@ impl LineEditor {
     }
 
     fn set(&mut self, text: String, cursor: usize) {
+        self.anchor = None;
         self.text = text;
         self.cursor = cursor.min(self.text.chars().count());
     }
@@ -134,6 +137,10 @@ impl LineEditor {
             self.search = self.search.take().map(|(q, _)| (q, 0));
             return;
         }
+        if text.chars().all(char::is_control) {
+            return;
+        }
+        self.delete_selection();
         let mut chars: Vec<char> = self.text.chars().collect();
         let insert: Vec<char> = text
             .chars()
@@ -155,6 +162,9 @@ impl LineEditor {
     }
 
     pub fn backspace(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         if let Some((query, _)) = &mut self.search {
             query.pop();
             self.search = self.search.take().map(|(q, _)| (q, 0));
@@ -168,6 +178,9 @@ impl LineEditor {
     }
 
     pub fn delete(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         let mut chars: Vec<char> = self.text.chars().collect();
         if self.cursor < chars.len() {
             chars.remove(self.cursor);
@@ -203,6 +216,9 @@ impl LineEditor {
 
     /// Ctrl+Backspace / Ctrl+W.
     pub fn delete_word_back(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         let start = self.word_start();
         let chars: Vec<char> = self.text.chars().collect();
         let text = chars[..start].iter().chain(&chars[self.cursor..]).collect();
@@ -211,6 +227,9 @@ impl LineEditor {
 
     /// Ctrl+Delete.
     pub fn delete_word_forward(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         let end = self.word_end();
         let chars: Vec<char> = self.text.chars().collect();
         let text = chars[..self.cursor].iter().chain(&chars[end..]).collect();
@@ -219,32 +238,42 @@ impl LineEditor {
 
     /// Ctrl+U: delete up to the cursor.
     pub fn kill_to_start(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         let rest = self.text[char_index(&self.text, self.cursor)..].to_owned();
         self.edited(rest, 0);
     }
 
     /// Ctrl+K: delete from the cursor on.
     pub fn kill_to_end(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
         let kept = self.text[..char_index(&self.text, self.cursor)].to_owned();
         let cursor = self.cursor;
         self.edited(kept, cursor);
     }
 
     pub fn left(&mut self) {
+        self.anchor = None;
         self.accept_search();
         self.cursor = self.cursor.saturating_sub(1);
     }
 
     pub fn right(&mut self) {
+        self.anchor = None;
         self.accept_search();
         self.cursor = (self.cursor + 1).min(self.text.chars().count());
     }
 
     pub fn word_left(&mut self) {
+        self.anchor = None;
         self.cursor = self.word_start();
     }
 
     pub fn word_right(&mut self) {
+        self.anchor = None;
         let chars: Vec<char> = self.text.chars().collect();
         let mut at = self.cursor;
         while at < chars.len() && chars[at] != ' ' {
@@ -257,10 +286,12 @@ impl LineEditor {
     }
 
     pub fn home(&mut self) {
+        self.anchor = None;
         self.cursor = 0;
     }
 
     pub fn end(&mut self) {
+        self.anchor = None;
         self.cursor = self.text.chars().count();
     }
 
@@ -352,6 +383,7 @@ impl LineEditor {
 
     /// Ctrl+R: start a reverse history search, or find the next older match.
     pub fn search_back(&mut self) {
+        self.anchor = None;
         self.search = Some(match self.search.take() {
             Some((query, back)) => {
                 let next = back + 1;
@@ -374,6 +406,7 @@ impl LineEditor {
 
     /// Enter: the line to run (a search's entry when searching); it joins the history.
     pub fn submit(&mut self) -> String {
+        self.anchor = None;
         self.accept_search();
         let line = std::mem::take(&mut self.text);
         self.cursor = 0;

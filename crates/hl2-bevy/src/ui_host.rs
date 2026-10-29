@@ -190,6 +190,7 @@ pub struct Modifiers {
     pub command: bool,
     pub paste: bool,
     pub copy: bool,
+    pub select_all: bool,
 }
 
 pub fn modifiers(native: &ButtonInput<KeyCode>) -> Modifiers {
@@ -207,6 +208,7 @@ pub fn modifiers(native: &ButtonInput<KeyCode>) -> Modifiers {
         command,
         paste: clipboard_modifier && native.just_pressed(KeyCode::KeyV),
         copy: clipboard_modifier && native.just_pressed(KeyCode::KeyC),
+        select_all: clipboard_modifier && native.just_pressed(KeyCode::KeyA),
     }
 }
 
@@ -242,6 +244,23 @@ pub fn binding_keys(
 #[cfg(test)]
 mod binding_tests {
     use super::*;
+
+    #[test]
+    fn platform_clipboard_shortcuts_include_select_all() {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(if cfg!(target_os = "macos") {
+            KeyCode::SuperLeft
+        } else {
+            KeyCode::ControlLeft
+        });
+        keys.press(KeyCode::KeyA);
+        assert!(modifiers(&keys).select_all);
+        keys.release(KeyCode::KeyA);
+        keys.press(KeyCode::KeyC);
+        assert!(modifiers(&keys).copy);
+        keys.press(KeyCode::KeyV);
+        assert!(modifiers(&keys).paste);
+    }
 
     #[test]
     fn pressed_inputs_become_binding_names() {

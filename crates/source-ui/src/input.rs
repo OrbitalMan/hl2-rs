@@ -101,6 +101,8 @@ pub struct Input {
     pub paste: Option<String>,
     /// The copy shortcut (Cmd+C on macOS, Ctrl+C elsewhere) was pressed this frame.
     pub copy: bool,
+    /// The host platform select-all shortcut was pressed.
+    pub select_all: bool,
 }
 impl Input {
     pub fn pressed(&self, key: Key) -> bool {

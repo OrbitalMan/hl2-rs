@@ -432,6 +432,7 @@ fn prepare_ui_input(ctx: UiInputContext) -> source_ui::input::Input {
         alt: ctx.modifiers.alt,
         paste: ctx.paste,
         copy: ctx.modifiers.copy,
+        select_all: ctx.modifiers.select_all,
         keys: ui_keys,
         held_keys: ui_held_keys,
         pointer: ctx.pointer,

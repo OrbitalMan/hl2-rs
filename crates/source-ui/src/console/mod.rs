@@ -7,5 +7,6 @@
 pub mod command;
 pub mod complete;
 pub mod dialog;
+mod editing;
 pub mod editor;
 pub mod panel;

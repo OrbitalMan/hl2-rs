@@ -1,5 +1,18 @@
 # MODLOG
 
+## 2026-10-29 Console input selection and clipboard editing
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** Added Unicode character selection to the shared line editor, Shift navigation and platform select-all, copy of input selections through existing clipboard transport, replacement on typing/paste/delete, visible clipped highlights and input/history selection handoff. Extracted keyboard editing and entry drawing from the large panel module. Removed the conflicting Ctrl+A-to-home shortcut.
+
+**Tested how / Result:** `cargo test -p source-ui --locked`: 134 passed. `cargo clippy -p source-ui --all-targets --locked -- -D warnings`: passed. Added host modifier coverage for platform A/C/V shortcuts; included in final workspace validation.
+
+**Still broken or not tested:** Interactive desktop clipboard roundtrip not tested. Pasted newlines preserve existing command-separator behavior.
+
+**Next:** Final packaged captures and SMG blur regression/performance checks.
+
+
 ## 2026-10-29 Contain long captions and reflow on resize
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

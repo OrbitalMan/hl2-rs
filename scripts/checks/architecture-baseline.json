@@ -201,7 +201,7 @@
   "crates/hl2-ui/src/gameui/options.rs": 2528,
   "crates/hl2-ui/src/hud.rs": 1792,
   "crates/source-assets/src/models.rs": 1465,
-  "crates/source-ui/src/console/panel.rs": 1091,
+  "crates/source-ui/src/console/panel.rs": 1010,
   "crates/source-ui/src/widgets.rs": 2176
  },
  "functions": {
@@ -537,12 +537,6 @@
   ],
   "crates/source-assets/src/vtf.rs::layout_level_picmip": [
    112
-  ],
-  "crates/source-ui/src/console/panel.rs::draw": [
-   129
-  ],
-  "crates/source-ui/src/console/panel.rs::input": [
-   121
   ],
   "crates/source-ui/src/native_font.rs::load": [
    176
