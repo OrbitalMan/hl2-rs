@@ -86,6 +86,8 @@ portrait, odd dimensions, every HUD aspect frame and retained retail size refere
 
 ### Background vs Gameplay Loading UI/UX & Transition State Sequence
 
+- The saved `background_force_default_blur` cvar defaults to 0 (normal aspect-based variant selection). At 1 it selects the standard pre-blurred texture even on a wide canvas. Menu and loading draws share this policy through `Console::background_texture`; diagnostic texture names use the same predicate. The override is independent of background debug mode; that mode's Minus hotkey changes the stored cvar and displays its state. This deliberate non-retail artwork choice does not change camera FOV or image crop/presentation policy. See the non-retail feature guide for controls.
+
 - Menu background projection uses the authored 75-degree 4:3 reference and existing aspect-ratio crop; gameplay FOV, vertical-FOV overrides and weapon/env zoom do not change it. Fit Display supplies the actual internal game-frame aspect, not the configured resolution or outer window aspect.
 
 - Before revealing a newly installed background, the host processes due zero-time map-spawn I/O and resolves its authored camera through the same view resolver as ordinary simulation ticks. This prevents exposing the player spawn view for one frame. Authored delays and fixed/script clocks are preserved; no timed loading delay is added. Diagnostic captures include a separate `-installed.png` image of this exact handoff frame.

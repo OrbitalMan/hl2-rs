@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-29 Persist standard background blur selection and add debug toggle
+
+**Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.
+
+**Changed / Why:** Added default-false `video.background_force_default_blur` and its stored cvar through the shared setting registry. It selects normal artwork even on wide frames independently of debug mode; both menu/loading lookup and diagnostic names use one effective-variant predicate. Background debug Minus/keypad subtract toggles via the same saved command path once per press; the overlay shows its 0/1 value and key hint. A small external-settings helper keeps open Options drafts and sub-dialog snapshots synchronized without losing existing edits; the existing display-mode synchronization moved into that module. Documentation covers persistence and controls.
+
+**Tested how / Result:** New tests cover legacy loading, serialization, debug independence, query, set and error cases, actual texture selection/fallback, Options retention and native key gating/hold behavior. Reviewed the added cvar golden transcript. `scripts/checks/validate.sh`: 1,249 Rust tests passed, 105 ignored; 27 Python tests, strict Clippy, formatting and architecture passed. `scripts/checks/check_windows.sh` passed; architecture baseline tightened after the Options extraction. Release rebuilt. A muted isolated packaged run set 1 during gameplay with debug off; restart retained it, and 16:9 captures show normal artwork/flag 1 then widescreen artwork/flag 0 after restoring the default. Sampled background changes: 225,437 pixels. `NO_BUILD=1 ONLY='bg_compare save_config' python3 scripts/checks/replays.py`: both groups passed.
+
+**Performance:** One cached-config predicate in the existing lookup, no asset reads or render passes added. Debug label work is gated by debug mode; saving occurs only on command/key activation, never on held-key frames. Camera and image crop/presentation policy are unchanged.
+
+**Still broken or not tested:** Windows GPU runtime and native image parity not tested; forced normal artwork is a deliberate non-retail choice. The physical Minus path is covered with native-input unit tests; packaged captures exercise its shared cvar path.
+
+**Next:** Use the saved cvar in any mode or toggle it from background debug; retain default 0 for ordinary aspect-based selection.
+
+
 ## 2026-10-29 Rename viewmodel debug mode and append the latest tuning snapshot
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

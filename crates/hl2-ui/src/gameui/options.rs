@@ -21,6 +21,7 @@
 //! slider or a combo box and switch tabs; Alt+Up/Down opens a combo box's list; Enter elsewhere
 //! presses the default button (docs/gameui.md section 6c).
 
+mod external_settings;
 mod hints;
 mod sub_frame;
 use super::settings::support::{self, binding_for_control as control_binding};
@@ -710,16 +711,6 @@ impl OptionsDialog {
     /// open (retail applies the slider immediately; Cancel restores the saved value).
     pub fn preview_gamma(&self) -> Option<f32> {
         matches!(self.sub, Some(Sub::Gamma)).then_some(self.draft.config.video.gamma)
-    }
-
-    /// The window's display mode changed outside the dialog (for example macOS native full
-    /// screen entered with the green button): the applied state follows it, and so does the
-    /// draft unless the user already picked a different mode there.
-    pub fn sync_display_mode(&mut self, mode: crate::config::DisplayMode) {
-        if self.draft.config.video.display_mode == self.applied.video.display_mode {
-            self.draft.config.video.display_mode = mode;
-        }
-        self.applied.video.display_mode = mode;
     }
 
     /// Whether Apply would change anything.

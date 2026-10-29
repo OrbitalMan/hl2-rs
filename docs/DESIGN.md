@@ -1,5 +1,9 @@
 # Design
 
+## Persisted standard-background-blur override (2026-10-29)
+
+Add default-false video.background_force_default_blur through the existing stored-cvar registry, independent of debug mode. Share the effective wide/normal predicate between texture lookup and diagnostic names, covering menu backgrounds and gameplay/background loading. Preserve the existing image crop/presentation and camera policy; the requested deviation selects the normal installed asset. Debug Minus toggles through the same saved command path once per press, with a live flag row in the overlay. Cover legacy config loading, persistence, command validation, texture/fallback choices and held-key behavior; verify packaged save/restart and debug captures. No new assets, file reads on render frames or render pass.
+
 ## Viewmodel debug command and newest snapshot ordering (2026-10-29)
 
 Rename the mode command and host dispatch to viewmodel_debug_mode; keep the existing reset command. Each tuning update removes the prior toolkit snapshot and appends the replacement after ordinary output. Remap affected cached row numbers and history selection endpoints, preserve scrolled-back ordinary content, and retain normal bounded-buffer eviction. Cover interleaved output, wrapped/filter rows, selection and full-buffer updates; verify the renamed command and live packaged console ordering.

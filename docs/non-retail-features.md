@@ -100,6 +100,14 @@ project's `crates/hl2-ui/assets/ui/tuning.json` to retain authored changes.
 
 ## Menu background debug mode
 
+`background_force_default_blur 0|1` is a saved option that works independently of
+debug mode. **0** (the default) selects widescreen blur artwork on wide aspect
+ratios, with the normal existing fallback when that artwork is unavailable. **1**
+always selects the normal blur texture, even on wide frames. The choice applies to
+menu and loading backgrounds and survives restarting the game. Query it by entering
+`background_force_default_blur` without an argument.
+
+
 From the main menu, enter `background_debug_mode 1` in the developer console.
 It focuses the menu so its debug keys work immediately. The overlay reports the
 background state, map, pre-blurred texture, overlay opacity and camera FOV. This is
@@ -110,6 +118,7 @@ not an Advanced/Ultra motion-blur setting.
 | --- | --- |
 | Up / Down | Increase / decrease the background camera's vertical FOV. |
 | `0` | Restore the authored background FOV. |
+| `-` | Toggle the saved `background_force_default_blur` option; its 0/1 state and this binding appear in the overlay. |
 | `,` / `.` | Decrease / increase overlay opacity by one percentage point. |
 | Left / Right | Toggle opacity to 0% / 100%; repeat to restore the base opacity. |
 | `1`, `2`, `3`, `4` | Switch to the initial background for Half-Life 2, Episode One, Episode Two or Lost Coast, using installed resources. |
@@ -123,7 +132,10 @@ active; `background_map_fov [degrees]` queries or sets the background FOV overri
 (the explicit range is 1–170 degrees).
 
 The mode is limited to the main-menu background/loading context. Starting gameplay
-disables it, and background debug and viewmodel tweak modes exclude each other.
+disables it, and background debug and viewmodel debug modes exclude each other.
 During background loading or failure, the loading presentation can force the blur
 fully opaque; the opacity comparison becomes meaningful once the background is
-ready. These are runtime diagnostics, not saved gameplay camera settings.
+ready. The FOV/opacity tools are runtime diagnostics, not saved gameplay camera settings.
+The standard-blur override is the saved exception: turning debug mode off does not
+reset it. Holding `-` does not repeat the toggle, and the key is inactive while the
+console is open.

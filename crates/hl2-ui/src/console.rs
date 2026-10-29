@@ -695,3 +695,6 @@ mod button_padding_tests;
 
 #[cfg(test)]
 mod snapshot_tests;
+
+#[cfg(test)]
+mod background_blur_tests;

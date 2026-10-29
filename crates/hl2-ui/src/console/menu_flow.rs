@@ -24,7 +24,9 @@ impl Console {
     ) -> Option<&Texture2D> {
         let key = |name: String| (game.to_owned(), name);
         let map = crate::gameui::resources::blur(map);
-        widescreen
+        self.config
+            .video
+            .background_uses_widescreen(widescreen)
             .then(|| {
                 self.background_textures
                     .get(&key(format!("{map}_widescreen")))

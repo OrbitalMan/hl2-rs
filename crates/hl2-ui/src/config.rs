@@ -265,6 +265,8 @@ pub struct VideoSettings {
     /// aspect ratio (within `9:16..=32:9`) and `width`/`height` only set its detail and the
     /// requested windowed size.
     pub flexible_aspect: bool,
+    /// Force standard pre-blurred background artwork even on wide frames.
+    pub background_force_default_blur: bool,
     pub fov: f32,
     /// Vertical field of view in degrees (Video > Advanced); 0 is automatic: derived from
     /// `fov` and the screen's aspect ratio. An explicit value replaces the derived one and scales
@@ -289,6 +291,11 @@ pub struct VideoSettings {
 pub type LoadDetail = (ModelDetail, TextureDetail, bool);
 
 impl VideoSettings {
+    /// Effective artwork variant; presentation aspect and gameplay FOV are independent.
+    pub fn background_uses_widescreen(&self, widescreen: bool) -> bool {
+        widescreen && !self.background_force_default_blur
+    }
+
     pub fn load_detail(&self) -> LoadDetail {
         (
             self.advanced.model_detail,
@@ -305,6 +312,7 @@ impl Default for VideoSettings {
             height: 720,
             display_mode: DisplayMode::Fullscreen,
             flexible_aspect: false,
+            background_force_default_blur: false,
             fov: 75.0,
             vertical_fov: 0.0,
             viewmodel_fov: hl2_simulation::viewmodel_effects::VIEWMODEL_FOV,

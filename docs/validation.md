@@ -1,5 +1,26 @@
 # Local validation — 2026-10-05
 
+## Saved normal-background-blur override (2026-10-29)
+
+`background_force_default_blur` defaults to 0 in new and legacy configs, uses the
+stored-cvar save/apply path and does not require debug mode. Tests cover query/set
+validation, serialization, debug lifetime independence, standard/wide lookup and
+missing-standard behavior, synchronized diagnostic names, single-press Minus with
+hold, console-focus and debug-off guards, and preservation of pending Options edits. The cvar
+golden transcript contains only the new query, set and error cases. Workspace validation
+and strict Windows checks pass; the package is rebuilt.
+
+A muted isolated packaged run sets 1 in gameplay with debug mode off and saves it.
+A new process queries 1 and shows normal background01 artwork on a 1280x720 frame.
+Debug mode retains the stored flag and its overlay shows `background01`, value 1
+and the Minus hint. Setting 0 restores `background01_widescreen`, value 0 and saved
+false. Inspected both captures; 225,437 background pixels differ in the sampled
+600x420 region. The `bg_compare` and `save_config` packaged groups pass. Reports,
+settings and captures remain in ignored artifacts. Physical-key behavior is unit
+verified; the packaged run invokes the same saved cvar path. Windows GPU runtime
+and native image parity are not tested. Camera and crop policy are unchanged.
+
+
 ## Viewmodel debug rename and snapshot log order (2026-10-29)
 
 `viewmodel_debug_mode` is registered and dispatches to the host; the former mode

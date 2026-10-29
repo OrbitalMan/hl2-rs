@@ -193,6 +193,13 @@ pub const COMMANDS: &[Spec] = &[
         &[],
         developer::viewmodel_tweak_reset,
     ),
+    setting(
+        "background_force_default_blur",
+        "background_force_default_blur [0|1]: query or force standard background blur artwork on all aspect ratios",
+        BOOLEAN,
+        video::background_force_default_blur_value,
+        video::set_background_force_default_blur,
+    ),
     command(
         "background_debug_mode",
         "background_debug_mode <0|1>: toggle background visual debug mode (background map/blur only)",

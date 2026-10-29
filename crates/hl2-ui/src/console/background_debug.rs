@@ -19,7 +19,7 @@ impl Console {
     /// Pre-blurred image name applied to the given background map.
     pub fn blur_texture_name(&self, map: &str, widescreen: bool) -> String {
         let base_map = crate::gameui::resources::blur(map);
-        if widescreen {
+        if self.config.video.background_uses_widescreen(widescreen) {
             let wide_key = format!("{base_map}_widescreen");
             let found = self
                 .background_textures
@@ -30,6 +30,13 @@ impl Console {
             }
         }
         base_map.to_owned()
+    }
+
+    /// Use the stored cvar path for debug hotkeys, including normal save/apply behavior.
+    pub fn toggle_background_force_default_blur(&mut self) {
+        let value = u8::from(!self.config.video.background_force_default_blur);
+        let effects = self.submit(&format!("background_force_default_blur {value}"));
+        self.deferred.extend(effects);
     }
 
     /// Whether the current canvas aspect ratio is widescreen (> 4:3).

@@ -1,5 +1,12 @@
 # STATUS
 
+## Persisted standard background blur override (2026-10-29)
+
+Added the independent stored cvar `background_force_default_blur [0|1]`: 0 is the default aspect-based selection, 1 always selects normal pre-blurred artwork, including wide frames. Menu and loading paths share the same policy. Background debug Minus (also keypad subtract) toggles once per press through the normal save/apply path; the overlay shows the flag and key hint and refreshes the effective texture name. Opening the console suspends the hotkey. External changes synchronize this hidden flag into open Options drafts without discarding pending edits.
+
+Verified: legacy config/default false, stored-cvar golden transcript and invalid arguments, serialization, debug lifetime independence, synthetic normal/wide texture selection, hotkey hold, console-focus and debug-off guards, and Options draft retention. Workspace validation (1,249 Rust tests passed, 105 ignored; 27 Python tests, strict Clippy, formatting and architecture) and Windows cross-target checks pass; release package rebuilt. A packaged gameplay command saved 1 with debug off; restart retained it and displayed normal artwork on a 16:9 frame, with matching overlay text. Restoring 0 selected widescreen artwork; the two captures differ in 225,437 pixels in the sampled background region. Packaged bg_compare and save_config groups pass. No Windows GPU runtime or native parity claim; this option is an explicit non-retail asset override. Unrelated scratch files remain untouched.
+
+
 ## Viewmodel debug command and newest tuning log ordering (2026-10-29)
 
 The mode command is now `viewmodel_debug_mode 0|1`; runtime dispatch, usage/error text, completion registry, README and current feature/GameUI documentation use the new name. The separate `viewmodel_tweak_reset` command is unchanged. Each tuning update removes the previous snapshot and appends the latest one after intervening ordinary output. Shared toolkit bookkeeping remaps cached wrapping and selections and keeps scrolled-back ordinary content anchored, including filtered/wrapped and full-buffer cases.

@@ -198,7 +198,7 @@
   "crates/hl2-simulation/src/physics.rs": 3657,
   "crates/hl2-simulation/src/projectiles.rs": 1286,
   "crates/hl2-simulation/src/sounds.rs": 1208,
-  "crates/hl2-ui/src/gameui/options.rs": 2528,
+  "crates/hl2-ui/src/gameui/options.rs": 2519,
   "crates/hl2-ui/src/hud.rs": 1792,
   "crates/source-assets/src/models.rs": 1465,
   "crates/source-ui/src/widgets.rs": 2176

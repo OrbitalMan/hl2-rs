@@ -336,7 +336,9 @@ fn draw_debug_overlays(
     }
     if sim.background_debug.enabled {
         let aspect = width / height.max(1.);
-        let lines = sim.background_debug.lines(aspect);
+        let lines = sim
+            .background_debug
+            .lines(aspect, ui.source.config.video.background_force_default_blur);
         stack_top = ui.source.draw_background_debug(&lines, stack_top) + OVERLAY_GAP;
     }
     stack_top

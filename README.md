@@ -195,6 +195,11 @@ temporary settings, and current limits.
 | Viewmodel debug mode | Console: `viewmodel_debug_mode 1`; tune weapon FOV and position offsets for the current aspect profile. |
 | Menu background debug mode | Console from the main menu: `background_debug_mode 1`; compare background FOV, blur opacity and chapter artwork. |
 
+`background_force_default_blur 1` always selects the normal menu/loading blur
+texture, even on wide frames; `0` restores aspect-based selection (the default).
+It is saved independently of debug mode. While background debug is enabled, `-`
+toggles it and the overlay shows its state.
+
 ## Implemented so far
 
 In short: owned VPK/BSP/VMT/VTF/MDL/PHY/audio readers; world, displacement, prop and model rendering with baked lightmaps, Source model lighting, HDR auto exposure, bloom, skies and live monitors; fixed-step player movement and collision; entity I/O, doors, triggers and choreographed scenes with layered gestures, facial flexes and lip sync; the HL2 arsenal through the gravity gun, frag, crossbow, RPG and bug bait (crowbar, pistol, .357, SMG1, AR2, shotgun first) with their HUD; VPhysics-like props with breakables, gibs, explosive barrels (they ignite, burn with the installed burning_character particles and explode) and basic constraints; NPC AI ported from the SDK for metrocops, Combine soldiers (including shotgunner, elite and prison guard), citizens/rebels and the Barney/Alyx allies (senses, relationships, schedules, cover and reload, NPC weapons, grenades, kicks, speech and footsteps; few native comparisons), classic and poison zombies (chase, claws/bites, headcrab bodygroup, burning), squads (membership, shared enemies, squad speech), NPC death ragdolls from the models' .phy ragdolls (jointed bodies with authored limits; the player walks through them; shots, explosions and crossbow pins act on corpses; retired beyond eight by fading; death forces checked against native pistol/shotgun kills); friendly NPCs immune to the player (F4 debug option to allow it); runtime entity creation (F4 spawn overlay with NPC and physics-prop tabs, npc_create, ent_create, prop_physics_create, npc_template_maker copies); and map transitions. The full item-by-item list is in [docs/features.md](docs/features.md).

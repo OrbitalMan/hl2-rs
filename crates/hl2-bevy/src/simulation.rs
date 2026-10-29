@@ -246,7 +246,9 @@ impl Simulation {
         self.run_after_script = options.capture_live;
         self.loading = true;
         self.background_level = target.background;
-        let is_wide = options.width as f32 / (options.height as f32).max(1.0) > 4. / 3. + 1e-3;
+        let is_wide = options.config.video.background_uses_widescreen(
+            options.width as f32 / (options.height as f32).max(1.0) > 4. / 3. + 1e-3,
+        );
         self.init_background_target(target, is_wide);
     }
     pub fn init_background_target(
@@ -557,6 +559,11 @@ impl Simulation {
         let detail_changed = self.applied_detail.is_some_and(|prev| prev != detail);
         self.applied_detail = Some(detail);
         ui.source.config = cfg.clone();
+        if self.background_debug.enabled {
+            self.background_debug.blur_texture_name = ui
+                .source
+                .blur_texture_name(&self.background_debug.map_name, ui.source.is_widescreen());
+        }
         if detail_changed && !self.loading {
             let map = game.world.name.clone();
             if !map.is_empty() {

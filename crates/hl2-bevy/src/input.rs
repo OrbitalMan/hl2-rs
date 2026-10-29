@@ -583,6 +583,14 @@ fn process_background_debug_keys(
             sim.background_debug.fov = None;
         }
         if let Some(ref mut ui) = ui {
+            if input.keys.just_pressed(KeyCode::Minus)
+                || input.keys.just_pressed(KeyCode::NumpadSubtract)
+            {
+                ui.source.toggle_background_force_default_blur();
+                sim.background_debug.blur_texture_name = ui
+                    .source
+                    .blur_texture_name(&sim.background_debug.map_name, ui.source.is_widescreen());
+            }
             ui.source.background_blur_opacity = sim.background_debug.blur_opacity;
             handle_background_swap_keys(sim, ui, input.keys);
         }
@@ -1190,3 +1198,6 @@ mod tests {
         assert_eq!(sim.background_debug.blur_opacity, 50);
     }
 }
+
+#[cfg(test)]
+mod background_blur_tests;

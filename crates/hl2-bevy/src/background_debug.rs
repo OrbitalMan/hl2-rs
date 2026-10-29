@@ -69,11 +69,15 @@ impl BackgroundDebug {
     }
 
     /// Formats the lines displayed in the debug overlay.
-    pub fn lines(&self, aspect: f32) -> Vec<String> {
+    pub fn lines(&self, aspect: f32, force_default_blur: bool) -> Vec<String> {
         let fov = self.fov(aspect);
         vec![
             format!("state: {}  |  map: {}", self.state_label, self.map_name),
             format!("blur_texture: {}", self.blur_texture_name),
+            format!(
+                "background_force_default_blur: {}  (-: toggle)",
+                u8::from(force_default_blur)
+            ),
             format!(
                 "blur_opacity: {}%  (left: 0  right: 100  ,: -1%  .: +1%)",
                 self.blur_opacity
@@ -223,19 +227,21 @@ mod tests {
             state_label: "Ready".to_owned(),
             ..Default::default()
         };
-        let lines = debug.lines(16. / 9.);
-        assert_eq!(lines.len(), 6);
+        let lines = debug.lines(16. / 9., false);
+        assert_eq!(lines.len(), 7);
         assert!(lines[0].contains("state: Ready"));
         assert!(lines[0].contains("map: background01"));
         assert!(lines[1].contains("blur_texture: background01_widescreen"));
+        assert_eq!(lines[2], "background_force_default_blur: 0  (-: toggle)");
+        assert!(debug.lines(16. / 9., true)[2].contains("background_force_default_blur: 1"));
         assert_eq!(
-            lines[2],
+            lines[3],
             "blur_opacity: 50%  (left: 0  right: 100  ,: -1%  .: +1%)"
         );
-        assert!(lines[3].contains("fov: "));
-        assert!(lines[3].contains("0: reset"));
-        assert!(lines[4].contains("1-4:"));
-        assert!(lines[4].contains("[/]"));
+        assert!(lines[4].contains("fov: "));
+        assert!(lines[4].contains("0: reset"));
+        assert!(lines[5].contains("1-4:"));
+        assert!(lines[5].contains("[/]"));
     }
 
     #[test]
