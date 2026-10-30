@@ -1,17 +1,40 @@
 # MODLOG
 
+## 2026-10-30 Ultra review: rocket coverage and payload correction
+
+**Agent/model:** Codex desktop; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Corrected the quarter-size RGBA8 allocation from 7.5 MB to 1.87 MB;
+864 x 542 x 4 = 1,873,152 bytes. The saved inventory totals 159,335,448 bytes with both
+cameras. Qualified the thin-object claim: four footprint reads do not cover all 16 pixels.
+No runtime change. The owner reports that the overall appearance looks fine.
+
+**Tested how / Result:** Packaged e020bee rocket fixture at 1024x768, yaw offsets 0/0.1/0.2/0.3
+degrees applied at tick 142, no AA and 4x AA, existing reconstruction diagnostic and nine-image
+bursts. Every case detects object reconstruction: peak diagnostic pixel counts 79/86/83/82
+and 79/82/81/82 respectively. All report a flying projectile, zero pose mismatches and no
+rendering errors. Evidence: artifacts/blur-review/rocket. Portable validation and strict
+Windows cross-target checks passed during review; documentation diff and architecture pass.
+
+**Still broken or not tested:** Some later burst frames contain zero detected pixels; moving
+captures and a fixed detection region do not isolate the reason. This is a projectile smoke
+check, not proof of every one-pixel phase or unchanged temporal fidelity. Windows GPU runtime
+not tested. No confirmed regression justifies a shader change from this check.
+
+**Next:** Retain the optimization; use frozen motion/depth inputs if thin-trail dropout is reported.
+
 ## 2026-10-30 Ultra object trails gathered at quarter size
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
 
 **Changed / Why:** Follows the archived quarter-gather idea, rebuilt on the current shader. The object gather
 now draws into a quarter-size image; the native pass only composites it, so nothing changes where no trail exists.
-Each quarter-size pixel takes the fastest of four reads across its footprint, so thin objects stay detected.
+Each quarter-size pixel takes the fastest of four reads across its footprint, reducing missed thin objects; this does not guarantee coverage of all 16 native pixels.
 
 **Tested how / Result:** Alternating packaged runs, doors swinging at 3456x2168 with 4x AA, standing at the
 entrance: mean 14.2 to 12.8 ms, worst frame about 28 to 19 ms; doors still, no difference. One of three runs had a
 115 ms hitch and 14.3 ms mean, and the host sped up between sessions, so compare only alternating pairs. Payload
-7.5 MB more at native resolution (Ultra 159.34 MB, measured before the footprint read, which adds no image).
+1.87 MB more at native resolution (864 x 542 x 4 = 1,873,152 bytes; Ultra 159.34 MB, measured before the footprint read, which adds no image).
 World, weapon, retail and cutout GPU checks, motion blur replays, validation and strict Windows checks pass.
 `check_world_blur.py` now counts upscaled magenta, since one quarter-size pixel peaks near 77%; the off, retail
 and paused controls still count zero. Grenade and rocket captures match the previous build by eye.

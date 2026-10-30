@@ -1,5 +1,13 @@
 # STATUS
 
+## Ultra optimization review (2026-10-30)
+
+Owner reports overall appearance looks fine. Eight packaged rocket cases (four small yaw shifts,
+no AA and 4x AA) all reach object reconstruction without rendering or pose errors. No runtime
+change from review. Quarter-size texture payload corrected to 1.87 MB; four footprint reads
+do not guarantee every thin-object phase. Some later burst frames have no detection, so
+temporal coverage is not established. See MODLOG for counts and limits.
+
 ## Ultra weapon blur and door spikes fixed (2026-10-30)
 
 Ultra's weapon blur now matches Advanced; only the world is softened. Standing at the station doors
