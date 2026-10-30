@@ -18,6 +18,21 @@ fn world_downsample(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }}
     return vec4(sum.rgb*0.25,peak);
 }
+// The output image's size, from a fragment's position and normalized coordinate.
+fn data_size(position: vec2<f32>, uv: vec2<f32>) -> vec2<f32> { return position/uv; }
+// Wide local log luminance: what counts as ordinary around each trail. A log average keeps
+// a large lamp from raising the level it is judged against.
+@fragment
+fn world_environment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    // Each output texel is wide enough that a lamp cannot define its own surroundings.
+    let texel = 1.0/vec2<f32>(data_size(in.position.xy,in.uv));
+    var sum = 0.0;
+    for (var y = 0; y < 8; y++) { for (var x = 0; x < 8; x++) {
+        let offset = (vec2<f32>(f32(x),f32(y))-3.5)/8.0;
+        sum += log(dot(textureSampleLevel(full_frame,image_sampler,in.uv+offset*texel,0.0).rgb,vec3(0.2126,0.7152,0.0722))+0.01);
+    }}
+    return vec4(sum/64.0,0.0,0.0,0.0);
+}
 
 #else
 
@@ -197,6 +212,7 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 }
 #else
 @group(0) @binding(7) var camera_filtered: texture_2d<f32>;
+@group(0) @binding(8) var camera_environment: texture_2d<f32>;
 // Read all surfaces, including sky/background motion. Reversed depth is larger nearer us.
 fn raw_surface(uv: vec2<f32>) -> vec4<f32> {
     let p = clamp(vec2<i32>(uv*data.params.zw),vec2(0),vec2<i32>(data.params.zw)-1);
@@ -287,36 +303,42 @@ fn taps(vector: vec2<f32>) -> i32 {
     // Subpixel spacing for thin bright lights; odd counts retain the exact center.
     return i32(clamp(ceil(length(vector*data.params.zw)*1.5),2.0,256.0)) | 1;
 }
-// Refine bright, contrasting footprints using nested midpoint samples. Smooth areas
-// keep the coarse integral; refinement reuses every coarse sample and adds no images.
-fn highlight(peak: f32, average: vec3<f32>) -> f32 {
-    let mean = dot(average,vec3(0.2126,0.7152,0.0722));
-    return smoothstep(0.25,0.75,peak)*smoothstep(1.5,3.0,peak/max(mean,0.001));
+// How unusual a trail is against its surroundings, brighter or darker: a bright scene is
+// not a highlight by itself. Ratios below 6:1 occur all over ordinary outdoor frames.
+fn highlight(peak: f32, low: f32, environment: f32) -> f32 {
+    let contrast = max((peak+0.04)/(environment+0.04),(environment+0.04)/(low+0.04));
+    return smoothstep(6.0,12.0,contrast);
 }
+// Refine unusual footprints using nested midpoint samples. Ordinary areas keep the
+// coarse integral; refinement reuses every coarse sample.
 fn camera_gather(uv: vec2<f32>, vector: vec2<f32>) -> vec4<f32> {
     let count = i32(clamp(ceil(length(vector*vec2<f32>(textureDimensions(background)))*0.75),4.0,64.0)) | 1;
     var sum = vec3(0.0);
     var peak = 0.0;
+    var low = 1e9;
+    let environment = exp(textureSampleLevel(camera_environment,linear_sampler,uv,0.0).r)-0.01;
     for (var i = 0; i < count; i++) {
         let offset = vector * ((f32(i)+0.5)/f32(count)-0.5);
         let sample = textureSampleLevel(background,linear_sampler,clamp(uv+offset,vec2(0.0),vec2(1.0)),0.0);
         sum += sample.rgb;
         peak = max(peak,sample.a);
+        low = min(low,dot(sample.rgb,vec3(0.2126,0.7152,0.0722)));
     }
     var total = f32(count);
-    if highlight(peak,sum/total) > 0.0 {
+    if highlight(peak,low,environment) > 0.0 {
         for (var i = 0; i < count; i++) {
             for (var side = -1; side <= 1; side += 2) {
                 let offset = vector * ((f32(i)+0.5+f32(side)/3.0)/f32(count)-0.5);
                 let sample = textureSampleLevel(background,linear_sampler,clamp(uv+offset,vec2(0.0),vec2(1.0)),0.0);
                 sum += sample.rgb;
                 peak = max(peak,sample.a);
+                low = min(low,dot(sample.rgb,vec3(0.2126,0.7152,0.0722)));
             }
         }
         total *= 3.0;
     }
     let average = sum/total;
-    return vec4(average,mix(data.flags.y,1.0,highlight(peak,average)));
+    return vec4(average,mix(data.flags.y,1.0,highlight(peak,low,environment)));
 }
 @fragment
 fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {

@@ -83,6 +83,9 @@ fn capture(
         if let Some(output) = &textures.output {
             inventory.add(&output.texture, false);
         }
+        if let Some(environment) = &textures.environment {
+            inventory.add(&environment.texture, false);
+        }
         if let Some(motion) = prepass.and_then(|p| p.motion_vectors.as_ref()) {
             inventory.add(&motion.texture.texture, true);
             if let Some(resolve) = &motion.resolve_target {

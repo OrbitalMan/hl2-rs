@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-30 Judge Ultra highlights against their surroundings
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** Owner direction: stronger camera blur should follow contrast, not brightness; a
+bright scene alone must not blur harder, an unusually dark object in it should. The gate required
+high absolute brightness and compared the peak with the trail's own mean. It now compares the
+trail's brightest and darkest points with a wide local log-average luminance, on a 6:1 to 12:1 ramp.
+A new image four texels wide, drawn from the quarter-size frame while the camera moves, holds that
+level. Two plain averages were rejected in packaged captures: a large lamp raised its own level to
+about 2.8:1 and its trail was not treated as unusual.
+
+**Tested how / Result:** Frozen inputs against production uniform sampling, previous gate then this
+one. Time: plaza long 1.71 to 1.07, plaza horizontal 1.71 to 1.04, dense checkerboard 2.77 to 0.68,
+bright flat 0.73 to 0.69, dark bars on bright 0.93 to 1.08. Share of the frame at stronger blur:
+plaza 26-31% to 5.6-6.9%, bright flat 0 to 0, dark bars 1.4% to 9.4%, dense 97% to 0. A packaged
+vertical lamp turn shows a full-strength connected trail. Cutout, world and weapon GPU checks, motion
+blur replays, validation and strict Windows checks pass. Ultra payload stays 157.46 MB.
+
+**Still broken or not tested:** In a captured plaza turn the dark pole's trail changes strength
+where it crosses the skyline, and the roofline shows ghosting; whether that reads well in motion is
+not tested. Dark bars on bright cost slightly more than production. The new pass's own frame time
+is not measured separately. Windows GPU runtime not tested.
+
+**Next:** Owner review in play, then a retail blur presence check and motion and depth probe inputs.
+
 ## 2026-10-30 Adaptive Ultra sampling measured on a bright outdoor scene
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.

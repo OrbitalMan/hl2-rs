@@ -10,11 +10,12 @@ use bevy::render::{
 };
 use std::collections::HashMap;
 
-pub(super) type Cache = HashMap<(TextureFormat, u32), [CachedRenderPipelineId; 2]>;
+pub(super) type Cache = HashMap<(TextureFormat, u32), [CachedRenderPipelineId; 3]>;
 
 pub(super) struct Prepared {
-    pub pipelines: [CachedRenderPipelineId; 2],
+    pub pipelines: [CachedRenderPipelineId; 3],
     pub downsample: BindGroup,
+    pub environment: BindGroup,
     pub native: BindGroup,
 }
 
@@ -33,6 +34,14 @@ pub(super) fn prepare(
         [
             pipeline(p, cache, "world_downsample", format, 1, true),
             pipeline(p, cache, "world_objects", format, samples, true),
+            pipeline(
+                p,
+                cache,
+                "world_environment",
+                super::prepare::ENVIRONMENT_FORMAT,
+                1,
+                true,
+            ),
         ]
     });
     let layout = cache.get_bind_group_layout(&p.image_layout);
@@ -41,11 +50,47 @@ pub(super) fn prepare(
         &layout,
         &BindGroupEntries::sequential((frame, &p.sampler, frame)),
     );
+    let image = &textures.background.default_view;
+    let environment = device.create_bind_group(
+        Some("world_blur_environment"),
+        &layout,
+        &BindGroupEntries::sequential((image, &p.sampler, image)),
+    );
     Some(Prepared {
         pipelines,
         downsample,
+        environment,
         native,
     })
+}
+
+/// The quarter-size frame the camera gather reads, and its wide local luminance.
+pub(super) fn prepare_images(
+    ctx: &mut RenderContext,
+    cache: &PipelineCache,
+    textures: &Textures,
+    world: &Prepared,
+) {
+    draw(
+        ctx,
+        cache,
+        world.pipelines[0],
+        &world.downsample,
+        &textures.background.default_view,
+        "world_blur_downsample",
+    );
+    draw(
+        ctx,
+        cache,
+        world.pipelines[2],
+        &world.environment,
+        &textures
+            .environment
+            .as_ref()
+            .expect("world environment")
+            .default_view,
+        "world_blur_environment",
+    );
 }
 
 pub(super) fn reconstruct(

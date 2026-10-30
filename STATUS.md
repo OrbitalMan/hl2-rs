@@ -7,13 +7,13 @@ existing check noticed. Reverted; no check yet asserts retail blur is present du
 the previous build a captured Advanced turn matched blur off exactly; not explained. Eight archived
 blur experiments are **not re-tested**: the frozen probe needs motion and depth inputs. See MODLOG.
 
-## Ultra brightness-adaptive sampling integrated (2026-10-30)
+## Ultra contrast-adaptive sampling integrated (2026-10-30)
 
-Frozen-input time relative to same-blend uniform sampling: 0.45-0.92 on flat, dark, sparse and
-dark captured scenes, 1.10-1.24 mixed, 1.32-1.40 on a bright outdoor capture at long vectors
-(about +0.2 ms at quarter resolution), 2.2 on a dense bright checkerboard (+0.47 ms). Composited
-error is at or below uniform's in all 17 scenes. Perceived quality in play
-and Windows GPU runtime **not tested**. Evidence in MODLOG.
+Camera trails refine and blur harder only when their brightest or darkest point is unusual against a
+wide local log-average luminance. Frozen-input time against production uniform sampling: bright
+outdoor 1.04-1.07, flat and dark about 0.7, dense 0.68, dark bars on bright 1.08. Stronger blur
+covers 5.6-6.9% of the outdoor frame, down from 26-31%. A captured plaza turn shows the pole's trail
+changing strength at the skyline; perceived quality in play and Windows GPU runtime **not tested**.
 
 ## Ultra fence stripes fixed (2026-10-30)
 

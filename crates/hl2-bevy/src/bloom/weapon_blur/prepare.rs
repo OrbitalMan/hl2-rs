@@ -24,6 +24,9 @@ use bevy::{
 use std::collections::HashMap;
 // Reductions only consume XY; keep the same half-float precision without unused ZW.
 const MOTION_FORMAT: TextureFormat = TextureFormat::Rg16Float;
+pub(super) const ENVIRONMENT_FORMAT: TextureFormat = TextureFormat::R16Float;
+// A quarter of the frame width per texel at any resolution, as the contrast gate was tuned.
+const ENVIRONMENT_WIDTH: u32 = 4;
 
 type Stale = (
     Or<(With<Textures>, With<Prepared>, With<Key>)>,
@@ -108,6 +111,14 @@ pub(super) fn textures(
                     size.x.div_ceil(4),
                     size.y.div_ceil(4),
                     view.target_format,
+                    filtered,
+                )
+            }),
+            environment: blur.world.then(|| {
+                texture(
+                    ENVIRONMENT_WIDTH,
+                    (ENVIRONMENT_WIDTH * size.y).div_ceil(size.x.max(1)),
+                    ENVIRONMENT_FORMAT,
                     filtered,
                 )
             }),
@@ -295,6 +306,11 @@ fn composite_group(
     } else {
         frame
     };
+    // Only camera gathers read it; the other entry points need the slot filled.
+    let environment = textures
+        .environment
+        .as_ref()
+        .map_or(frame, |environment| &environment.default_view);
     device.create_bind_group(
         Some("motion_composite"),
         layout,
@@ -307,6 +323,7 @@ fn composite_group(
             depth,
             &textures.reduced[2].default_view,
             filtered,
+            environment,
         )),
     )
 }

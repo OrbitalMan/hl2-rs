@@ -149,6 +149,7 @@ fn init(
                     motion_binding(msaa, TextureSampleType::Depth),
                     texture_2d(float),
                     texture_2d(filtered),
+                    texture_2d(filtered),
                 ),
             ),
         )
@@ -189,7 +190,7 @@ fn pipeline(
 ) -> CachedRenderPipelineId {
     let msaa = usize::from(samples > 1);
     let layout = match entry {
-        "world_downsample" => &p.image_layout,
+        "world_downsample" | "world_environment" => &p.image_layout,
         "world_objects" => &p.composite_layouts[msaa],
         "reduce_raw" => &p.raw_layouts[msaa],
         "composite" => &p.composite_layouts[msaa],
@@ -203,7 +204,7 @@ fn pipeline(
             shader: p.shader.clone(),
             shader_defs: {
                 let mut defs = Vec::new();
-                if entry == "world_downsample" {
+                if matches!(entry, "world_downsample" | "world_environment") {
                     defs.push("WORLD_IMAGE".into());
                 } else if world {
                     defs.push("WORLD_RECONSTRUCTION".into());
@@ -248,6 +249,7 @@ struct Textures {
     reduced: [CachedTexture; 3],
     world: bool,
     output: Option<CachedTexture>,
+    environment: Option<CachedTexture>,
 }
 
 #[derive(Component)]
@@ -365,14 +367,7 @@ fn reconstruct(
     if let Some(world) = &frame.world
         && blur.camera_moving
     {
-        draw(
-            &mut ctx,
-            &cache,
-            world.pipelines[0],
-            &world.downsample,
-            &textures.background.default_view,
-            "world_blur_downsample",
-        );
+        world::prepare_images(&mut ctx, &cache, textures, world);
     }
     for i in 0..3 {
         let scissor = (i == 0 && !blur.world)
