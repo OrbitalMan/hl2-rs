@@ -1,4 +1,4 @@
-"""Opt-in owned GPU stress guard: native-resolution 4x MSAA, idle/turn/swing.
+"""Opt-in owned GPU stress guard: native-resolution 4x MSAA, idle/turn/swing/door.
 
 NO_BUILD=1 python3 scripts/checks/check_blur_performance.py
 Defaults reproduce the reported 3456x2168 regression. BLUR_WIDTH/BLUR_HEIGHT,
@@ -18,6 +18,16 @@ from blur_environment_report import write as write_resource_report
 
 
 def fixture(scene):
+    if scene == "door":
+        # Standing at the station entrance while its doors swing fills the view with object motion.
+        frames = [{"tick": 1, "fly": True, "eye": [-3225, -2048, 128], "yaw": 0, "actions": [
+            {"action": "send", "target": "station_entrance", "input": "Unlock"},
+            {"action": "send", "target": "station_entrance", "input": "Close"}]}]
+        frames += [{"tick": tick, "actions": [{"action": "send", "target": "station_entrance",
+                                               "input": "Open" if i % 2 == 0 else "Close"}]}
+                   for i, tick in enumerate(range(100, 1100, 110))]
+        frames.append({"tick": 1200, "label": "performance"})
+        return frames
     frames = [{"tick": 1, "fly": True, "eye": [-3104, -2018, 128], "yaw": 12,
                "actions": [{"action": "loadout"}, {"action": "slot", "slot": 0}]},
               {"tick": 2, "actions": [{"action": "confirm"}]}]
@@ -87,8 +97,8 @@ def measure(scene, advanced, repeat):
 
 def requested_scenes(value):
     scenes = tuple(value.split())
-    if not scenes or len(set(scenes)) != len(scenes) or any(s not in ("still", "turn", "swing") for s in scenes):
-        raise ValueError("BLUR_SCENES must select unique still/turn/swing scenes")
+    if not scenes or len(set(scenes)) != len(scenes) or any(s not in ("still", "turn", "swing", "door") for s in scenes):
+        raise ValueError("BLUR_SCENES must select unique still/turn/swing/door scenes")
     return scenes
 
 

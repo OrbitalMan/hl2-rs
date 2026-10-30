@@ -1,5 +1,11 @@
 # STATUS
 
+## Ultra weapon blur and door spikes fixed (2026-10-30)
+
+Ultra's weapon blur now matches Advanced; only the world is softened. Standing at the station doors
+while they swing at 3456x2168 with 4x AA, the worst frame falls from 196 to 33.5 ms (p95 29 ms). Ordinary
+play and Windows GPU runtime **not tested**. Evidence in MODLOG.
+
 ## Retail blur frame copy removal rejected (2026-10-30)
 
 Swapping main textures instead of copying the frame saved 29.97 MB but lost the retail blur, and no

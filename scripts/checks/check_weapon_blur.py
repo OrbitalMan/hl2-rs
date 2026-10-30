@@ -6,7 +6,11 @@ viewmodel fixture as replays.py. Generated variations/captures stay under artifa
 """
 import json
 import replays as replay
-from images import png_rgb
+from images import pixel_changes, png_rgb
+
+
+# The softened weapon blur differed by far more; animation timing moves a few hundred pixels.
+MAX_ULTRA_WEAPON_DIFFERENCE = 600
 
 
 def artifact_count(path):
@@ -78,6 +82,22 @@ def check(case, aa):
     replay.expect("covered pixels losing all gathered coverage", max(y for _, y, _ in counts), 0)
 
 
+def check_ultra_matches_advanced():
+    """Ultra softens the world's camera blur only; a still view swings the same weapon blur."""
+    captures = {}
+    for world in (False, True):
+        replay.settings(video={"hdr": "none", "hdr_migrated": True, "advanced": {
+            "motion_blur": True, "motion_blur_viewmodel": True, "motion_blur_world": world,
+            "antialiasing": "x4", "vsync": False}})
+        name = "weapon_swing_" + ("ultra" if world else "advanced")
+        run = replay.game(name, "--map", "d1_trainstation_02", "--width", "1024", "--height", "768",
+                          "--movement-script", str(replay.REPO / "test-inputs/bevy-viewmodel-motion-blur.json"))
+        replay.holds("no render errors", "Caught rendering error" not in run.log)
+        captures[world] = run.capture
+    changes = pixel_changes(captures[False], captures[True], threshold=16, region=(180, 430, 1000, 768))
+    replay.holds("Ultra keeps Advanced's weapon blur", changes["changed"] <= MAX_ULTRA_WEAPON_DIFFERENCE, changes)
+
+
 def main():
     replay.OUT.mkdir(parents=True, exist_ok=True)
     replay.build()
@@ -93,6 +113,9 @@ def main():
                 check(case, aa)
     finally:
         shader.write_text(original, encoding="utf-8")
+    if replay.CONFIG.exists():
+        replay.CONFIG.unlink()
+    check_ultra_matches_advanced()
     print("weapon surface-motion checks passed")
 
 

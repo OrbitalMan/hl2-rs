@@ -263,6 +263,27 @@ fn surface(uv: vec2<f32>) -> vec4<f32> {
     return raw_surface(uv);
 #endif
 }
+// Trail taps read one sample: they land inside a blur, and reading all of them on every tap
+// multiplied a door filling the screen into frames of about 200 ms.
+fn tap_depth(uv: vec2<f32>) -> f32 {
+    let p = clamp(vec2<i32>(uv*data.params.zw),vec2(0),vec2<i32>(data.params.zw)-1);
+    return textureLoad(depth,p,0);
+}
+fn surface_tap(uv: vec2<f32>) -> vec4<f32> {
+#ifdef WORLD_OBJECTS
+    let p = clamp(vec2<i32>(uv*data.params.zw),vec2(0),vec2<i32>(data.params.zw)-1);
+    let object = textureLoad(motion,p,0).xy;
+    let pixels = length(object*data.params.zw);
+    var z = 0.0;
+    if pixels >= 1.0 {
+        z = tap_depth(uv);
+        if z == 0.0 { return vec4(0.0); }
+    }
+    return vec4(object,z,pixels);
+#else
+    return raw_surface(uv);
+#endif
+}
 fn dominant_motion(uv: vec2<f32>) -> vec2<f32> {
     let size = vec2<i32>(textureDimensions(tiles));
     let tile = clamp(vec2<i32>(uv*vec2<f32>(size)),vec2(0),size-1);
@@ -300,8 +321,8 @@ fn limited(v: vec2<f32>) -> vec2<f32> {
     return exposed * min(1.0,data.params.x/max(length(exposed),1e-8));
 }
 fn taps(vector: vec2<f32>) -> i32 {
-    // Subpixel spacing for thin bright lights; odd counts retain the exact center.
-    return i32(clamp(ceil(length(vector*data.params.zw)*1.5),2.0,256.0)) | 1;
+    // Subpixel spacing while it is affordable; long trails share a fixed budget.
+    return i32(clamp(ceil(length(vector*data.params.zw)*1.5),2.0,25.0)) | 1;
 }
 // How unusual a trail is against its surroundings, brighter or darker: a bright scene is
 // not a highlight by itself. Ratios below 6:1 occur all over ordinary outdoor frames.
@@ -384,19 +405,21 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let pixels = length(vector*data.params.zw);
     if pixels < 1.0 { return base; }
     let count = taps(vector);
+    // Per-pixel phase turns widely spaced taps into fine noise instead of bands.
+    let jitter = fract(52.9829189*fract(dot(in.position.xy,vec2(0.06711056,0.00583715))));
     var foreground = vec3(0.0);
     var coverage = 0.0;
     var behind = vec3(0.0);
     var background_weight = 0.0;
     for (var i = 0; i < count; i++) {
-        let offset = vector * (f32(i)/f32(count-1)-0.5);
+        let offset = vector * ((f32(i)+jitter)/f32(count)-0.5);
         let uv = in.uv+offset;
         if any(uv < vec2(0.0)) || any(uv > vec2(1.0)) { continue; }
-        let sample = surface(uv);
+        let sample = surface_tap(uv);
         if sample.w < 1.0 {
             if !moving { continue; }
             var z = sample.z;
-            if z == 0.0 { z = background_depth(uv); }
+            if z == 0.0 { z = tap_depth(uv); }
             if z <= own.z*1.01 {
                 behind += textureSampleLevel(frame,linear_sampler,uv,0.0).rgb;
                 background_weight += 1.0;

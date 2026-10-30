@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-30 Ultra weapon blur and door frame spikes
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** Owner reports: Ultra's weapon blur looked absent while Advanced's looked very good,
+and interacting with the station doors dropped to about 5 FPS. Ultra's softening also applied to the
+viewmodel camera, halving its reach, exposure and blend together; the weapon now keeps full strength
+and only the world is softened. Each tap of the object gather read all MSAA samples of motion and
+depth, up to 257 taps per pixel over a door filling the view. Trail taps now read one sample, share a
+budget of 25, and use a per-pixel phase so wide spacing becomes fine noise rather than bands.
+
+**Tested how / Result:** Doors swinging at 3456x2168 with 4x AA, standing at the entrance: Ultra maximum
+frame 196 to 33.5 ms, p95 99 to 29 ms, mean 27.3 to 17.4 ms; from further back 70 to 25.7 ms. Enabled
+there is 18.7 ms at most, Ultra with still doors 16.2 ms. Skipping the gather gave 17 ms p95, so it
+costs about 12 ms at p95. A lower tier for still pixels made no measurable difference and was dropped.
+Weapon pixels changed over 16/255 by reconstruction, same swing: Ultra 1465 to 5073, Advanced 5073.
+`check_weapon_blur.py` now compares the two modes: 0 changed pixels, 2285 on the previous build; no
+earlier check set the world option. `check_blur_performance.py` gained a `door` scene. Mid-swing
+captures show no banding at half resolution. World, cutout and weapon GPU checks, motion blur replays,
+validation and strict Windows checks pass.
+
+**Still broken or not tested:** A close door still costs about 13 ms over still doors at p95. Other
+large moving objects use the same path and are not measured. Native-resolution trail noise and the
+result in ordinary play not tested by the agent. Windows GPU runtime not tested.
+
+**Next:** Owner review, then a retail blur presence check and motion and depth probe inputs.
+
 ## 2026-10-30 Judge Ultra highlights against their surroundings
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
