@@ -32,6 +32,7 @@ use bevy::{
 };
 
 pub(super) mod depth;
+pub(super) mod memory;
 mod prepare;
 mod region;
 mod strength;

@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from bench_process_macos import ProcessUsage, swap_usage
 
 
 def command(*args):
@@ -85,6 +86,7 @@ class Probe:
         self.lib.host_statistics.argtypes = [ctypes.c_uint, ctypes.c_int,
             ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
         self.host = self.lib.mach_host_self()
+        self.usage = ProcessUsage()
         self.cpu = None
         self.process = None
         self.previous_time = None
@@ -127,6 +129,9 @@ class Probe:
         pressure = command("sysctl", "-n", "kern.memorystatus_vm_pressure_level")
         if pressure and pressure.strip().isdigit():
             result["memory_pressure_level"] = int(pressure)
+        swap = command("sysctl", "-n", "vm.swapusage")
+        if swap:
+            result.update(swap_usage(swap))
         processes = command('ps', '-A', '-o', 'pid=,time=,rss=,comm=')
         if processes:
             result.update(self.processes(processes.decode(), now))
@@ -145,6 +150,7 @@ class Probe:
                 result["competing_build_processes"] += 1
             if path == self.executable:
                 result["game_rss_bytes"] = int(rss)*1024
+                result.update(self.usage.sample(int(pid)))
                 total = cpu_seconds(cpu)
                 if self.process and self.process[0] == pid and self.previous_time is not None:
                     result["game_cpu_percent_one_core"] = 100*(total-self.process[1])/max(now-self.previous_time, 1e-9)

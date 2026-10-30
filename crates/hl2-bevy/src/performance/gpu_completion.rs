@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 #[derive(Default, serde::Serialize)]
 pub(super) struct Stats {
+    pub(super) blur_memory: Option<crate::bloom::BlurMemory>,
     limit: usize,
     pub(super) camera_indirect_drawing_disabled: bool,
     submitted_frames: u64,
@@ -68,6 +69,7 @@ pub(super) fn prepare(app: &mut App) -> Performance {
     if !app.is_plugin_added::<bevy::winit::WinitPlugin>()
         && let Some(render) = app.get_sub_app_mut(RenderApp)
     {
+        crate::bloom::install_memory_probe(render);
         *performance.1.lock().expect("GPU profiling state") = Some(Stats {
             limit: 2,
             ..Default::default()

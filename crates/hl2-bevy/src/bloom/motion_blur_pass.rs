@@ -154,7 +154,7 @@ type Stale = (
 
 /// The frame copy the blur reads (it cannot read the texture it resolves into).
 #[derive(bevy::ecs::component::Component)]
-struct Scratch(CachedTexture);
+pub(super) struct Scratch(pub(super) CachedTexture);
 
 fn prepare_scratch(
     mut commands: Commands,

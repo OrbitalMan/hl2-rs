@@ -1,5 +1,30 @@
 # Design
 
+## Frozen-input blur comparisons (2026-10-30)
+
+Standalone opt-in fragment probe uses the production gather functions on identical
+linear RGBA inputs, without simulation or installed assets. Warm every pipeline, retain
+priming, alternate variant order for twelve batches and wait for GPU completion. Encode
+before timing; report encoder timestamp spans when supported, and distinguish them from
+submission/completion wall time. Compare readback against a dense 513-tap reference on
+flat, dark, sparse bright, dense bright and owned-scene inputs, with direction/phase sweeps.
+Compare adaptive sampling to uniform sampling with the same brightness-aware blend, not
+only to the visually different softer blend. Retain quality errors, timings and failed
+controls. Only promote after packaged world/projectile/weapon/lifecycle verification.
+Revisit archived texture/sample-sharing ideas with the same isolation before rejecting
+or promoting them; external renderer FPS reports are leads, not HL2-RS performance evidence.
+
+## Attribute blur memory by controlled mode changes (2026-10-30)
+
+Measure Disabled/Enabled/Advanced/Ultra in identical isolated muted packages, native
+resolution and 4x MSAA, with reversed-order repeated launches and declared priming.
+Add macOS process physical footprint and current swap occupancy to the existing host
+telemetry: RSS alone omits compressed/swapped memory; cumulative swap traffic is not
+occupied disk space. Keep unavailable counters absent. Compare aligned steady windows,
+paired deltas, workload completion and resource flags. If cross-process variation masks
+the effect, use same-process mode transitions or direct GPU allocation inventory before
+claiming a total. Retain trials and separate measured footprint from nominal texture payload.
+
 ## Softer Ultra and compact motion reductions (2026-10-30)
 
 Follow-up hypothesis: prioritize bright, contrasting trails during rapid camera rotation.

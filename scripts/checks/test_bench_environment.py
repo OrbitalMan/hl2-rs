@@ -168,6 +168,7 @@ class EnvironmentTests(unittest.TestCase):
     def test_process_cpu_uses_elapsed_time_and_no_process_names_are_retained(self):
         self.assertAlmostEqual(cpu_seconds('1-02:03:04.5'), 93784.5)
         probe = object.__new__(Probe)
+        probe.usage = SimpleNamespace(sample=lambda pid: {})
         probe.executable = str(Path('owned-game/hl2-bevy').resolve())
         probe.process, probe.previous_time = ('12', 10.), 1.
         result = probe.processes(f'12 0:11.50 1024 {probe.executable}\n13 0:00.0 42 /tools/rustc\n14 0:00.0 42 /another/hl2-bevy', 2.)

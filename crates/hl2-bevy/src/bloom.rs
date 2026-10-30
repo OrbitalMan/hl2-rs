@@ -29,6 +29,7 @@ mod motion_blur_pass;
 mod viewmodel_blur;
 mod weapon_blur;
 mod world_blur;
+pub(crate) use weapon_blur::memory::{Report as BlurMemory, install as install_memory_probe};
 
 /// Bloom amount on the last 3D camera of the main view, and the image that receives the
 /// pre-bloom frame for auto exposure.

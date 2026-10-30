@@ -46,6 +46,12 @@ impl Drop for Scope<'_> {
     }
 }
 impl Performance {
+    pub(crate) fn record_blur_memory(&self, report: crate::bloom::BlurMemory) {
+        if let Some(stats) = self.1.lock().expect("GPU profiling state").as_mut() {
+            stats.blur_memory = Some(report);
+        }
+    }
+
     pub(crate) fn record_reduction(&self, world: bool, processed: u64, full: u64) {
         if let Some(stats) = self.1.lock().expect("GPU profiling state").as_mut() {
             stats.reduction(world, processed, full);
