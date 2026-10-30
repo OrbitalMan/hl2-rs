@@ -1,5 +1,30 @@
 # MODLOG
 
+## 2026-10-30 Brightness-adaptive Ultra camera sampling
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** Ultra's camera gather starts with half the samples and refines only footprints
+with a bright, contrasting peak, recorded in the downsample's alpha. Those trails blend at full
+strength; ordinary surfaces stay at Ultra's half strength. No new image or pass.
+
+**Tested how / Result:** Frozen inputs in one process, variants alternated, GPU completion waited,
+864x542, compared with a 513-tap reference; pressure level 1, no known interference. Time relative
+to uniform sampling with the same blend: flat/dark 0.6, sparse lines 0.45-0.92, lamp and fence
+captures 0.60-0.66, mixed 1.10-1.24, dense bright checkerboard 2.2 (0.38 to 0.84 ms). Composited
+error is at or below uniform's in all 13 scenes, at most 2/255 from the reference; a 1% longer
+vector moves no pixel by more than 16/255. Raising the refinement gate to 0.25 did not help dense
+scenes and was rejected. Raw maximum error (127) was alpha without visible effect, so composited
+output is the metric. Packaged lamp captures show a connected vertical trail. World, weapon and
+cutout GPU checks, motion blur replays and validation pass.
+
+**Still broken or not tested:** Lamp and fence inputs are dark 8-bit captures converted to linear,
+so they mainly show the saving on ordinary frames; bright-trail quality rests on the synthetic
+scenes and packaged captures. Timings include submission overhead. Dense bright scenes cost more.
+Perceived quality in play and Windows GPU runtime not tested.
+
+**Next:** Re-test archived blur experiments with frozen inputs.
+
 ## 2026-10-30 Match motion prepass culling to the colour pass
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.

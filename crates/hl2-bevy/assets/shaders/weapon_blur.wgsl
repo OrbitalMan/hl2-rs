@@ -10,10 +10,13 @@
 fn world_downsample(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let texel = 1.0/vec2<f32>(textureDimensions(full_frame));
     var sum = vec4(0.0);
+    var peak = 0.0;
     for (var y = -1; y <= 1; y += 2) { for (var x = -1; x <= 1; x += 2) {
-        sum += textureSampleLevel(full_frame,image_sampler,in.uv+vec2<f32>(f32(x),f32(y))*texel,0.0);
+        let color = textureSampleLevel(full_frame,image_sampler,in.uv+vec2<f32>(f32(x),f32(y))*texel,0.0);
+        sum += color;
+        peak = max(peak,dot(color.rgb,vec3(0.2126,0.7152,0.0722)));
     }}
-    return sum*0.25;
+    return vec4(sum.rgb*0.25,peak);
 }
 
 #else
@@ -284,14 +287,36 @@ fn taps(vector: vec2<f32>) -> i32 {
     // Subpixel spacing for thin bright lights; odd counts retain the exact center.
     return i32(clamp(ceil(length(vector*data.params.zw)*1.5),2.0,256.0)) | 1;
 }
-fn camera_gather(uv: vec2<f32>, vector: vec2<f32>) -> vec3<f32> {
-    let count = i32(clamp(ceil(length(vector*vec2<f32>(textureDimensions(background)))*1.5),16.0,96.0)) | 1;
+// Refine bright, contrasting footprints using nested midpoint samples. Smooth areas
+// keep the coarse integral; refinement reuses every coarse sample and adds no images.
+fn highlight(peak: f32, average: vec3<f32>) -> f32 {
+    let mean = dot(average,vec3(0.2126,0.7152,0.0722));
+    return smoothstep(0.25,0.75,peak)*smoothstep(1.5,3.0,peak/max(mean,0.001));
+}
+fn camera_gather(uv: vec2<f32>, vector: vec2<f32>) -> vec4<f32> {
+    let count = i32(clamp(ceil(length(vector*vec2<f32>(textureDimensions(background)))*0.75),4.0,64.0)) | 1;
     var sum = vec3(0.0);
+    var peak = 0.0;
     for (var i = 0; i < count; i++) {
-        let offset = vector * (f32(i)/f32(count-1)-0.5);
-        sum += textureSampleLevel(background,linear_sampler,clamp(uv+offset,vec2(0.0),vec2(1.0)),0.0).rgb;
+        let offset = vector * ((f32(i)+0.5)/f32(count)-0.5);
+        let sample = textureSampleLevel(background,linear_sampler,clamp(uv+offset,vec2(0.0),vec2(1.0)),0.0);
+        sum += sample.rgb;
+        peak = max(peak,sample.a);
     }
-    return sum/f32(count);
+    var total = f32(count);
+    if highlight(peak,sum/total) > 0.0 {
+        for (var i = 0; i < count; i++) {
+            for (var side = -1; side <= 1; side += 2) {
+                let offset = vector * ((f32(i)+0.5+f32(side)/3.0)/f32(count)-0.5);
+                let sample = textureSampleLevel(background,linear_sampler,clamp(uv+offset,vec2(0.0),vec2(1.0)),0.0);
+                sum += sample.rgb;
+                peak = max(peak,sample.a);
+            }
+        }
+        total *= 3.0;
+    }
+    let average = sum/total;
+    return vec4(average,mix(data.flags.y,1.0,highlight(peak,average)));
 }
 @fragment
 fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
@@ -328,8 +353,9 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     if true {
 #endif
         if camera_pixels < 1.0 { return vec4(0.0); }
-        let strength = smoothstep(1.0,3.0,camera_pixels)*data.flags.y;
-        return vec4(camera_gather(in.uv,camera_vector)*strength,strength);
+        let gathered = camera_gather(in.uv,camera_vector);
+        let strength = smoothstep(1.0,3.0,camera_pixels)*gathered.a;
+        return vec4(gathered.rgb*strength,strength);
     }
     let moving = own.w >= 1.0;
     let vector = limited(select(camera+dominant,own.xy,moving));

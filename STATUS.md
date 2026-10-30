@@ -1,5 +1,12 @@
 # STATUS
 
+## Ultra brightness-adaptive sampling integrated (2026-10-30)
+
+Frozen-input time relative to same-blend uniform sampling: 0.45-0.92 on flat, dark, sparse and
+captured scenes, 1.10-1.24 mixed, 2.2 on a dense bright checkerboard (+0.47 ms at quarter
+resolution). Composited error is at or below uniform's in all 13 scenes. Perceived quality in play
+and Windows GPU runtime **not tested**. Evidence in MODLOG.
+
 ## Ultra fence stripes fixed (2026-10-30)
 
 Ultra's motion prepass wrote back-face depth the colour pass never drew, exposing the sky through
