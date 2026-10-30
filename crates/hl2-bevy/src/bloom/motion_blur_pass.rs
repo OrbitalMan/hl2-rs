@@ -22,9 +22,10 @@ use bevy::{
         render_resource::{
             BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
             CachedRenderPipelineId, ColorTargetState, ColorWrites, FilterMode, FragmentState,
-            MultisampleState, PipelineCache, RenderPassDescriptor, RenderPipelineDescriptor,
-            Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType,
-            TextureFormat, TextureSampleType, TextureView, TextureViewId, UniformBuffer,
+            LoadOp, MultisampleState, Operations, PipelineCache, RenderPassColorAttachment,
+            RenderPassDescriptor, RenderPipelineDescriptor, Sampler, SamplerBindingType,
+            SamplerDescriptor, ShaderStages, ShaderType, StoreOp, TextureFormat, TextureSampleType,
+            TextureView, TextureViewId, UniformBuffer,
             binding_types::{sampler, texture_2d, uniform_buffer},
         },
         renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
@@ -243,10 +244,24 @@ fn source_motion_blur(
     };
     // The frame stays readable in the texture it was resolved to; the attachment now resolves
     // into the other one, so no copy of the frame is needed.
-    target.post_process_write();
+    let destination = target.post_process_write().destination;
+    // The triangle overwrites every sample, so loading the old image would only cost bandwidth.
+    // The multisampled image must be stored: the viewmodel camera continues from it.
+    let (view, resolve_target) = match target.sampled_main_texture_view() {
+        Some(sampled) => (sampled, Some(destination)),
+        None => (destination, None),
+    };
     let mut pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
         label: Some("source_motion_blur"),
-        color_attachments: &[Some(target.get_color_attachment())],
+        color_attachments: &[Some(RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target: resolve_target.map(|view| &**view),
+            ops: Operations {
+                load: LoadOp::Clear(Default::default()),
+                store: StoreOp::Store,
+            },
+        })],
         depth_stencil_attachment: None,
         timestamp_writes: None,
         occlusion_query_set: None,

@@ -1,5 +1,14 @@
 # Local validation — 2026-10-05
 
+## Blur presence and door stress (2026-10-30)
+
+`python3 scripts/checks/check_retail_blur.py` captures at a frame count while the camera sweeps around one
+heading, because a finished script's capture lands after the camera stops, when retail blur is zero by design.
+It expects blurred Enabled and Advanced at no AA and 4x, and a plain-read control that must not count as blurred.
+`check_cutout_alpha.py` compares a still fence with Ultra off and on, and `check_weapon_blur.py` compares Ultra's
+weapon blur with Advanced's. `BLUR_SCENES=door python3 scripts/checks/check_blur_performance.py` keeps the station
+doors swinging in view. Windows GPU runtime **not tested**.
+
 ## Parallel loading, late audio and reuse (2026-10-30)
 
 Routine validation: 1,268 Rust tests passed, 106 ignored; 28 Python tests. Strict

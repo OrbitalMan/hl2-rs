@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-30 Retail blur no longer loads the image it overwrites
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** The retail blur took the view's attachment after the main pass, so with 4x AA it loaded the
+119.88 MB multisampled image before a fullscreen triangle overwrote every sample. It now clears and stores.
+Also documents this session's blur checks and designs.
+
+**Tested how / Result:** Four alternating native sweeps in Enabled at 3456x2168 with 4x AA: median 12.57 to
+12.56 ms, no measurable change; identical binaries vary by about 0.05 ms. `check_retail_blur.py` and its control
+pass with no AA and 4x, with GPU checks, motion blur replays, validation and strict Windows checks.
+
+**Still broken or not tested:** The bandwidth saving is inferred from the attachment, not measured. The report
+holds CPU spans only for blur passes, so `world_blur_environment`'s own GPU time is not measured; it draws 12
+pixels at 3456x2168 with 64 taps each. Windows GPU runtime not tested.
+
 ## 2026-10-30 Cheaper Ultra motion reduction; archived blur experiments concluded
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
@@ -21,7 +37,7 @@ motion caches add a full-resolution image: not pursued. cooperative-reduce needs
 longer exists; its aim is met by the one-sample read. motion-occupancy adds an image; tile-skip's long rays
 are now bounded by the tap budget. quarter-gather **not tested**: it remains the candidate for the door cost.
 
-**Metal attachments:** Our passes clear rather than load. Bevy fixes Store on main and prepass attachments, and
+**Metal attachments:** Corrected by the entry above: the retail blur pass did load. Bevy fixes Store on main and prepass attachments, and
 those stay unpatched. Depth is shared per target and MSAA, so sampling adds no second depth image. The weapon
 snapshot cannot use the main-texture swap: reconstruction would write the texture it reads.
 
