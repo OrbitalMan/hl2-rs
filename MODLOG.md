@@ -1,5 +1,33 @@
 # MODLOG
 
+## 2026-10-30 Cheaper Ultra motion reduction; archived blur experiments concluded
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** The world motion reduction read all four MSAA samples of 16 pixels per output texel on
+every Ultra frame. A maximum over that many pixels needs no per-sample precision, so it now reads one.
+The weapon's reduction is unchanged.
+
+**Tested how / Result:** Paired packaged runs, shader variants only, 3456x2168 with 4x AA, doors still:
+Ultra mean 14.30 to 12.65 ms, repeated; removing the reduction altogether gives 12.0 ms, Enabled 11.45 ms.
+Swinging doors 18.1 to 16.3 ms. World, weapon, cutout and retail blur GPU checks, motion blur and flashlight
+replays, validation and strict Windows checks pass.
+
+**Archived experiments:** Reading every second pixel saves 0.45 ms more but can miss thin fast objects:
+rejected. single-sample-camera: no measurable change in a camera sweep (14.2 ms either way): rejected.
+main-depth, quarter camera filter, direct colour sources and bounded weapon reductions are already in
+production; encoder-timing is instrumentation; direct drawing is an existing runtime policy; both resolved
+motion caches add a full-resolution image: not pursued. cooperative-reduce needs a compute reduction that no
+longer exists; its aim is met by the one-sample read. motion-occupancy adds an image; tile-skip's long rays
+are now bounded by the tap budget. quarter-gather **not tested**: it remains the candidate for the door cost.
+
+**Metal attachments:** Our passes clear rather than load. Bevy fixes Store on main and prepass attachments, and
+those stay unpatched. Depth is shared per target and MSAA, so sampling adds no second depth image. The weapon
+snapshot cannot use the main-texture swap: reconstruction would write the texture it reads.
+
+**Still broken or not tested:** Windows GPU runtime and ordinary play not tested. Frozen-probe motion and depth
+inputs were not built: paired packaged shader variants gave repeatable answers without them.
+
 ## 2026-10-30 Retail camera blur without a frame copy, reinstated
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.

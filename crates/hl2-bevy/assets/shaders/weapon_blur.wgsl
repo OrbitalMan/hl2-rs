@@ -60,16 +60,17 @@ fn object_motion(v: vec2<f32>, p: vec2<i32>, sample: i32) -> vec2<f32> {
 }
 fn raw_motion(p: vec2<i32>) -> vec2<f32> {
 #ifdef MULTISAMPLED
+#ifdef WORLD_RECONSTRUCTION
+    // A maximum over many pixels needs no per-sample precision; this pass runs every frame.
+    return object_motion(textureLoad(raw,p,0).xy,p,0);
+#else
     var best = vec2(0.0);
     for (var i = 0u; i < textureNumSamples(raw); i++) {
-#ifdef WORLD_RECONSTRUCTION
-        let v = object_motion(textureLoad(raw,p,i32(i)).xy,p,i32(i));
-#else
         let v = textureLoad(raw,p,i32(i)).xy;
-#endif
         if dot(v,v) > dot(best,best) { best = v; }
     }
     return best;
+#endif
 #else
 #ifdef WORLD_RECONSTRUCTION
     return object_motion(textureLoad(raw,p,0).xy,p,0);
