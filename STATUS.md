@@ -1,10 +1,18 @@
 # STATUS
 
+## Retail blur frame copy removal rejected (2026-10-30)
+
+Swapping main textures instead of copying the frame saved 29.97 MB but lost the retail blur, and no
+existing check noticed. Reverted; no check yet asserts retail blur is present during a turn. On
+the previous build a captured Advanced turn matched blur off exactly; not explained. Eight archived
+blur experiments are **not re-tested**: the frozen probe needs motion and depth inputs. See MODLOG.
+
 ## Ultra brightness-adaptive sampling integrated (2026-10-30)
 
 Frozen-input time relative to same-blend uniform sampling: 0.45-0.92 on flat, dark, sparse and
-captured scenes, 1.10-1.24 mixed, 2.2 on a dense bright checkerboard (+0.47 ms at quarter
-resolution). Composited error is at or below uniform's in all 13 scenes. Perceived quality in play
+dark captured scenes, 1.10-1.24 mixed, 1.32-1.40 on a bright outdoor capture at long vectors
+(about +0.2 ms at quarter resolution), 2.2 on a dense bright checkerboard (+0.47 ms). Composited
+error is at or below uniform's in all 17 scenes. Perceived quality in play
 and Windows GPU runtime **not tested**. Evidence in MODLOG.
 
 ## Ultra fence stripes fixed (2026-10-30)

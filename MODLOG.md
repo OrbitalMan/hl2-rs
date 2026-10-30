@@ -1,5 +1,23 @@
 # MODLOG
 
+## 2026-10-30 Adaptive Ultra sampling measured on a bright outdoor scene
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** No code. The earlier matrix's captured scenes were dark, so they mainly showed
+the cheap path. Added a daylight d1_trainstation_02 capture to correct that picture.
+
+**Tested how / Result:** Same frozen-input method. Time relative to uniform sampling with the same
+blend: long vertical 1.40 (0.39 to 0.55 ms), long horizontal 1.39, long diagonal 1.32, short 0.87.
+Composited error against the 513-tap reference is lower: mean 0.04-0.07 against 0.10-0.16, and at
+most 58 pixels off by more than 4/255 against up to 693. None exceeds 16/255.
+
+**Still broken or not tested:** Adaptive sampling saves time on dark interiors and costs about
+0.2 ms at quarter resolution on bright outdoor frames at long vectors. Whether its better trails
+justify that in play is not tested. The probe's baseline now comes from the pre-integration shader.
+
+**Next:** Owner decision on keeping adaptive sampling outdoors.
+
 ## 2026-10-30 Rejected: retail camera blur without a frame copy
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
