@@ -1,5 +1,23 @@
 # MODLOG
 
+## 2026-10-30 Correct the retail blur findings
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** Documentation only. Captures are requested when a script finishes, as the camera stops,
+so most land on a frame with no retail blur, on any build. A paint test shows retail blur running in
+Advanced with the weapon out, at no AA and 4x; the note that Advanced matched blur off was this
+timing effect. The same effect undermines the evidence for rejecting the frame-copy removal.
+
+**Tested how / Result:** Repeated turns: the copying build showed blur in 0/6 Enabled captures at no AA, and
+the swap build in 2/6 Enabled at 4x. A falling fixture meant to capture in motion was invalid: its
+frames held almost no detail, with and without blur.
+
+**Still broken or not tested:** Whether the frame-copy removal loses blur is **not established**, and it
+stays reverted. No check asserts retail blur is present during motion.
+
+**Next:** None planned; the owner reports the current blur options run well enough.
+
 ## 2026-10-30 Ultra weapon blur and door frame spikes
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
