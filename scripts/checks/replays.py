@@ -864,7 +864,7 @@ def check_viewmodel_motion_blur():
     script = json.loads((REPO / "test-inputs/bevy-viewmodel-motion-blur.json").read_text())
     shader = GAME / "bevy-assets/shaders/weapon_blur.wgsl"
     original = shader.read_text(encoding="utf-8")
-    hook = "if alpha == 0.0 { return select(world,base,own.z < 0.5); }"
+    hook = "if alpha == 0.0 { return mix(base,select(world,base,own.z < 0.5),data.flags.y); }"
     holds("animation reconstruction hook", hook in original)
 
     def run(name, aa="none", enabled=True, state="swing", advanced=True):

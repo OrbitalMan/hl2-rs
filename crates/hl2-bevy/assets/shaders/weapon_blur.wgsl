@@ -188,9 +188,9 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     // and coverage by available samples so clipped guns do not fade at screen edges.
     let normalization = max(valid_taps,1.0);
     let alpha = min(coverage/normalization,1.0);
-    if alpha == 0.0 { return select(world,base,own.z < 0.5); }
+    if alpha == 0.0 { return mix(base,select(world,base,own.z < 0.5),data.flags.y); }
     let reconstructed = vec4(sum/normalization + world.rgb * (1.0-alpha),base.a);
-    return mix(base, reconstructed, smoothstep(1.0,3.0,pixel_motion));
+    return mix(base, reconstructed, smoothstep(1.0,3.0,pixel_motion)*data.flags.y);
 }
 #else
 @group(0) @binding(7) var camera_filtered: texture_2d<f32>;
@@ -328,7 +328,7 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     if true {
 #endif
         if camera_pixels < 1.0 { return vec4(0.0); }
-        let strength = smoothstep(1.0,3.0,camera_pixels);
+        let strength = smoothstep(1.0,3.0,camera_pixels)*data.flags.y;
         return vec4(camera_gather(in.uv,camera_vector)*strength,strength);
     }
     let moving = own.w >= 1.0;
@@ -376,7 +376,7 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let reconstructed = foreground/f32(count)+backdrop*(1.0-alpha);
     let strength = smoothstep(1.0,3.0,pixels)*select(0.0,1.0,moving || alpha > 0.0 || camera_pixels >= 1.0);
 #ifdef WORLD_OBJECTS
-    return vec4(mix(base.rgb,reconstructed,strength),base.a);
+    return vec4(mix(base.rgb,reconstructed,strength*data.flags.y),base.a);
 #else
     return vec4(reconstructed*strength,strength);
 #endif

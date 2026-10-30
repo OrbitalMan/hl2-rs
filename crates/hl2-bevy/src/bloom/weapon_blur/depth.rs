@@ -65,6 +65,7 @@ mod tests {
                     camera,
                     WeaponBlur {
                         max: 0.12,
+                        scale: 1.,
                         world: true,
                         camera_moving: false,
                     },

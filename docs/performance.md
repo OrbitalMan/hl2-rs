@@ -1,5 +1,36 @@
 # Performance measurements - 2026-10-05
 
+## Ultra softening and brightness experiment (2026-10-30)
+
+Apple M1 Pro/Metal, 3456x2168, 4x MSAA, HDR None. Three alternating triples,
+reversed middle order; three priming runs retained separately. Original Ultra,
+half-strength RG16F candidate and brightness-adaptive prototype respectively:
+
+| Variant | Raw mean frame times (ms) | Median (ms) |
+| --- | --- | --- |
+| baseline | 16.808, 17.183, 16.529 | 16.808 |
+| candidate | 16.665, 16.568, 16.661 | 16.661 |
+| adaptive | 16.592, 16.636, 16.666 | 16.636 |
+
+All pairs fail environment qualification due to memory pressure; one original/adaptive
+pair also has baseline CPU/GPU drift. No speedup or energy saving is established.
+GPU occupancy is 98.25-98.94%, host CPU busy 27.87-37.33%, and available-memory
+estimates 3.14-3.43 GiB. Game CPU use is about 193-199% of one core. These are
+system-wide occupancy proxies and observational associations, not isolated pass timers.
+Dedicated VRAM and watts remain unavailable on unified memory. Full raw telemetry,
+CPU/GPU work per frame, timestamp-aligned within-run Pearson correlations, priming,
+paired ratios and rejected flags: artifacts/ultra-soft-efficient/timing.
+
+RG16F retains XY half-float precision and reduces the two cameras' reduction payload
+by 3,863,808 bytes at this resolution. It does not halve total GPU memory. Among 50
+reference/candidate captures, 19 PNGs are byte-identical; projectile frames diverge
+substantially, so these uncontrolled scene differences do not establish pixel equivalence.
+Camera/lamp/projectile captures render without errors and preserve reported poses.
+The brightness prototype gives vertical fluorescent trails more coverage; still images
+do not establish reduced perceived afterimages. Keep it experimental pending controlled
+GPU reduction readback equivalence, clean idle/turn/swing comparisons and display testing.
+
+
 ## Background/shared map loading: parallel preparation and content reuse (2026-10-30)
 
 The serial timing baseline is `2bf2290`; the first complete pipeline checkpoint is

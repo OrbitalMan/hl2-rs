@@ -45,10 +45,13 @@ pub(super) fn update(
 ) {
     let active = game.as_ref().map_or("", |g| g.inventory.active.as_str());
     let scene_time = game.as_ref().map_or(0., |g| g.scene.time);
-    let enabled = ui.is_some_and(|ui| {
-        let a = &ui.source.config.video.advanced;
-        a.motion_blur_mode().viewmodel()
-    }) && sim.is_some_and(|sim| !sim.paused() && !sim.background_level)
+    let mode = ui
+        .as_ref()
+        .map_or(hl2_ui::config::MotionBlurMode::Disabled, |ui| {
+            ui.source.config.video.advanced.motion_blur_mode()
+        });
+    let enabled = mode.viewmodel()
+        && sim.is_some_and(|sim| !sim.paused() && !sim.background_level)
         && game.as_ref().is_some_and(|g| !g.inventory.carrying())
         && draws
             .iter()
@@ -77,6 +80,7 @@ pub(super) fn update(
         }
         let blur = WeaponBlur {
             max: if ready { 0.12 } else { 0. },
+            scale: WeaponBlur::scale(mode),
             world: false,
             camera_moving: false,
         };
@@ -107,6 +111,7 @@ mod tests {
                 Projection::default(),
                 WeaponBlur {
                     max: 0.12,
+                    scale: 1.,
                     world: false,
                     camera_moving: false,
                 },

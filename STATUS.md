@@ -1,5 +1,19 @@
 # STATUS
 
+## Ultra optimization checkpoint (2026-10-30)
+
+Ultra exposure, trail cap and blend contribution are halved; Advanced strength is unchanged.
+Shared motion reductions use RG16F, saving 3.68 MiB payload at 3456x2168 with both cameras.
+Portable validation, strict Windows checks, release packaging and focused blur tests pass.
+Packaged world/lamp/projectile captures pass rendering/pose checks. Repeated native turns
+show 16.81/16.66/16.64 ms medians for original/soft/adaptive, but every comparison is
+memory-pressure flagged: no qualified speedup. Brightness-adaptive sampling remains a
+separate prototype; perceived afterimages and Windows GPU runtime are not tested.
+Rejected sandbox GPU launch and initial Rust visibility error were corrected. Uncontrolled
+projectile image differences prevent a pixel-equivalence claim. See docs/performance.md.
+Next: deterministic reduction readback and clean resource-qualified idle/turn/swing runs.
+
+
 ## Final loading critical-path validation (2026-10-30)
 
 Visual auxiliary work now starts before audio metadata planning, removing its remaining serial tail without changing resource ownership or worker bounds. The final three-pair medians for request-to-installed CPU time are base background 2.518→0.369 s, Episode Two 2.508→0.270 s, gameplay station02 3.272→2.161 s. Auxiliary waits are 0.006–0.011 ms. Complete audio and advancing clocks verified in all 18 final reports. Gameplay frame median increases 0.060 ms within overlapping ranges; short telemetry does not establish a causal cost. Final memory pressure is level 1; comparisons across earlier rounds remain observational.

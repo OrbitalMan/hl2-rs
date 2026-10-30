@@ -1,5 +1,26 @@
 # MODLOG
 
+## 2026-10-30 Softer Ultra and compact motion storage
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents.
+
+**Changed / Why:** Halve Ultra exposure, trail limit and contribution for both cameras;
+retain Advanced strength. Store reduction XY in RG16F, retaining precision with half
+payload. Preserve history/coverage behavior and regression hooks.
+
+**Tested how / Result:** Focused bloom tests (15), workspace validation, strict Windows
+checks, release build and owned GPU camera/lamp/projectile captures. Three alternating
+native turning triples include resource telemetry and correlations: original/soft/adaptive
+medians 16.81/16.66/16.64 ms. All environment pairs fail due to memory pressure; no speedup
+claimed. Reduction payload saves 3.68 MiB at native resolution.
+
+**Still broken or not tested:** Brightness variant remains experimental. Uncontrolled
+projectile captures do not prove format equivalence. Windows GPU, perceived afterimages,
+clean idle/swing performance and energy savings not tested. Sandbox GPU attempt and first
+Rust visibility compile failed, then corrected; evidence retained.
+
+**Next:** Controlled GPU readback equivalence and resource-qualified performance/display tests.
+
 ## 2026-10-30 Start visual preparation before audio metadata planning
 
 **Agent/model:** Codex desktop; GPT-6 family, exact identifier not exposed. No subagents.

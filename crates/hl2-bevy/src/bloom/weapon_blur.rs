@@ -34,11 +34,13 @@ use bevy::{
 pub(super) mod depth;
 mod prepare;
 mod region;
+mod strength;
 mod world;
 
 #[derive(Component, Clone, Copy, PartialEq, ExtractComponent)]
 pub(super) struct WeaponBlur {
     pub max: f32,
+    pub scale: f32,
     pub world: bool,
     pub camera_moving: bool,
 }

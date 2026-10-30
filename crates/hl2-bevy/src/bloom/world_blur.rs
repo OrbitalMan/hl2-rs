@@ -83,6 +83,7 @@ pub(super) fn update(
         );
         let blur = WeaponBlur {
             max: if ready { 0.12 } else { 0. },
+            scale: WeaponBlur::scale(hl2_ui::config::MotionBlurMode::Ultra),
             world: true,
             camera_moving,
         };
@@ -124,6 +125,7 @@ mod tests {
                 Projection::default(),
                 WeaponBlur {
                     max: 0.12,
+                    scale: 1.,
                     world: true,
                     camera_moving: false,
                 },

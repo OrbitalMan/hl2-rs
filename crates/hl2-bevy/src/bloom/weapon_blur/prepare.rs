@@ -22,6 +22,9 @@ use bevy::{
     },
 };
 use std::collections::HashMap;
+// Reductions only consume XY; keep the same half-float precision without unused ZW.
+const MOTION_FORMAT: TextureFormat = TextureFormat::Rg16Float;
+
 type Stale = (
     Or<(With<Textures>, With<Prepared>, With<Key>)>,
     Without<WeaponBlur>,
@@ -90,7 +93,7 @@ pub(super) fn textures(
             texture(
                 size.x.div_ceil(factor),
                 size.y.div_ceil(factor),
-                TextureFormat::Rgba16Float,
+                MOTION_FORMAT,
                 TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
             )
         });
@@ -366,13 +369,8 @@ fn view_data(
     }
     Data {
         reprojection,
-        flags: Vec4::new(f32::from(blur.camera_moving), 0., 0., 0.),
-        params: Vec4::new(
-            blur.max,
-            1.25,
-            textures.size.x as f32,
-            textures.size.y as f32,
-        ),
+        flags: Vec4::new(f32::from(blur.camera_moving), blur.scale, 0., 0.),
+        params: blur.parameters(textures.size),
     }
 }
 
@@ -384,23 +382,9 @@ fn pipeline_set(
     world: bool,
 ) -> [CachedRenderPipelineId; 4] {
     [
-        pipeline(
-            p,
-            cache,
-            "reduce_raw",
-            TextureFormat::Rgba16Float,
-            samples,
-            world,
-        ),
-        pipeline(
-            p,
-            cache,
-            "reduce_tiles",
-            TextureFormat::Rgba16Float,
-            1,
-            world,
-        ),
-        pipeline(p, cache, "dilate", TextureFormat::Rgba16Float, 1, world),
+        pipeline(p, cache, "reduce_raw", MOTION_FORMAT, samples, world),
+        pipeline(p, cache, "reduce_tiles", MOTION_FORMAT, 1, world),
+        pipeline(p, cache, "dilate", MOTION_FORMAT, 1, world),
         pipeline(p, cache, "composite", format, samples, world),
     ]
 }

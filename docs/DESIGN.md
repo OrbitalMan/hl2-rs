@@ -1,5 +1,31 @@
 # Design
 
+## Softer Ultra and compact motion reductions (2026-10-30)
+
+Follow-up hypothesis: prioritize bright, contrasting trails during rapid camera rotation.
+Prototype nested midpoint sampling in the camera gather, using peak luminance in the
+existing downsample alpha channel. Refine bright footprints without repeating coarse
+samples and increase their blend contribution toward one; ordinary surfaces retain half
+strength. Compare vertical fluorescent-lamp rotation, retained uniform-soft controls and
+native turning cost before promotion. This changes sampling quality and is experimental;
+full-scene projectile captures have nondeterministic differences and cannot prove exact
+format equivalence. No claim about perceived display afterimages follows from still images.
+
+
+Use the current integrated renderer as baseline and preserve the earlier experiment branches.
+Ultra alone halves reconstruction exposure (1.25 to 0.625 frames), maximum UV trail
+(0.12 to 0.06), and blend contribution (1 to 0.5), including its weapon path. Advanced
+retains its established strength. Preserve sample spacing, center taps, depth rejection,
+coverage, history reset, resolution and AA. Shorter footprints naturally reduce gather work.
+Separately store the shared two-component motion reductions in RG16F instead of RGBA16F:
+identical half-float XY values, half the reduction image payload, no added pass or allocation.
+Record a baseline package, softened RGBA reference and compact candidate. Compare real GPU
+captures against the reference, including odd sizes/MSAA and weapon/projectile silhouettes;
+exercise tier/paused/history behavior and exact strength policy. Run portable/Windows checks
+and packaged replays. Benchmark three alternating native pairs for idle, turn and swing with
+completion pacing and resource telemetry; distinguish the intended visual change from exact
+storage savings, retain failed runs, and do not claim watts or universal FPS improvement.
+
 ## Shorten background and shared map loading critical paths (2026-10-29)
 
 Measure worker stages, world installation and request-to-visible timing before changing policy. Keep equivalent outputs and errors, map identity, stale-result protection and authored first-view handoff. First extract the serial loader into bounded modules with diagnostic timings, retain a packaged baseline, and measure background01, an expansion background and a gameplay map. Then overlap independent preparation using bounded scoped workers and remove confirmed duplicate work. Separate audio planning from expensive decoding so background visuals can install first and audio can arrive through an owned asynchronous result, safely discarded on map replacement; preserve speech timing and avoid losing gameplay one-shot requests. Reuse shared improvements for gameplay without deferring correctness-critical physics/simulation resources. No new dependencies or unbounded thread fanout. Add concurrency/lifecycle tests, run full portable/Windows checks and packaged regressions, and compare repeated alternating prior/current runs and frame costs with raw ranges. No fidelity/quality reduction or fixed loading delay.
