@@ -1,5 +1,12 @@
 # STATUS
 
+## Ultra fence stripes fixed (2026-10-30)
+
+Ultra's motion prepass wrote back-face depth the colour pass never drew, exposing the sky through
+one-sided cutouts. It now culls like the colour pass; shadow casters are unchanged. A still fence
+is identical with Ultra off and on, and the check fails on the previous build. Windows GPU runtime
+**not tested**. Evidence in MODLOG; reproduce with `python3 scripts/checks/check_cutout_alpha.py`.
+
 ## Ultra optimization checkpoint (2026-10-30)
 
 Ultra exposure, trail cap and blend contribution are halved; Advanced strength is unchanged.

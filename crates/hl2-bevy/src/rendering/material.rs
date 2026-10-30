@@ -1,6 +1,8 @@
 //! Textures and Source materials for draws: fallback images, filtered samplers, VTF mip chains and the
 //! `SourceMaterial` a material definition makes.
 use super::{MaterialData, ModelLighting, SourceMaterial};
+use bevy::pbr::MeshPipelineKey;
+use bevy::render::render_resource::Face;
 use bevy::{
     asset::{Handle, RenderAssetUsages},
     image::{Image, ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
@@ -290,9 +292,46 @@ impl bevy::pbr::Material for SourceMaterial {
         // BSP render triangles are normalized before model append; vmdl already
         // supplies CCW model triangles. Both now use Bevy's CCW front face.
         descriptor.primitive.front_face = bevy::render::render_resource::FrontFace::Ccw;
-        if key.bind_group_data.two_sided {
-            descriptor.primitive.cull_mode = None;
-        }
+        descriptor.primitive.cull_mode = faces_culled(
+            descriptor.primitive.cull_mode,
+            key.bind_group_data.two_sided,
+            key.mesh_key,
+        );
         Ok(())
+    }
+}
+
+/// Bevy's prepass culls nothing unless the material says so. A motion prepass must match the
+/// colour pass: back-face depth it alone writes hides the colour behind it and exposes the sky
+/// through one-sided cutouts. Shadow casters share that pipeline, depth-only, and keep both faces.
+fn faces_culled(current: Option<Face>, two_sided: bool, mesh_key: MeshPipelineKey) -> Option<Face> {
+    if two_sided {
+        None
+    } else if mesh_key.contains(MeshPipelineKey::MOTION_VECTOR_PREPASS) {
+        Some(Face::Back)
+    } else {
+        current
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn motion_prepass_culls_like_the_colour_pass_and_shadows_keep_both_faces() {
+        let motion = MeshPipelineKey::DEPTH_PREPASS | MeshPipelineKey::MOTION_VECTOR_PREPASS;
+        assert_eq!(faces_culled(None, false, motion), Some(Face::Back));
+        assert_eq!(faces_culled(None, true, motion), None);
+        assert_eq!(
+            faces_culled(None, false, MeshPipelineKey::DEPTH_PREPASS),
+            None
+        );
+        let colour = MeshPipelineKey::NONE;
+        assert_eq!(
+            faces_culled(Some(Face::Back), false, colour),
+            Some(Face::Back)
+        );
+        assert_eq!(faces_culled(Some(Face::Back), true, colour), None);
     }
 }

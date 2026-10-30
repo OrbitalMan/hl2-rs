@@ -2,11 +2,16 @@
 
 Uses an isolated muted package; diagnostic shaders and captures stay in artifacts/.
 The negative control removes only the opaque-alpha assignment in the private copy.
+Ultra must also leave a still fence as it was: its motion prepass writing depth the colour
+pass does not draw exposes the bright sky through the wires.
 """
 import json
 import replays as replay
-from images import png_rgb
+from images import pixel_changes, png_rgb
 
+
+# Isolated edge pixels may differ; the fault this guards against brightened over 10,000.
+MAX_FENCE_BRIGHTER = 8
 
 PROBE = '''
 #ifdef MAY_DISCARD
@@ -36,12 +41,24 @@ def run(name, aa, world=False, fence=False):
         {"tick": 1, "fly": True,
          "eye": [-4304, -200, 48] if fence else [-3104, -2018, 128],
          "yaw": 0 if fence else -48, "pitch": -8 if fence else 0},
-        {"tick": 120, "paused": True, "label": "cutouts"},
+        # A paused game drops Ultra's motion prepass, so Ultra runs must keep playing.
+        {"tick": 120, "paused": not world, "label": "cutouts"},
     ]), encoding="utf-8")
     result = replay.game(name, "--map", "d1_trainstation_02", "--width", "1024",
                          "--height", "768", "--movement-script", str(fixture))
     replay.holds("no GPU validation errors", "ERROR" not in result.log)
     return counts(result.capture)
+
+
+def check_fence_matches_blur_off(aa):
+    """A still camera gives Ultra nothing to blur, so the fence must not gain bright pixels."""
+    off = f"fence_{aa}_off"
+    ultra = f"fence_{aa}_ultra"
+    run(off, aa, fence=True)
+    run(ultra, aa, True, fence=True)
+    changes = pixel_changes(replay.OUT / f"{off}.png", replay.OUT / f"{ultra}.png", threshold=40)
+    replay.holds("still fence unchanged by Ultra", changes["brighter"] <= MAX_FENCE_BRIGHTER, changes)
+    return changes
 
 
 def main():
@@ -78,6 +95,8 @@ def main():
         shader.write_text(original, encoding="utf-8")
     run("normal_trees_x4", "x4")
     run("normal_fence_x4", "x4", fence=True)
+    fences = {aa: check_fence_matches_blur_off(aa) for aa in ("none", "x4")}
+    (replay.OUT / "fence-ultra.json").write_text(json.dumps(fences, indent=2))
     print("cutout alpha GPU checks passed")
 
 

@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-30 Match motion prepass culling to the colour pass
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** With Ultra on, bright stripes and white wires appeared on chain-link fences,
+even with a still camera. Bevy's prepass culls no faces unless the material sets it, and
+`SourceMaterial::specialize` never did, so one-sided surfaces wrote back-face depth that the
+colour pass never drew; colour behind that depth was rejected and the sky showed through. The
+motion prepass now culls as the colour pass does. Depth-only shadow casters keep both faces.
+
+**Tested how / Result:** Shader-only splits on a package copy, scored against Ultra off at
+1024x768: dropping prepass cutouts 11604 -> 0 changed pixels at 4x; bypassing the blur composite,
+no change; dropping prepass back faces 11507 -> 1 without AA, front faces no change. Tint, vertex
+alpha and cutoff changes did not explain it. `check_cutout_alpha.py` now compares a still fence
+with Ultra off and on: fixed build 0 changed pixels at no AA and 4x; on the pre-fix package the same
+check fails with 11507 and 11604. Its first version passed on the pre-fix package because
+pausing removes Ultra's prepass, so Ultra runs now stay unpaused. Moving fence captures (yaw,
+pitch, strafe, forward) inspected. World, weapon and cutout GPU checks, five flashlight and motion
+blur replays, validation and strict Windows checks pass.
+
+**Still broken or not tested:** Windows GPU runtime not tested; the cause is in pipeline state,
+not Metal, so it is expected there too. Frame time not measured: no pass is added and the prepass
+draws fewer faces. `source_depth.wgsl` still omits vertex alpha from its cutout test; that made no
+difference in this scene.
+
+**Next:** Conclude brightness-adaptive sampling with frozen inputs.
+
 ## 2026-10-30 Softer Ultra and compact motion storage
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents.
