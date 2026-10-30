@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-30 Retail camera blur without a frame copy
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** Enabled and Advanced copied the whole frame to a dedicated image each frame so
+the blur could read it. The view already has a second main texture: swap them, read the previous
+one and draw through the usual attachment, which still writes the multisampled image the viewmodel
+camera continues from. Removes one image and one full-frame copy; the shader is unchanged.
+
+**Tested how / Result:** Live blur texture payload at 3456x2168 with 4x AA: Enabled 29.97 -> 0 MB,
+Advanced 181.75 -> 151.78 MB, Ultra unchanged at 157.46 MB. Weapon and world GPU checks, motion blur
+replays, validation and strict Windows checks pass. A packaged Advanced 4x capture shows a blurred
+world under a sharp weapon.
+
+**Archived blur experiments, from their code:** main-depth and the quarter-resolution camera filter
+are already in production; encoder-timing is instrumentation; both resolved-motion caches add a
+full-resolution image, against this goal. cooperative-reduce, motion-occupancy, quarter-gather,
+single-sample-camera, direct-drawing, direct-colour-sources, tile-skip and bounded reductions are
+**not re-tested**: the frozen probe binds colour only and needs motion and depth inputs first.
+
+**Still broken or not tested:** Old and new captures are not pixel-compared: an identical build
+differs by up to 96178 pixels between launches, because blur strength follows frame timing. Frame
+time not measured. Windows GPU runtime not tested. The 4x motion target (119.88 MB) remains the
+largest blur image.
+
+**Next:** Give the frozen probe motion and depth inputs, then re-test the remaining experiments.
+
 ## 2026-10-30 Brightness-adaptive Ultra camera sampling
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.

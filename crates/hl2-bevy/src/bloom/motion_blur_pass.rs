@@ -1,7 +1,7 @@
-//! Image-space motion blur, render half: after the world camera's main pass the frame is copied
-//! to a scratch texture and drawn back blurred (into the multisampled attachment too, so the
-//! viewmodel camera that follows draws its weapon sharp over the blurred world, as the engine
-//! blurs before the viewmodel). No pass, texture or buffer exists while the component is absent.
+//! Image-space motion blur, render half: after the world camera's main pass the view's two main
+//! textures swap and the previous one is drawn back blurred (into the multisampled attachment too,
+//! so the viewmodel camera that follows draws its weapon sharp over the blurred world, as the
+//! engine blurs before the viewmodel). No pass or buffer exists while the component is absent.
 use super::motion_blur::SourceMotionBlur;
 use bevy::render::extract_component::ExtractComponentPlugin;
 use bevy::{
@@ -14,23 +14,20 @@ use bevy::{
         entity::Entity,
         query::{Or, With, Without},
         schedule::IntoScheduleConfigs,
-        system::{Commands, Local, Query, Res, ResMut},
+        system::{Commands, Local, Query, Res},
     },
     prelude::{App, AssetServer, Handle, Msaa, Plugin, Shader},
     render::{
         Render, RenderApp, RenderStartup, RenderSystems,
-        camera::ExtractedCamera,
         render_resource::{
             BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
-            CachedRenderPipelineId, ColorTargetState, ColorWrites, Extent3d, FilterMode,
-            FragmentState, MultisampleState, PipelineCache, RenderPassDescriptor,
-            RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
-            ShaderType, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
-            TextureUsages, TextureViewId, UniformBuffer,
+            CachedRenderPipelineId, ColorTargetState, ColorWrites, FilterMode, FragmentState,
+            MultisampleState, PipelineCache, RenderPassDescriptor, RenderPipelineDescriptor,
+            Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType,
+            TextureFormat, TextureSampleType, TextureView, TextureViewId, UniformBuffer,
             binding_types::{sampler, texture_2d, uniform_buffer},
         },
         renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
-        texture::{CachedTexture, TextureCache},
         view::{ExtractedView, ViewTarget},
     },
 };
@@ -48,8 +45,7 @@ impl Plugin for MotionBlurPlugin {
             .add_systems(
                 Render,
                 (
-                    prepare_pipelines.in_set(RenderSystems::Prepare),
-                    prepare_scratch.in_set(RenderSystems::PrepareResources),
+                    (remove_stale, prepare_pipelines).in_set(RenderSystems::Prepare),
                     prepare_groups.in_set(RenderSystems::PrepareBindGroups),
                 ),
             )
@@ -148,75 +144,42 @@ fn prepare_pipelines(
 
 /// Views that still carry render state of a blur whose component is gone.
 type Stale = (
-    Or<(With<Scratch>, With<BlurPipeline>, With<BlurGroup>)>,
+    Or<(With<BlurPipeline>, With<BlurGroup>)>,
     Without<SourceMotionBlur>,
 );
 
-/// The frame copy the blur reads (it cannot read the texture it resolves into).
-#[derive(bevy::ecs::component::Component)]
-pub(super) struct Scratch(pub(super) CachedTexture);
-
-fn prepare_scratch(
-    mut commands: Commands,
-    mut cache: ResMut<TextureCache>,
-    device: Res<RenderDevice>,
-    views: Query<(Entity, &ExtractedCamera, &ExtractedView), With<SourceMotionBlur>>,
-    stale: Query<Entity, Stale>,
-) {
-    // A view without the component keeps no scratch texture, pipeline key or bind group.
+fn remove_stale(mut commands: Commands, stale: Query<Entity, Stale>) {
+    // A view without the component keeps no pipeline key or bind group.
     for entity in &stale {
         commands
             .entity(entity)
-            .remove::<(Scratch, BlurPipeline, BlurGroup)>();
-    }
-    for (entity, camera, view) in &views {
-        let Some(size) = camera.physical_viewport_size else {
-            continue;
-        };
-        let texture = cache.get(
-            &device,
-            TextureDescriptor {
-                label: Some("source_motion_blur_frame"),
-                size: Extent3d {
-                    width: size.x,
-                    height: size.y,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: view.target_format,
-                usage: TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            },
-        );
-        commands.entity(entity).insert(Scratch(texture));
+            .remove::<(BlurPipeline, BlurGroup)>();
     }
 }
 
-/// The bind group of this frame's blur: the scratch texture, the sampler and the uniform.
+/// The bind groups of this frame's blur, one per main texture it may read.
 #[derive(bevy::ecs::component::Component)]
-struct BlurGroup(BindGroup);
+struct BlurGroup([(TextureViewId, BindGroup); 2]);
 
 struct Prepared {
     buffer: UniformBuffer<BlurData>,
-    group: Option<(TextureViewId, BindGroup)>,
+    groups: Option<[(TextureViewId, BindGroup); 2]>,
 }
 
-/// Writes the uniform of a view that blurs this frame and binds it to its scratch texture; the
-/// buffer and the group live as long as the view carries the component and are rebuilt only when
-/// the scratch texture changes.
+/// Writes the uniform of a view that blurs this frame and binds it to both main textures; the
+/// buffer and the groups live as long as the view carries the component and are rebuilt only when
+/// the main textures change.
 fn prepare_groups(
     mut commands: Commands,
     (pipelines, cache): (Res<Pipelines>, Res<PipelineCache>),
     (device, queue): (Res<RenderDevice>, Res<RenderQueue>),
     mut prepared: Local<HashMap<Entity, Prepared>>,
-    views: Query<(Entity, &SourceMotionBlur, &Scratch)>,
+    views: Query<(Entity, &SourceMotionBlur, &ViewTarget)>,
 ) {
     prepared.retain(|entity, _| views.contains(*entity));
-    for (entity, blur, scratch) in &views {
+    for (entity, blur, target) in &views {
         let samples = hl2_simulation::motion_blur::samples(
-            scratch.0.texture.height(),
+            target.main_texture().height(),
             blur.values.to_array(),
         );
         if samples == 0 {
@@ -225,50 +188,62 @@ fn prepare_groups(
         }
         let state = prepared.entry(entity).or_insert_with(|| Prepared {
             buffer: UniformBuffer::default(),
-            group: None,
+            groups: None,
         });
         state.buffer.set(BlurData {
             values: blur.values,
             params: bevy::math::Vec4::new(blur.max, samples as f32, 0., 0.),
         });
         state.buffer.write_buffer(&device, &queue);
-        let id = scratch.0.default_view.id();
-        if state.group.as_ref().is_none_or(|(known, _)| *known != id) {
+        let sources = [target.main_texture_view(), target.main_texture_other_view()];
+        let known = state
+            .groups
+            .as_ref()
+            .is_some_and(|groups| sources.iter().all(|view| group_of(groups, view).is_some()));
+        if !known {
             let Some(buffer) = state.buffer.binding() else {
                 continue;
             };
             let layout = cache.get_bind_group_layout(&pipelines.layout);
-            let group = device.create_bind_group(
-                Some("source_motion_blur_bind_group"),
-                &layout,
-                &BindGroupEntries::sequential((
-                    &scratch.0.default_view,
-                    &pipelines.sampler,
-                    buffer,
-                )),
-            );
-            state.group = Some((id, group));
+            state.groups = Some(sources.map(|view| {
+                let group = device.create_bind_group(
+                    Some("source_motion_blur_bind_group"),
+                    &layout,
+                    &BindGroupEntries::sequential((view, &pipelines.sampler, buffer.clone())),
+                );
+                (view.id(), group)
+            }));
         }
-        if let Some((_, group)) = &state.group {
-            commands.entity(entity).insert(BlurGroup(group.clone()));
+        if let Some(groups) = &state.groups {
+            commands.entity(entity).insert(BlurGroup(groups.clone()));
         }
     }
 }
 
+fn group_of<'a>(
+    groups: &'a [(TextureViewId, BindGroup); 2],
+    view: &TextureView,
+) -> Option<&'a BindGroup> {
+    groups
+        .iter()
+        .find_map(|(id, group)| (*id == view.id()).then_some(group))
+}
+
 fn source_motion_blur(
-    view: ViewQuery<(&ViewTarget, &BlurPipeline, &Scratch, &BlurGroup)>,
+    view: ViewQuery<(&ViewTarget, &BlurPipeline, &BlurGroup)>,
     cache: Res<PipelineCache>,
     mut ctx: RenderContext,
 ) {
-    let (target, pipeline, scratch, group) = view.into_inner();
+    let (target, pipeline, groups) = view.into_inner();
     let Some(pipeline) = cache.get_render_pipeline(pipeline.0) else {
         return;
     };
-    ctx.command_encoder().copy_texture_to_texture(
-        target.main_texture().as_image_copy(),
-        scratch.0.texture.as_image_copy(),
-        scratch.0.texture.size(),
-    );
+    let Some(group) = group_of(&groups.0, target.main_texture_view()) else {
+        return;
+    };
+    // The frame stays readable in the texture it was resolved to; the attachment now resolves
+    // into the other one, so no copy of the frame is needed.
+    target.post_process_write();
     let mut pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
         label: Some("source_motion_blur"),
         color_attachments: &[Some(target.get_color_attachment())],
@@ -278,6 +253,6 @@ fn source_motion_blur(
         multiview_mask: None,
     });
     pass.set_render_pipeline(pipeline);
-    pass.set_bind_group(0, &group.0, &[]);
+    pass.set_bind_group(0, group, &[]);
     pass.draw(0..3, 0..1);
 }

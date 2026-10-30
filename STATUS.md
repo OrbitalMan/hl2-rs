@@ -1,5 +1,12 @@
 # STATUS
 
+## Retail camera blur frame copy removed (2026-10-30)
+
+Enabled and Advanced no longer keep a scratch image or copy the frame: 29.97 MB less payload at
+3456x2168 (Enabled 0 MB, Advanced 151.78 MB, Ultra 157.46 MB). Pixel equivalence and frame time
+**not tested**: captures vary with frame timing. Remaining archived experiments need motion and
+depth inputs in the frozen probe; triage in MODLOG.
+
 ## Ultra brightness-adaptive sampling integrated (2026-10-30)
 
 Frozen-input time relative to same-blend uniform sampling: 0.45-0.92 on flat, dark, sparse and
