@@ -67,7 +67,6 @@ pub(crate) fn install(render: &mut bevy::app::SubApp) {
 fn capture(
     mut frames: Local<u32>,
     views: Query<(&Textures, Option<&ViewPrepassTextures>)>,
-    scratch: Query<&super::super::motion_blur_pass::Scratch>,
     performance: Res<Performance>,
 ) {
     *frames += 1;
@@ -92,9 +91,6 @@ fn capture(
                 inventory.add(&resolve.texture, true);
             }
         }
-    }
-    for texture in &scratch {
-        inventory.add(&texture.0.texture, false);
     }
     performance.record_blur_memory(inventory.report);
 }

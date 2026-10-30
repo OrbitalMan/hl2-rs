@@ -1,5 +1,26 @@
 # MODLOG
 
+## 2026-10-30 Retail camera blur without a frame copy, reinstated
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** Reinstates the main-texture swap that replaced Enabled and Advanced's full-frame copy.
+Its rejection was wrong: the captures behind it landed after the camera stopped, when blur is zero by
+design on any build. Adds `check_retail_blur.py`, which captures at a frame count while the camera sweeps
+around one heading, so captures see the same scene with blur active.
+
+**Tested how / Result:** Edge energy at 1024x768, no AA and 4x: blur off and a plain-read control about
+2.45M on both builds. Enabled and Advanced are blurred in 14 of 16 captures with the copy and 16 of 16 with
+the swap, at 0.60-1.41M. The check passes with its control at both AA levels. Live payload at 3456x2168 with
+4x AA: Enabled 29.97 MB to 0, Advanced 181.75 to 151.78 MB, Ultra unchanged. Weapon, world and cutout GPU
+checks, motion blur replays, validation and strict Windows checks pass. A plain turn was tried first and
+rejected: its captures saw different scenes, so energy followed the view, not the blur.
+
+**Still broken or not tested:** Frame time gain not measured. Windows GPU runtime not tested. Blur in
+captures still varies with frame timing, so the check compares medians.
+
+**Next:** Metal attachment audit; motion and depth inputs for the frozen probe.
+
 ## 2026-10-30 Correct the retail blur findings
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.

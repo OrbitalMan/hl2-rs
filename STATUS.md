@@ -6,12 +6,12 @@ Ultra's weapon blur now matches Advanced; only the world is softened. Standing a
 while they swing at 3456x2168 with 4x AA, the worst frame falls from 196 to 33.5 ms (p95 29 ms). Ordinary
 play and Windows GPU runtime **not tested**. Evidence in MODLOG.
 
-## Retail blur frame copy removal not adopted (2026-10-30)
+## Retail blur frame copy removed (2026-10-30)
 
-Swapping main textures instead of copying the frame saves 29.97 MB. It stays reverted, but whether it
-loses retail blur is **not established**: captures usually land after the camera stops, on any build.
-Retail blur does run in Advanced. No check asserts retail blur is present during motion. Eight archived
-blur experiments are **not re-tested**; the frozen probe needs motion and depth inputs. See MODLOG.
+Enabled and Advanced swap main textures instead of copying the frame: 29.97 MB less payload at 3456x2168
+(Enabled 0, Advanced 151.78 MB, Ultra 157.46 MB). `check_retail_blur.py` confirms blur during a camera sweep,
+with a control. An earlier rejection was a capture-timing error. Eight archived blur experiments are **not
+re-tested**; the frozen probe needs motion and depth inputs. See MODLOG.
 
 ## Ultra contrast-adaptive sampling integrated (2026-10-30)
 
