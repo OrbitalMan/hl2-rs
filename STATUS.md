@@ -11,7 +11,8 @@ play and Windows GPU runtime **not tested**. Evidence in MODLOG.
 Enabled and Advanced swap main textures instead of copying the frame: 29.97 MB less payload at 3456x2168
 (Enabled 0, Advanced 151.78 MB, Ultra 157.46 MB). `check_retail_blur.py` confirms blur during a camera sweep,
 with a control. Ultra's world reduction reads one sample: 14.30 to 12.65 ms with nothing moving. Archived blur
-experiments are concluded in MODLOG; only quarter-gather stays **not tested**.
+experiments are concluded in MODLOG. Object trails gather at quarter size: swinging doors 14.2 to 12.8 ms, worst
+frame about 28 to 19 ms; ordinary play **not tested**.
 
 ## Ultra contrast-adaptive sampling integrated (2026-10-30)
 

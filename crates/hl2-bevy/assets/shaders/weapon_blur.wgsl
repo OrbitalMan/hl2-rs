@@ -214,6 +214,7 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 #else
 @group(0) @binding(7) var camera_filtered: texture_2d<f32>;
 @group(0) @binding(8) var camera_environment: texture_2d<f32>;
+@group(0) @binding(9) var object_gathered: texture_2d<f32>;
 // Read all surfaces, including sky/background motion. Reversed depth is larger nearer us.
 fn raw_surface(uv: vec2<f32>) -> vec4<f32> {
     let p = clamp(vec2<i32>(uv*data.params.zw),vec2(0),vec2<i32>(data.params.zw)-1);
@@ -301,9 +302,26 @@ fn background_depth(uv: vec2<f32>) -> f32 {
 #endif
 }
 
+// A quarter-size pixel takes the fastest surface in its footprint: a thin rocket can fall
+// between pixel centres and would otherwise blur only as a passing trail.
+fn footprint(uv: vec2<f32>) -> vec4<f32> {
+    let texel = 1.0/data.params.zw;
+    var best = surface_tap(uv+vec2(-1.0,-1.0)*texel);
+    for (var i = 0; i < 3; i++) {
+        let offset = array(vec2(1.0,-1.0),vec2(-1.0,1.0),vec2(1.0,1.0))[i];
+        let sample = surface_tap(uv+offset*texel);
+        if sample.w > best.w { best = sample; }
+    }
+    return best;
+}
+
 struct Destination { own: vec4<f32>, camera: vec2<f32>, relative: vec2<f32> }
 fn destination(uv: vec2<f32>) -> Destination {
+#ifdef OBJECT_GATHER
+    var own = footprint(uv);
+#else
     var own = surface(uv);
+#endif
 #ifdef WORLD_OBJECTS
     if own.z == 0.0 { own.z = background_depth(uv); }
 #endif
@@ -372,15 +390,21 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         let filtered = textureSampleLevel(camera_filtered,linear_sampler,in.uv,0.0);
         base = vec4(filtered.rgb+original.rgb*(1.0-filtered.a),original.a);
     }
+#ifndef OBJECT_GATHER
+    // The trails were gathered at quarter size; only their composite runs per native pixel.
+    let gathered = textureSampleLevel(object_gathered,linear_sampler,in.uv,0.0);
+    return vec4(gathered.rgb+base.rgb*(1.0-gathered.a),base.a);
+#else
     let object_span = length(dominant*data.params.zw)*data.params.y;
-    if object_span < data.params.y { return base; }
+    if object_span < data.params.y { return vec4(0.0); }
     if data.flags.x > 0.0 {
         let texel = max(data.params.z/f32(textureDimensions(camera_filtered).x),data.params.w/f32(textureDimensions(camera_filtered).y));
         let camera_span = length(camera_motion(in.uv,0.0,data)*data.params.zw)*data.params.y;
         // Do not repeat a long camera gather for sub-filter-texel object motion.
         // Its contribution is below the camera filter's spatial resolution.
-        if object_span <= texel && camera_span >= max(texel*4.0,object_span*8.0) { return base; }
+        if object_span <= texel && camera_span >= max(texel*4.0,object_span*8.0) { return vec4(0.0); }
     }
+#endif
 #endif
     if data.params.x == 0.0 { return vec4(0.0); }
     let center = destination(in.uv);
@@ -404,7 +428,11 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let moving = own.w >= 1.0;
     let vector = limited(select(camera+dominant,own.xy,moving));
     let pixels = length(vector*data.params.zw);
+#ifdef OBJECT_GATHER
+    if pixels < 1.0 { return vec4(0.0); }
+#else
     if pixels < 1.0 { return base; }
+#endif
     let count = taps(vector);
     // Per-pixel phase turns widely spaced taps into fine noise instead of bands.
     let jitter = fract(52.9829189*fract(dot(in.position.xy,vec2(0.06711056,0.00583715))));
@@ -448,7 +476,8 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let reconstructed = foreground/f32(count)+backdrop*(1.0-alpha);
     let strength = smoothstep(1.0,3.0,pixels)*select(0.0,1.0,moving || alpha > 0.0 || camera_pixels >= 1.0);
 #ifdef WORLD_OBJECTS
-    return vec4(mix(base.rgb,reconstructed,strength*data.flags.y),base.a);
+    let contribution = strength*data.flags.y;
+    return vec4(reconstructed*contribution,contribution);
 #else
     return vec4(reconstructed*strength,strength);
 #endif

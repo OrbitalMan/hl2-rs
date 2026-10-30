@@ -10,10 +10,11 @@ use bevy::render::{
 };
 use std::collections::HashMap;
 
-pub(super) type Cache = HashMap<(TextureFormat, u32), [CachedRenderPipelineId; 3]>;
+pub(super) type Cache = HashMap<(TextureFormat, u32), [CachedRenderPipelineId; 4]>;
 
 pub(super) struct Prepared {
-    pub pipelines: [CachedRenderPipelineId; 3],
+    pub pipelines: [CachedRenderPipelineId; 4],
+    pub gather: BindGroup,
     pub downsample: BindGroup,
     pub environment: BindGroup,
     pub native: BindGroup,
@@ -26,7 +27,7 @@ pub(super) fn prepare(
     textures: &Textures,
     samples: u32,
     known: &mut Cache,
-    (native, frame): (BindGroup, &TextureView),
+    (native, gather, frame): (BindGroup, BindGroup, &TextureView),
 ) -> Option<Prepared> {
     let output = textures.output.as_ref()?;
     let format = output.texture.format();
@@ -42,6 +43,7 @@ pub(super) fn prepare(
                 1,
                 true,
             ),
+            pipeline(p, cache, "world_object_gather", format, samples, true),
         ]
     });
     let layout = cache.get_bind_group_layout(&p.image_layout);
@@ -60,6 +62,7 @@ pub(super) fn prepare(
         pipelines,
         downsample,
         environment,
+        gather,
         native,
     })
 }
@@ -112,6 +115,18 @@ pub(super) fn reconstruct(
             "world_motion_blur",
         );
     }
+    draw(
+        ctx,
+        cache,
+        world.pipelines[3],
+        &world.gather,
+        &textures
+            .object_gathered
+            .as_ref()
+            .expect("world object gather")
+            .default_view,
+        "world_object_gather",
+    );
     let write = target.post_process_write();
     draw(
         ctx,

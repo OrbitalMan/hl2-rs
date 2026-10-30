@@ -89,7 +89,9 @@ def colors(result):
     region = projectile_region(result)
     for path in [result.capture] + [replay.OUT / f"{result.name}-{i}.png" for i in range(1, 9)]:
         width, _, rgb = png_rgb(path)
-        objects = sum(r > 240 and g < 15 and b > 240 and (region is None or
+        # Object trails are gathered at quarter size: one diagnostic pixel upscales to about 77%
+        # magenta over the scene. The off, retail and paused runs below must still count zero.
+        objects = sum(r > 150 and g < 110 and b > 150 and r-g > 60 and b-g > 60 and (region is None or
                       abs(i % width-region[0]) < 96 and abs(i // width-region[1]) < 96)
                       for i, (r, g, b) in enumerate(zip(rgb[::3], rgb[1::3], rgb[2::3])))
         counts.append({"object": objects,

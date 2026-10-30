@@ -1,5 +1,24 @@
 # MODLOG
 
+## 2026-10-30 Ultra object trails gathered at quarter size
+
+**Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
+
+**Changed / Why:** Follows the archived quarter-gather idea, rebuilt on the current shader. The object gather
+now draws into a quarter-size image; the native pass only composites it, so nothing changes where no trail exists.
+Each quarter-size pixel takes the fastest of four reads across its footprint, so thin objects stay detected.
+
+**Tested how / Result:** Alternating packaged runs, doors swinging at 3456x2168 with 4x AA, standing at the
+entrance: mean 14.2 to 12.8 ms, worst frame about 28 to 19 ms; doors still, no difference. One of three runs had a
+115 ms hitch and 14.3 ms mean, and the host sped up between sessions, so compare only alternating pairs. Payload
+7.5 MB more at native resolution (Ultra 159.34 MB, measured before the footprint read, which adds no image).
+World, weapon, retail and cutout GPU checks, motion blur replays, validation and strict Windows checks pass.
+`check_world_blur.py` now counts upscaled magenta, since one quarter-size pixel peaks near 77%; the off, retail
+and paused controls still count zero. Grenade and rocket captures match the previous build by eye.
+
+**Still broken or not tested:** A door's slowly moving parts are slightly softer. Native-resolution appearance in
+ordinary play and Windows GPU runtime not tested.
+
 ## 2026-10-30 Retail blur no longer loads the image it overwrites
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.

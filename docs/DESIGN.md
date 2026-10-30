@@ -5,8 +5,8 @@
 Stronger camera blur follows contrast with the surroundings, not brightness: compare a trail's brightest and
 darkest points with a local log-average luminance held in a four-texel-wide image, on a 6:1 to 12:1 ramp. Only
 unusual trails refine and blend at full strength. The weapon keeps full strength; Ultra softens the world only.
-The object gather reads one MSAA sample per tap and shares a 25-tap budget with a per-pixel phase, and the world
-reduction reads one sample per pixel. Retail blur swaps the view's main textures instead of copying the frame,
+The object gather runs at quarter size, reads one MSAA sample per tap and shares a 25-tap budget with a per-pixel
+phase; the native pass composites its result. The world reduction reads one sample per pixel. Retail blur swaps the view's main textures instead of copying the frame,
 and clears its attachment because it overwrites every sample. Motion prepasses cull as the colour pass does;
 shadow casters keep both faces. Evidence and rejected variants are in MODLOG.
 

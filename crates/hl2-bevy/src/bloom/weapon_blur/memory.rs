@@ -82,6 +82,9 @@ fn capture(
         if let Some(output) = &textures.output {
             inventory.add(&output.texture, false);
         }
+        if let Some(gathered) = &textures.object_gathered {
+            inventory.add(&gathered.texture, false);
+        }
         if let Some(environment) = &textures.environment {
             inventory.add(&environment.texture, false);
         }

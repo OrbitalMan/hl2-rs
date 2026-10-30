@@ -114,6 +114,14 @@ pub(super) fn textures(
                     filtered,
                 )
             }),
+            object_gathered: blur.world.then(|| {
+                texture(
+                    size.x.div_ceil(4),
+                    size.y.div_ceil(4),
+                    view.target_format,
+                    filtered,
+                )
+            }),
             environment: blur.world.then(|| {
                 texture(
                     ENVIRONMENT_WIDTH,
@@ -272,7 +280,7 @@ fn frame_groups(
         &layout,
         textures,
         (frame, vectors, depth, binding.clone()),
-        false,
+        Pass::Filter,
     );
     let world = if textures.world {
         let native = composite_group(
@@ -280,10 +288,26 @@ fn frame_groups(
             p,
             &layout,
             textures,
-            (frame, vectors, depth, binding),
-            true,
+            (frame, vectors, depth, binding.clone()),
+            Pass::Native,
         );
-        super::world::prepare(p, cache, device, textures, samples, known, (native, frame))
+        let gather = composite_group(
+            device,
+            p,
+            &layout,
+            textures,
+            (frame, vectors, depth, binding),
+            Pass::Gather,
+        );
+        super::world::prepare(
+            p,
+            cache,
+            device,
+            textures,
+            samples,
+            known,
+            (native, gather, frame),
+        )
     } else {
         None
     };
@@ -293,16 +317,32 @@ fn frame_groups(
         world,
     }
 }
+/// Which composite a bind group serves; a pass never reads the image it draws into.
+#[derive(Clone, Copy, PartialEq)]
+enum Pass {
+    Filter,
+    Gather,
+    Native,
+}
 fn composite_group(
     device: &RenderDevice,
     p: &Pipelines,
     layout: &BindGroupLayout,
     textures: &Textures,
     (frame, vectors, depth, uniform): Inputs<'_>,
-    native: bool,
+    pass: Pass,
 ) -> BindGroup {
-    let filtered = if native {
+    let filtered = if pass == Pass::Filter {
+        frame
+    } else {
         &textures.output.as_ref().expect("world output").default_view
+    };
+    let gathered = if pass == Pass::Native {
+        &textures
+            .object_gathered
+            .as_ref()
+            .expect("world object gather")
+            .default_view
     } else {
         frame
     };
@@ -324,6 +364,7 @@ fn composite_group(
             &textures.reduced[2].default_view,
             filtered,
             environment,
+            gathered,
         )),
     )
 }

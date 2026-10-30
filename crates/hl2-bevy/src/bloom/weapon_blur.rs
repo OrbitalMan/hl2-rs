@@ -150,6 +150,7 @@ fn init(
                     texture_2d(float),
                     texture_2d(filtered),
                     texture_2d(filtered),
+                    texture_2d(filtered),
                 ),
             ),
         )
@@ -191,7 +192,7 @@ fn pipeline(
     let msaa = usize::from(samples > 1);
     let layout = match entry {
         "world_downsample" | "world_environment" => &p.image_layout,
-        "world_objects" => &p.composite_layouts[msaa],
+        "world_objects" | "world_object_gather" => &p.composite_layouts[msaa],
         "reduce_raw" => &p.raw_layouts[msaa],
         "composite" => &p.composite_layouts[msaa],
         _ => &p.reduce_layout,
@@ -209,21 +210,24 @@ fn pipeline(
                 } else if world {
                     defs.push("WORLD_RECONSTRUCTION".into());
                 }
-                if entry == "world_objects" {
+                if matches!(entry, "world_objects" | "world_object_gather") {
                     defs.push("WORLD_OBJECTS".into());
+                }
+                if entry == "world_object_gather" {
+                    defs.push("OBJECT_GATHER".into());
                 }
                 if msaa == 1 {
                     defs.push("MULTISAMPLED".into());
                 }
                 if entry == "reduce_raw" {
                     defs.push("REDUCE_RAW".into());
-                } else if !matches!(entry, "composite" | "world_objects") {
+                } else if !matches!(entry, "composite" | "world_objects" | "world_object_gather") {
                     defs.push("REDUCE_FIELD".into());
                 }
                 defs
             },
             entry_point: Some(
-                if entry == "world_objects" {
+                if matches!(entry, "world_objects" | "world_object_gather") {
                     "composite"
                 } else {
                     entry
@@ -250,6 +254,7 @@ struct Textures {
     world: bool,
     output: Option<CachedTexture>,
     environment: Option<CachedTexture>,
+    object_gathered: Option<CachedTexture>,
 }
 
 #[derive(Component)]
