@@ -6,14 +6,14 @@ use crate::{
     ai_hull::HullType,
     entities::Scene,
     npc::{ActorPose, Controller, GoalKey, GoalState, MoveRequest, MoveStyle, AI_SCENE},
-    npc_probe::{ActorHull, Hull, HullTrace, NpcCollisionWorld, Query},
+    npc_probe::{
+        ActorHull, Hull, HullTrace, NpcCollisionWorld, Query, CONTENTS_MONSTER, NPC_SOLID_MASK,
+    },
     physics::Physics,
 };
 use glam::Vec3;
 use modkit_core::World;
 
-/// NPCs a flight's trace can pass through in one step.
-const MAX_PASSED: usize = 8;
 /// How far above its feet a route's first leg starts.
 const FLIGHT_START_LIFT: f32 = 2.;
 
@@ -291,14 +291,14 @@ impl Motor for SceneMotor<'_> {
         let (world, physics, me) = (self.world, self.physics, self.entity);
         let hull = flight_hull(world, me);
         let from = self.scene.states[me].origin + Vec3::Z * FLIGHT_START_LIFT;
-        let clear = |a, b| clear_flight(world, physics, (a, b), hull, me);
+        let clear = |a, b| clear_flight(physics, (a, b), hull, me);
         self.controller.fly_route(hull, from, goal, clear)
     }
     fn fly_patrol(&mut self, length: f32, seed: &mut u64) -> Option<Vec<Vec3>> {
         let (world, physics, me) = (self.world, self.physics, self.entity);
         let hull = flight_hull(world, me);
         let from = self.scene.states[me].origin;
-        let clear = |a, b| clear_flight(world, physics, (a, b), hull, me);
+        let clear = |a, b| clear_flight(physics, (a, b), hull, me);
         let roll = || super::roll(seed);
         self.controller.fly_patrol(hull, from, length, clear, roll)
     }
@@ -324,52 +324,30 @@ fn flight_hull(world: &World, id: usize) -> HullType {
 }
 
 /// Whether a body can fly a straight leg.
-fn clear_flight(
-    world: &World,
-    physics: &Physics,
-    leg: (Vec3, Vec3),
-    hull: HullType,
-    id: usize,
-) -> bool {
-    let hit = flight_trace(world, physics, leg, hull.bounds(), id);
+fn clear_flight(physics: &Physics, leg: (Vec3, Vec3), hull: HullType, id: usize) -> bool {
+    let hit = flight_trace(physics, leg, hull.bounds(), id);
     !hit.trace.start_solid && hit.trace.fraction >= 1.
 }
 
 /// A hull trace that only the world and props stop: birds pass through NPCs, each other and the
-/// player (HL2COLLISION_GROUP_CROW).
+/// player (HL2COLLISION_GROUP_CROW). NPC colliders are CONTENTS_MONSTER, so the mask leaves them
+/// out in one trace (tracing again past each NPC met cost up to nine sweeps in a swarm).
 pub fn flight_trace(
-    world: &World,
     physics: &Physics,
     (from, to): (Vec3, Vec3),
     hull: Hull,
     id: usize,
 ) -> HullTrace {
-    let mut excluded = [id; MAX_PASSED];
-    let mut count = 1;
-    loop {
-        let hit = physics.npc_trace_hull(
-            from,
-            to,
-            hull,
-            Query {
-                excluded_entities: &excluded[..count],
-                ..Default::default()
-            },
-        );
-        let npc = hit.entity.filter(|&e| {
-            world
-                .entities
-                .get(e)
-                .is_some_and(|x| x.class().starts_with("npc_"))
-        });
-        match npc {
-            Some(e) if count < MAX_PASSED => {
-                excluded[count] = e;
-                count += 1;
-            }
-            _ => return hit,
-        }
-    }
+    physics.npc_trace_hull(
+        from,
+        to,
+        hull,
+        Query {
+            contents_mask: NPC_SOLID_MASK & !CONTENTS_MONSTER,
+            excluded_entities: &[id],
+            ..Default::default()
+        },
+    )
 }
 
 /// FVisible with MASK_BLOCKLOS: world and solid entities (brushes, doors, props) block
@@ -379,25 +357,21 @@ pub struct PhysicsSight<'a> {
     pub world: &'a World,
 }
 impl PhysicsSight<'_> {
-    /// Where a line first meets something that stops sight; NPCs do not. After eight NPCs in a row
-    /// the last one counts.
+    /// Where a line first meets something that stops sight; NPCs do not (Source's MASK_BLOCKLOS has
+    /// no CONTENTS_MONSTER). Their colliders are left out of the one ray: casting again past each
+    /// NPC met cost up to nine rays a look in a crowd.
     pub fn first_solid(&self, from: Vec3, to: Vec3, ignore: &[usize]) -> Option<Vec3> {
-        let mut excluded: Vec<usize> = ignore.to_vec();
-        let mut last = None;
-        for _ in 0..8 {
-            let hit = self.physics.projectile_ray(from, to, &excluded)?;
-            let npc = self
-                .world
-                .entities
-                .get(hit.entity)
-                .is_some_and(|e| e.class().starts_with("npc_"));
-            if !npc {
-                return Some(hit.position);
-            }
-            excluded.push(hit.entity);
-            last = Some(hit.position);
-        }
-        last
+        let world = self.world;
+        let keep = |entity: usize| {
+            !ignore.contains(&entity)
+                && !world
+                    .entities
+                    .get(entity)
+                    .is_some_and(|e| e.class().starts_with("npc_"))
+        };
+        self.physics
+            .filtered_ray(from, to, &keep)
+            .map(|hit| hit.position)
     }
 }
 impl SightWorld for PhysicsSight<'_> {
