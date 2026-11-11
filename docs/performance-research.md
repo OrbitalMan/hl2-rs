@@ -87,6 +87,33 @@ On the render thread the sampled leaders are `allocate_and_free_meshes` (7 to 8%
 while sampled) and `prepare_erased_assets` (5%): meshes re-uploaded each frame, consistent
 with CPU flexes and per-frame silhouette and effect meshes. It is not the bound today.
 
+### After merging upstream: measured, and the ranking holds
+
+Upstream's single flight sweep and filtered sight ray are merged (`6c64694`). Three interleaved
+pairs per case on the M1 Pro, 600 host ticks, same settings and package layout as the first
+cycle; before is the first cycle's candidate package, after the merged release build. Tick cost
+drops its three slowest calls per run.
+
+| Case | Tick before | Tick after | Frame before | Frame after |
+| --- | ---: | ---: | ---: | ---: |
+| 30 manhacks | 5.59 ms (5.58 to 5.60) | 5.03 ms (5.01 to 5.03) | 13.62 ms (13.55 to 13.75) | 12.58 ms (12.45 to 12.83) |
+| Quiet | 3.38 ms (3.27 to 3.42) | 3.34 ms (3.34 to 4.06) | 5.99 ms (5.75 to 6.12) | 5.75 ms (5.64 to 6.76) |
+
+The crowd tick is 10% cheaper and its frame 7.6% shorter, with no overlap between the trial
+ranges; quiet is unchanged within its spread (one after-run had a 711 ms load hitch). The frame
+model predicted 12.85 ms from the new tick cost against 12.58 ms measured. This is the first
+frame-time gain of the work, and it came from the profile's top item, not from the survey.
+
+Machine state was recorded before every run: load average 4.3 to 8.8 on 10 logical CPUs and
+18 to 195% of one core used by the five busiest other processes, after the owner closed the
+heavy applications. Not idle; the pairs are interleaved and the crowd ranges are tight, so the
+difference stands, but the absolute values belong to that load.
+
+A 10 ms sampled crowd run of the merged build (attribution only) gives the same order:
+hull traces through the linear brush scan 42% of the fixed step (310 of 733 busy observations,
+from 48%), Rapier step 27%, `tick_npcs` hull traces within the first figure, hitbox posing 5%.
+The ranked list below is unchanged, with item 1 done.
+
 ### Machine load during these runs
 
 The two new sampled runs were taken on a loaded machine: load average about 4 on 10 logical

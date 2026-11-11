@@ -1,5 +1,26 @@
 # MODLOG
 
+## 2026-11-11: upstream flight and sight fixes merged and measured
+
+**Agent/model:** Claude Code desktop, claude-fable-5-2. No subagents.
+
+**Changed:** merged upstream main (`6c64694`: one flight sweep, one filtered sight ray); the
+measured result and the post-merge ranking in `docs/performance-research.md` and STATUS.
+
+**Why:** the first cycle measured a stale baseline; the diagnosis ranked this first.
+
+**Tested how / Result:** validation passes after the merge. Three interleaved packaged pairs
+per case, 600 ticks, M1 Pro / Metal, 1080p, all exit 0 at tick 600. Frame time before to after:
+30 manhacks 13.62 to 12.58 ms, quiet 5.99 to 5.75 ms (within spread). Tick cost: crowd 5.59 to
+5.03 ms, ranges disjoint; quiet 3.38 to 3.34 ms. Load average 4.3 to 8.8 recorded per run.
+A sampled merged run: brush-scan hull traces 42% of the crowd's fixed step, Rapier 27%.
+
+**Still broken or not tested:** the machine was not idle; Windows and a matched native run are
+not tested; replays were not rerun after the merge; the unscoped main-schedule time remains.
+
+**Next:** whole-frame timing, then brush-trace candidate rejection with a written budget.
+Plugin rules read: yes; exceptions: none.
+
 ## 2026-11-11: second-pass performance diagnosis (documentation only)
 
 **Agent/model:** Claude Code desktop, claude-fable-5-2. No subagents.

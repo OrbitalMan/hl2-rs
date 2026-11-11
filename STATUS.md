@@ -11,7 +11,10 @@ on the retained Windows crowd profile 1 ms off a tick returns about 2.8 ms of fr
 Fixed-step shares with 30 manhacks: NPC hull traces through the linear brush scan about 48%,
 Rapier tree and broad-phase maintenance 25%. Presentation: CPU facial flexes and CPU shadow
 silhouettes about 1.6 ms each. About 4 ms of main-schedule time per crowd frame is in no
-scope: **not measured**. Next: merge upstream's flight and sight fixes and re-profile, time
+scope: **not measured**. Upstream's flight and sight fixes are merged (`6c64694`): three
+interleaved pairs, crowd tick 5.59 to 5.03 ms and frame 13.62 to 12.58 ms with no range
+overlap, quiet unchanged; machine load recorded per run (load average 4.3 to 8.8, not idle).
+After the merge the brush scan is still 42% of the crowd's fixed step and Rapier 27%. Next: time
 the whole frame, then brush-trace candidate rejection and Rapier maintenance (DESIGN 14s).
 The first cycle's runtime edits below remain neutral and tested. Windows and a matched native
 run are **not tested**. Plugin rules read: yes; exceptions: none.
