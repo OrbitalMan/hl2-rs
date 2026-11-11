@@ -1,5 +1,38 @@
 # MODLOG
 
+## 2026-11-11: packaged performance research measurement checkpoint
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. Materially involved
+subagents handled rendering/source synthesis, simulation research and packaged measurements.
+
+**Changed:** completed the performance research report and local measurement record; added
+geometry author-to-implementation sources, six-variant trial/tail results, upstream revision
+scope, rejected experiments and concrete next tests. Updated STATUS and DESIGN disposition.
+No production runtime source, executable or shader was changed.
+
+**Why:** test which existing mechanisms influence the frame before selecting an optimization
+for the owner's unmatched RTX5070 station02 native250+/rewrite60+ observation.
+
+**Tested how / Result:** isolated existing release2208bcb on M1 Pro / Metal, fixed600-tick indoor
+spawn workload, three sequential interleaved rounds, six variants, muted uncapped/profiled.
+All18 valid runs exited0/completed; baseline median5.811ms, noPVS7.736, CPUskin12.568,
+720p5.781, partition5.775, Low5.680. PVS/GPU skinning matter; resolution/partition changes
+are within variation, Low changes quality. Separate untimed1080p capture shows lit textured
+stairs. Source-checkpoint architecture/source-isolation and diff checks passed; final
+`git diff --check` and `python3 scripts/checks/architecture.py` also passed without baseline growth. Full methods and
+p95/p99 bounds: docs/performance-research.md and docs/performance.md.
+
+**Still broken or not tested:** two invalid-Low config trials remain rejected; existing
+asset/runtime warnings, setup-overlapping CPU scopes,1ms histogram bounds,different warmup
+simulation windows and existing compressed/swap memory limit interpretation. No new optimized
+build, WindowsRTX5070/native matched comparison, interactive throughput, local crowd or full
+custom-GPU-pass attribution is established. Measured baseline is four commits behind fetched
+upstream main6d0b2f6; flight/sight improvements are already published,14s redesign remains planned.
+
+**Next:** reproduce the exact owner fixture on Windows/latest upstream; validate existing14s
+hitbox/query plan or separately measured render-preparation/sprite batching without changing
+behavior or dropping visual work. Plugin rules read: yes; exceptions: none.
+
 ## 2026-11-11: performance research source checkpoint
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. Materially involved

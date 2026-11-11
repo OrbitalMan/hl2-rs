@@ -1,5 +1,25 @@
 # STATUS
 
+## Performance research and packaged sensitivity checkpoint (2026-11-11)
+
+Broad author/source research and 18 valid packaged fixed-tick station02 indoor-spawn trials
+are complete; see docs/performance-research.md. The measured existing release package is
+2208bcb (SHA256 51cf256188b5e0446165cc2dc55ad90729768143683151f9c4e5182c41895fc5), M1 Pro / Metal,
+muted headless uncapped/profiled, 1080p explicit High/HDR Full/no-AA settings. Baseline median
+5.811 ms/frame (~172 FPS); no-PVS 7.736, CPU skinning 12.568; 720p/partition differences are
+within trial variation. No new optimization was implemented. Two invalid-Low attempts remain
+rejected, with existing warnings and memory-pressure limits retained; screenshot is an untimed
+lit stairwell view, not a plaza/crowd comparison. All accepted scripts finish tick600.
+
+The package predates upstream main6d0b2f6 by four commits, including completed flight/sight query
+improvements. Latest fetched session53 tip1473203 still plans the14s lazy-hitbox/query-maintenance
+work; avoid duplicating it. Owner RTX5070 station02 native250+/rewrite60+ remains unmatched:
+CPU, resolution/settings/view/workload are unknown. Windows/native comparisons, local crowds,
+interactive presentation and future optimized builds are **not tested**. Reproduce with
+`python3 artifacts/performance-research-2026-11-11/benchmark.py`; raw accepted/rejected reports
+remain there. Next: matched Windows owner fixture, reuse upstream tracing improvements, then
+validate existing14s work or separate measured render-preparation/effects experiments.
+
 ## Current-count observer integration (2026-11-03 HH)
 
 HH completes the authored integration after the frozen HF35-root cutoff. Cap1/12/36 debugger26872/54416/29420 andhosts50100/51096/54980 exit0:49samples/196count reads/686nested reads/196parent-side reads/588model reads/49caller-FP pairs;23new identity/model-wrapper/phase controls pass. Full36 covers local1/virtual2/virtual24 counts. Independent review confirms the same stopped identity andmodel-prefix joins. HH is sealed separately; HF's earlier inventory remains unchanged. No further native attempt. Next prepare a new nested/current-count native root only after a fresh ownership guard clears; current count still does not prove earlier getter consumption. Actor/cache/final-pose/campaign/Rust parity remain open, with no Rust action.

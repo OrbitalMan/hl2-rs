@@ -15,7 +15,11 @@ Windows profiles and the owner's unmatched RTX 5070 station02 observation. Attri
 render preparation, per-view work and custom GPU passes without adding overlapping scopes.
 Preserve source behavior, current bounds, monitor views and exact trace results. Any later runtime
 experiment receives its own bounded design, regression checks and before/after frame-time evidence;
-this checkpoint changes documentation only. Fresh timings remain pending.
+this checkpoint changes documentation only. Fresh timing disposition: 18 valid fixed-600-tick
+packaged sensitivity runs at station02 indoor spawn are complete; existing PVS/GPU skinning
+matter, while resolution/partition changes are within variation. Methods, rejected Low trials
+and limits are recorded in docs/performance-research.md. No new optimized build or matched
+RTX 5070/native result is established.
 
 ## Current-count integration disposition (2026-11-03 HH)
 

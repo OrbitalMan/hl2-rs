@@ -3,7 +3,7 @@
 Research checkpoint: 2026-11-11. Runtime inspected at `2208bcb618adfd3072ea5fd00553babdcb9a7866`.
 This document records external implementation evidence, the corresponding HL2-RS code,
 and bounded experiments. No runtime optimization has been implemented in this checkpoint.
-Fresh local measurements are pending and must be recorded separately from historical results.
+Fresh local packaged measurements are complete and recorded below, separately from historical results.
 The measured baseline predates published upstream trace improvements; see revision scope below.
 
 ## Scope and the reported gap
@@ -171,6 +171,25 @@ overdraw reordering can be unhelpful on tile GPUs. [AMD analysis](https://gpuope
 [Apple documentation](https://developer.apple.com/documentation/Metal/rendering-a-scene-with-deferred-lighting-in-swift),
 [mesh layout guidance](https://github.com/zeux/meshoptimizer).
 
+## Geometry headlines: distinguish source scenes from shaded frames
+
+The Nyx author advertises roughly 1.6 billion unique / 18.9 billion instanced triangles and
+links the implementation; author comments point to Epic's technical presentations. The
+repository clarifies that these are source-scene totals, with actual per-frame work selected
+by visibility and LOD. Its current example uses Ryzen 9950X / 96 GiB / RTX 5070, DX12 mesh
+shaders, two-pass hierarchical-depth culling, compressed asynchronous pages and cached
+shadows. It defaults to DLSS Quality with fallback, so output 4K is not proof of native 4K
+shading. Current repository counts differ from the older post. This is a renderer prototype,
+not a complete campaign comparison or a drop-in Bevy feature.
+[Author post and comments](https://www.reddit.com/r/GraphicsProgramming/comments/1rm9mf0/i_built_a_nanitestyle_virtualized_geometry/),
+[implementation and architecture](https://github.com/moonlovelj/Nyx).
+
+The legacy Vulkan Guide sample reports 125,000 objects, 40 million triangles across two mesh
+passes and 290 FPS on RTX 2080, with CPU processing under 0.5 ms. GPU-resident state and
+indirect command construction explain its low submission cost; the chapter explicitly labels
+itself outdated. These are sample results, not equivalent HL2 gameplay or predicted savings.
+[Implementation guide](https://vkguide.dev/docs/gpudriven/gpu_driven_engines/).
+
 ## Current code: concrete opportunities and existing safeguards
 
 | Area | Inspected implementation | Implication to test |
@@ -246,9 +265,70 @@ Each timing fixture must finish its intended workload; a fixed frame cap can sam
 simulation duration. Pair visual comparisons with gameplay/trace assertions. Diagnostic runs
 that disable work establish attribution only and cannot qualify an optimization.
 
-Fresh local packaged tests: **pending at this checkpoint**. Matched native RTX 5070 comparison:
+Fresh local packaged tests: **18 valid completed sensitivity runs**, detailed below. Matched native RTX 5070 comparison:
 **not tested**. Windows validation of any future runtime change: **not tested** here. No
 performance gain, sustained FPS target or complete campaign fidelity is established by this report.
+
+## Fresh packaged measurements: indoor station02 spawn
+
+The existing release package matches `2208bcb618adfd3072ea5fd00553babdcb9a7866`, SHA256
+`51cf256188b5e0446165cc2dc55ad90729768143683151f9c4e5182c41895fc5`.
+Apple M1 Pro / Metal, 10 logical CPUs, 16 GiB, advanced-options/debug-tools plugins;
+muted headless uncapped profiling. Explicit baseline: 1920x1080, FOV 75, HDR Full,
+High model/texture/shader/shadow, World water, no AA, trilinear, motion blur and color
+correction on, multicore on, VSync off. These are controlled settings, not the owner's
+unestablished RTX 5070 settings or the local saved configuration.
+
+Six variants ran in three sequential interleaved orders. Each completed the same script at
+host tick 600; the 12,000-frame limit is only a safety cap. All 18 valid launches exited 0,
+with zero GPU completion errors, pose/visibility mismatches and texture errors. Two initial
+Low trials used an invalid water enum and remain rejected; two asset warnings and existing
+runtime warnings remain. No native game was launched and no user-launched application closed.
+
+| Variant | Trial mean frame times, ms | Median, ms | FPS from median | Trial p95 upper bounds, ms | Trial p99 upper bounds, ms |
+| --- | --- | ---: | ---: | --- | --- |
+| Baseline | 5.879 / 5.811 / 5.751 | 5.811 | 172.1 | 10 / 9 / 9 | 13 / 11 / 11 |
+| 720p | 5.781 / 5.735 / 5.982 | 5.781 | 173.0 | 9 / 9 / 10 | 12 / 11 / 13 |
+| PVS disabled | 7.736 / 7.674 / 7.784 | 7.736 | 129.3 | 10 / 10 / 11 | 14 / 14 / 14 |
+| World partition | 5.773 / 5.775 / 5.811 | 5.775 | 173.2 | 9 / 9 / 9 | 13 / 13 / 14 |
+| CPU skinning | 12.568 / 12.640 / 12.476 | 12.568 | 79.6 | 20 / 21 / 21 | 23 / 22 / 23 |
+| Low at 1080p | 5.680 / 5.796 / 5.650 | 5.680 | 176.1 | 9 / 9 / 9 | 11 / 13 / 11 |
+
+PVS disabled costs 33.1% more median frame time; CPU skinning costs 116.3% more. These
+measure already implemented mechanisms, not a newly optimized build. The 720p and partition
+differences (0.51% and 0.61%) are inside trial variation. Low differs by 2.25%, overlaps baseline
+variation and changes quality; no general gain is established.
+
+At the final viewpoint partitioning reduces candidates 52,768 to 7,257 triangles (about 86%)
+but raises candidate meshes 50 to 62 and loaded meshes 1,835 to 2,587. The tiny timing change
+shows why candidate triangle savings alone do not establish a faster frame. These are CPU
+candidates unioned across views, excluding sky/viewmodels, not actual GPU draws.
+
+The scene is the indoor spawn facing the stairwell exit, without a spawned crowd, not the
+plaza. Baseline final feet (-4304,-224,-63.96875), eye (-4304,-224,0.03125), grounded, tick 600
+agree. A separate untimed 1920x1080 capture shows lit, textured stairs and walls; its readback
+cost is excluded. Evidence: `artifacts/performance-research-2026-11-11/baseline-visual.png`.
+
+Frame statistics discard 120 gameplay frames and use 1 ms histogram upper bounds for p95/p99;
+p50 is unavailable. Different rendered-frame counts mean the discarded frames cover different
+simulation intervals; this is not a cycle-isolated skinning test. CPU scopes include setup,
+discard 30 calls, overlap, and are not GPU timing. Existing compressed memory and about
+640 MiB swap qualify results; unchanged swap occupancy does not establish zero paging.
+Power/thermal sensors, full custom-pass GPU timestamps, live windowed FPS, heavy crowds
+locally and Windows RTX 5070/native comparison are **not tested**.
+
+Reproduce from the repository root:
+
+```text
+python3 artifacts/performance-research-2026-11-11/benchmark.py
+```
+
+The ignored experiment directory retains the isolated package, exact per-run arguments and
+configs, raw reports/logs, `measurements.json`, `summary.json`, environment snapshots and
+rejected trials. A populated matrix is resumed rather than fresh evidence; independent reruns
+need a fresh isolated package/output set. The full report is
+`artifacts/performance-research-2026-11-11/reports/HL2RS performance research.md`.
+No new runtime dependency or production optimization was introduced.
 
 ## Research access limits
 

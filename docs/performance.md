@@ -1086,3 +1086,35 @@ A sequential900-frame1080p uncapped/profiled spawn run averages174.72FPS/5.723ms
 Station02 retains324429 triangles and743 materials, while loaded draw meshes rise921→1670. In the inspected plaza, union-of-view candidates fall69425→32011 triangles; its image is pixel-identical. These are candidates after PVS/frustum/layer checks, excluding sky/viewmodels, not GPU draw-call or fragment counts. Preliminary sequential900-frame1080p profiles measured159.74→165.91FPS at spawn and125.65→127.01FPS in the plaza; normal run variation and different autonomous scene durations prevent a robust general speed claim. A later frozen-scene diagnostic intentionally ends before its script completes and returns an incomplete-script error; it is excluded from these comparisons.
 
 An initial hall camera intersected a pillar and was rejected as visibility evidence. Area portals, occluders, native LODs and campaign-wide culling validation remain unfinished.
+
+
+## Bounded performance research: fixed-duration indoor sensitivity (2026-11-11)
+
+An isolated release package at `2208bcb618adfd3072ea5fd00553babdcb9a7866` (SHA256
+`51cf256188b5e0446165cc2dc55ad90729768143683151f9c4e5182c41895fc5`) ran on M1 Pro / Metal,
+10 logical CPUs / 16 GiB, advanced-options/debug-tools plugins. Station02 indoor spawn,
+fixed script ending tick 600, muted headless, uncapped/profiled, no capture while timing;
+1920x1080, FOV75, HDR Full, High details/shadows, no AA, trilinear, motion blur/color correction
+on. Three interleaved rounds: median of mean frame times, baseline 5.811 ms (5.751–5.879),
+720p 5.781 (5.735–5.982), no-PVS 7.736 (7.674–7.784), partition 5.775 (5.773–5.811), CPU
+skinning 12.568 (12.476–12.640), Low 5.680 (5.650–5.796). Baseline p95 bucket upper bounds
+10/9/9 ms, p99 13/11/11; exact p50 is unavailable. Full trial and tail table:
+[performance-research.md](performance-research.md).
+
+All 18 valid runs exited 0, reached tick 600 and completed; two invalid-Low config attempts
+remain rejected. Existing PVS/GPU skinning reduce median frame time substantially versus their
+disabled/fallback controls; this is no new runtime optimization. Partition cuts candidate
+triangles 52,768 to 7,257 but barely changes frame time; 720p and partition differences are within
+variation. Low changes quality and overlaps baseline variation. CPU candidates are not GPU draws.
+The untimed 1080p capture shows the indoor stairwell, not the crowd/plaza.
+
+The 120-frame warmup covers different simulation intervals at different throughput. CPU scope
+windows include setup and overlap; graph CPU wall intervals are not GPU timestamps. Existing
+compression/about 640 MiB swap qualify timings; full GPU/power/thermal counters are unavailable.
+The package omits four newer upstream-main commits, including flight/sight query improvements.
+Windows RTX 5070, live presentation, local crowds, native matched settings and general FPS
+improvements are **not tested**. No source/build modification or installed-game write occurred.
+
+Evidence and reproduction: `artifacts/performance-research-2026-11-11/summary.json`,
+`measurements.json`, per-run reports/logs/configs, `baseline-visual.png`, environment snapshots;
+`python3 artifacts/performance-research-2026-11-11/benchmark.py` from the repository root.
