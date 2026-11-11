@@ -23,6 +23,7 @@
 !/scripts/checks/architecture-baseline.json
 !/test-inputs/*.json
 !/test-inputs/expected/*.json
+!/test-inputs/performance-research/*.json
 !/docs/*.md
 !/docs/images/hl2-rs-trainstation.png
 !/plugins/*/Cargo.toml

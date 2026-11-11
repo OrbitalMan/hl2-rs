@@ -1,5 +1,69 @@
 # MODLOG
 
+## 2026-11-11: second-pass performance diagnosis (documentation only)
+
+**Agent/model:** Claude Code desktop, claude-fable-5-2. No subagents.
+
+**Changed:** `docs/performance-research.md` gains a first section with the reasons the first
+cycle gained nothing, the frame model, exclusive fixed-step shares, presentation costs, rules
+and a ranked list with ceilings; STATUS first section. No runtime code.
+
+**Why:** the owner asked why the optimizations had no effect and what the next cycle must learn.
+
+**Tested how / Result:** re-read the 30 retained reports and 1 ms samples; two new 10 ms
+stack-sampled packaged runs (quiet, 30 manhacks, 2400 ticks, both exit 0) reduced to exclusive
+per-system and per-call-path tables. Optimized helpers: 12 of 3,454 busy observations. Crowd
+fixed step: linear brush-scan hull traces about 48%, Rapier maintenance 25%. Model
+`T = N / (1 - S/15)` fits M1 and the retained Windows profile. Scope and sample ratios agree
+within the sampled run (animation to fixed 0.22 against 0.17).
+
+**Still broken or not tested:** about 4 ms of main-schedule time per crowd frame is unscoped
+and unexplained; `N` is derived, not timed; both samplers perturb timing; Windows, a matched
+native run and upstream's tip are not tested. No optimization was made in this pass.
+
+**Next:** merge upstream, add whole-frame timing, then brush-trace candidate rejection and
+Rapier maintenance, each with a written ms budget first. Plugin rules read: yes; exceptions: none.
+
+## 2026-11-11: implemented presentation helpers; no established frame gain
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. Materially involved
+subagents performed rendering/review/synthesis, simulation lookup/audit and packaged measurements.
+
+**Changed:** persistent effect-quad attribute storage, single new-slot initialization and
+unchanged material/visibility-write avoidance; instance-resolved shared attachment helper and
+batched eligible manhack model lookup with zero/singleton fast paths. Added source-only paired
+driver, authored tests/five fixtures and narrow JSON whitelist exception. Final report explains
+why selected microsecond helpers did not reduce the millisecond-scale frame bottlenecks.
+No shaders, dependencies, AI cadence, collision semantics or effect count/lifetime changed.
+
+**Why:** the owner requested implementation/testing before the report and an evidence-based
+explanation of the neutral result to guide the next cycle, rather than demo-FPS extrapolation.
+
+**Tested how / Result:** four effect tests, three glow tests, 24 equivalent-output glow microcases;
+full validate and Windows cross-target strict Clippy pass. Geometry ~0.242→0.0086 us/update;
+30-actor / 1k-prefix glow28.590→17.789 us, with small-case overhead retained. Thirty paired M1 Pro / Metal
+packaged launches complete 600 ticks with all 15 full gameplay-state pairs equal. Medians ms:
+quiet 5.5359→5.5493, frozen 5.9949→5.9566, active 7.4000→7.3968,crowd 1080p13.5671→13.6421,
+retina 13.8773→13.8715. Overlap/poorer 1080p tails and swap 706→2339 MiB qualify differences;
+**no end-to-end FPS gain established**. All 6 original+3baseline-control+6fixed-exposure particle
+assertions pass; fixed fire/smoke are pixel-identical, ball retains61pixels / max 1 RGB. Separate
+1800-tick worker sampling/ordered-source audit identifies shared static-brush NPC/player scans,
+not optimized helpers, as a stronger conditional next target. Counts are not ms or summed shares.
+
+**Still broken or not tested:** failed ordinary HDR/baseline image equality and ball's residual
+fixed-exposure difference remain retained; exact ball/all-camera/campaign parity unproven.
+Rejected initial test/config/grenade/NPCplacement attempts remain logged. Windows runtime,
+matched native 276 FPS fixture and latest-upstream runtime comparison are not tested. Both tested
+packages omit four newer upstream flight/sight commits. Candidate SHA256
+51002f989e04e2f8d72dc96bfa0fc55d1ce1c38ce17b7f776b7939f310cd07ab pins a22f6a0 plus runtime edits
+through the source manifest, not an unchanged checkpoint build. No helper-ratio FPS promise.
+
+**Next:** validate/profile latest shared baseline first; coordinate 14s ownership, then only if
+still dominant investigate one conservative static-brush candidate kernel with exact ordered
+Trace fields/fallbacks and full cost accounting. Evidence: docs/performance-research.md,
+docs/performance.md, docs/validation.md and ignored implementation artifacts. Plugin rules read:
+yes; exceptions: none.
+
 ## 2026-11-11: corrected original performance observation provenance
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. Rendering/research

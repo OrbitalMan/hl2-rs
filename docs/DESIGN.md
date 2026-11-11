@@ -4,7 +4,7 @@
 
 The owner clarified that techniques must be implemented and tested before the final report.
 Existing research and sensitivity results are preliminary. No new speedup is established.
-Keep the clarified RTX 3070 / station02 plaza / native276FPS observation distinct from the
+Keep the clarified RTX 3070 / station02 plaza / native 276 FPS observation distinct from the
 local M1 Pro indoor workload; native/rewrite settings and exact CPU model remain unknown.
 
 ### A. Reuse effect-quad storage and avoid unchanged ECS writes
@@ -39,17 +39,55 @@ is not excused by a dense-effects win. Report variation and any unavailable coun
 speedup only after the before/after evidence supports it, with visual/behavior checks passing.
 Keep each validated change independently reversible and reviewable.
 
-### B. Hold the simulation candidate for its audit
+### B. Resolve manhack glow model instances once per presentation
 
-A simulation candidate is still being audited. No implementation is selected or approved by
-this plan. Preserve the published upstream flight/sight improvements and the existing14s
-hitbox/query-maintenance ownership. Record the candidate's exact source/correctness boundary,
-retail evidence and bounded validation design before any simulation code change. Do not
-combine hypothetical savings with the effect-pool result.
+The current glow iterator calls the shared attachment helper for each eligible manhack;
+that helper scans all model instances for the actor's first match. Replace repeated scans
+with one scoped pass: collect eligible actors in their existing sorted order, find their
+first matching instances through binary search into that list, then evaluate the same
+shared attachment math. Extract a crate-private instance-resolved attachment entry point;
+keep the existing public helper and its first-match behavior. No persistent index, public
+World contract, simulation timing, pose sampling or cache lifetime changes are introduced.
+No eligible actors means no model scan or allocation; one eligible actor uses the original
+lookup without temporary storage. This fast path addresses the measured small-population
+overhead in the first isolated CPU experiment. Preserve visibility, corpse/killed,
+strobe, AI-disabled, missing rig/attachment and current animation/scale behavior.
 
-The final report follows completed implementation/testing, and must separate accepted gains,
-neutral results, rejected experiments and work still not tested. Update MODLOG and STATUS with
-actual measured results rather than promoting the preliminary sensitivity study as a new gain.
+Before qualification, compare ordered outputs against the existing public attachment helper
+for arbitrary instance order, duplicate instances, missing data, hidden/killed/corpse actors,
+stunned frames, AI-disabled state and scaled animated attachments. Add an ignored isolated
+CPU benchmark with unrelated-instance counts and output equivalence, then use packaged
+crowd timing/visual evidence. Report measured overhead as well as wins; avoid claiming a
+whole-frame improvement from a lookup-only result. Preserve upstream trace improvements
+and the existing 14s hitbox/query-maintenance ownership; do not combine hypothetical savings.
+
+### Completed disposition and conditional next cycle
+
+A and B are implemented. Four effect tests and three glow equivalence tests pass; full local
+validation and Windows cross-target Clippy pass. Thirty paired packaged runs preserve all 15
+full gameplay-state pairs but establish no frame-rate improvement; isolated helper savings
+were too small to target the millisecond-scale critical work. The original frozen path already
+skipped unchanged geometry. Fixed-exposure fire/smoke image checks pass exactly; ball retains
+61pixels / max 1 RGB, so no full pixel-parity claim. Retain the failed ordinary HDR and baseline-repeat
+comparisons. Detailed timings, memory drift, tails and source/package identity are in
+performance-research.md and performance.md.
+
+Current-only worker sampling identifies the shared full static-brush hull trace as a stronger
+conditional candidate, especially NPC flight/sweep paths. First validate and profile a shared
+baseline with existing 4805c93 / 7f0e9ff fixes (published main 6d0b2f6): this cycle's base omits them,
+so observed repeated static scans can be stale/amplified. Check unprofiled throughput separately
+from profiling fences. Coordinate existing 14s hitbox/query ownership; do not duplicate it.
+
+Only if that kernel remains dominant, bound ONE experiment around conservative static-brush
+candidate rejection. Count actual queries/brushes/planes/candidates by consumer before coding;
+reuse existing swept-AABB query traversal with a represented-collider→original-brush mapping
+and exact fallback set for failed/unproven conversions. PVS is not a collision index. Keep one
+exact plane accumulator in original brush order, preserving epsilon, contents, equal-hit normal
+ownership, start_solid and all_solid: per-brush minimum merging is not equivalent. Dynamic doors/
+props retain their separate pose-aware path. Validate tangent/overlap/escape/all-solid/corner,
+clip-mask/large-hull/fallback cases and owned-map sweeps against the full-scan oracle. Include
+candidate sorting, scratch allocation and maintenance cost in before/after measurements. No new
+index, API/contract change, persistent memory note or projected FPS is part of this cycle.
 
 ## Performance research and benchmark plan (2026-11-11)
 
@@ -62,7 +100,7 @@ claims are not HL2-RS gains.
 
 Establish isolated packaged release measurements with declared settings, view, workload, warmup,
 completed scripts and repeated alternating trials. Separate fresh contributor results from retained
-Windows profiles and the owner's unmatched RTX 5070 station02 observation. Attribute fixed ticks,
+Windows profiles and the observer's unmatched RTX 3070 station02 observation. Attribute fixed ticks,
 render preparation, per-view work and custom GPU passes without adding overlapping scopes.
 Preserve source behavior, current bounds, monitor views and exact trace results. Any later runtime
 experiment receives its own bounded design, regression checks and before/after frame-time evidence;
@@ -70,7 +108,7 @@ this checkpoint changes documentation only. Fresh timing disposition: 18 valid f
 packaged sensitivity runs at station02 indoor spawn are complete; existing PVS/GPU skinning
 matter, while resolution/partition changes are within variation. Methods, rejected Low trials
 and limits are recorded in docs/performance-research.md. No new optimized build or matched
-RTX 5070/native result is established.
+RTX 3070/native result is established.
 
 ## Current-count integration disposition (2026-11-03 HH)
 

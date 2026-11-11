@@ -1,5 +1,45 @@
 # Local validation — 2026-10-05
 
+## Effect geometry/glow implementation validation (2026-11-11)
+
+Four effect-pool tests verify exact positions/UV/color/index/normal/UV1 output, storage reuse,
+invalid-storage fallback, material-handle remapping and pool bounds/layers/show-hide behavior.
+Three glow tests compare ordered current attachment output with the old first-model lookup,
+including duplicates, missing records/rigs/attachments, scaled animated poses and hidden/killed/
+corpse/stunned/AI-disabled cases. The 24-case isolated glow timing asserts equivalent output;
+small-case overhead remains reported. `scripts/checks/validate.sh` passes architecture, existing
+Python checks, plugin combinations, crate tests, strict Clippy and fmt.
+`scripts/checks/check_windows.sh` passes cross-target strict Clippy; Windows runtime is not tested.
+
+All 30 paired packaged launches finish host 600 with intended workloads and no GPU/texture/sprite/
+model/pose/missing-particle/capacity errors. All 15 paired full inventory/AI/projectile digests and
+reduced outcomes match. Quiet/frozen/active/crowd/retina cases check actual frames and completed
+scripts. All 6 original particle replays pass assertions, as do 3 baseline-repeat controls and 6
+fixed-exposure controls. Ordinary HDR images are not byte-stable (including same-baseline
+repeats) and report different exposure; failures are retained. Fixed `--tonemap-scale 1.0`
+with 400 host-tick prewarm yields identical fire/smoke images; ball differs 61 pixels / max 1 RGB in
+[1257,841,1286,854]. Exact ball pixel parity and full-campaign/all-camera equivalence remain
+unproven; no tolerance/extra flags promote the failure. Original timing settings are unchanged.
+
+The source-only measurement driver and 9 authored tests cover workload rejection, actual internal
+resolution, weighted complete windows, config restoration/path confinement, config symlink
+rejection and full paired gameplay-state mismatch. Fixture whitelist admits only five JSON
+sources. Root-level final helper/document checks are recorded with the checkpoint; runtime
+binaries/assets and generated reports remain ignored, not distributed.
+
+Separate current-only 1800-tick diagnostic runs finish (crowd 30 Combat, frozen 142 sprites); built-in
+sampled stacks and conservation parser are attribution evidence, not a throughput comparison.
+An overlapping keyword union is not a frame budget; waits/unresolved states are explicit.
+No new third-party patch or runtime prerequisite is introduced. Rejected initial authored test
+setups, invalid-Low config, empty-grenade pilot and failed NPC placement are retained in
+`artifacts/performance-implementation-2026-11-11/rejections.md` and original logs.
+
+Methods/source/package identity/trials/tails/visual limits and reproduction:
+[performance-research.md](performance-research.md). Candidate release SHA256
+51002f989e04e2f8d72dc96bfa0fc55d1ce1c38ce17b7f776b7939f310cd07ab; a22f6a0 plus pinned runtime
+source edits, not an unchanged a22f6a0 build. No end-to-end FPS gain is established.
+
+
 ## Integrated current-count observer (2026-11-03 HH)
 
 Caps1/12/36:debugger26872/54416/29420 andhosts50100/51096/54980 exit0.49samples/196count reads/686nested reads/196parent-side reads/588model reads/49caller-FP pairs and23new controls pass. Full36 covers local1/virtual2/virtual24 routes. Same stopped identity, model-wrapper prefix, code/file/path/two-generation/cap/cleanup checks pass. Independent review finds no material issue. HH is checked separately from the frozen HF35-root inventory. Native nested/current count/getter history andRust parity **not tested**; no additional native launch orgameplay rebuild.

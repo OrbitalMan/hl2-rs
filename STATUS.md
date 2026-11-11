@@ -1,11 +1,55 @@
 # STATUS
 
-## Performance research and packaged sensitivity checkpoint (2026-11-11)
+## Performance: why cycle one gained nothing, and the next targets (2026-11-11)
 
-Implementation and validation are now in progress at the owner's clarification: implement
-techniques and test them before the final report. The existing research report is preliminary,
-with no new speedup established. The bounded effect-quad storage/ECS-write plan is at the top
-of docs/DESIGN.md; a simulation candidate remains under audit, not selected for code changes.
+Second-pass diagnosis, no runtime change: `docs/performance-research.md`, first section.
+The two implemented helpers owned at most about 0.05 ms of a 13.4 ms crowd frame (12 of 3,454
+busy stack observations); they were picked from a survey, not from a frame budget, and the
+paired test's 1 to 3% spread could not resolve them. The frame is bound by the serial main
+world, not the renderer or GPU. The fixed step is amplified by frame time (`T = N / (1 - S/15)`):
+on the retained Windows crowd profile 1 ms off a tick returns about 2.8 ms of frame.
+Fixed-step shares with 30 manhacks: NPC hull traces through the linear brush scan about 48%,
+Rapier tree and broad-phase maintenance 25%. Presentation: CPU facial flexes and CPU shadow
+silhouettes about 1.6 ms each. About 4 ms of main-schedule time per crowd frame is in no
+scope: **not measured**. Next: merge upstream's flight and sight fixes and re-profile, time
+the whole frame, then brush-trace candidate rejection and Rapier maintenance (DESIGN 14s).
+The first cycle's runtime edits below remain neutral and tested. Windows and a matched native
+run are **not tested**. Plugin rules read: yes; exceptions: none.
+
+## Implemented performance experiments and next-cycle diagnosis (2026-11-11)
+
+Persistent effect-quad buffers/no-op ECS-write avoidance and batched manhack glow model lookup
+are implemented, with 4 geometry/state tests and 3 attachment equivalence tests. Full validate and
+Windows cross-target Clippy pass. Isolated geometry 0.242→0.0086 us/update and30-actor / 1k-prefix
+lookup 28.590→17.789 us gains do not become whole-frame gains. All 30 paired packaged runs complete
+fixed 600 host-tick workloads on M1 Pro / Metal; all 15 final inventory/AI/projectile state pairs match.
+Medians before→after ms: quiet 5.5359→5.5493; frozen5.9949→5.9566; active fire7.4000→7.3968;
+crowd 1080p13.5671→13.6421; crowd3456x2168 13.8773→13.8715. Ranges overlap; crowd 1080p p99 buckets
+worsen 23/23/23→24/25/26ms. Swap 706→2339 MiB qualifies timings. No sustained FPS gain is established.
+
+Original HDR image checks fail, including same-baseline repeats; exposure differs. Fixed-exposure
+controls pass all 6 particle assertions; fire/smoke are pixel-identical, ball retains 61 changed
+pixels / max 1 RGB at the viewmodel glow, so exact ball parity remains unproven. No failed image
+was discarded. Source/package evidence and all limits: docs/performance-research.md.
+
+Separate current-only 1800-tick sampled-worker diagnostics identify shared static-brush hull
+tracing as a stronger conditional target (710 crowd observations;634 under flight), with Rapier
+tree/broadphase work also present. Counts are not ms or exclusive frame shares; main-thread
+waiting must not hide worker CPU work. Static planes are scanned for BOTH NPC/player sweeps.
+First rebase/validate a shared baseline containing existing upstream flight/sight fixes; only
+if this remains dominant, investigate conservative existing-query-tree brush candidates with
+exact ordered plane semantics/fallbacks. Coordinate existing 14s ownership ; no next-cycle index
+was implemented. Windows/native matched timing, full-campaign/all-camera parity remain not tested.
+
+Candidate executable SHA256 51002f989e04e2f8d72dc96bfa0fc55d1ce1c38ce17b7f776b7939f310cd07ab;
+source identity records a22f6a0 plus pinned runtime edits. Both tested packages omit four newer
+published-main commits; fetch still sees main 6d0b2f6 / session53 1473203. Original 276 FPS observation
+is RTX 3070 with many plaza manhacks, not the provisional earlier 5070 identification. Reproduction:
+`scripts/checks/check_effect_pool_performance.py` with isolated packages and fresh artifacts output.
+Plugin rules read: yes; exceptions: none.
+
+## Preliminary performance sensitivity checkpoint (2026-11-11)
+
 Broad author/source research and 18 valid packaged fixed-tick station02 indoor-spawn trials
 are complete as preliminary evidence; see docs/performance-research.md. The measured existing release package is
 2208bcb (SHA256 51cf256188b5e0446165cc2dc55ad90729768143683151f9c4e5182c41895fc5), M1 Pro / Metal,

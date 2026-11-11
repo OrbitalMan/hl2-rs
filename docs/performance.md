@@ -1131,3 +1131,41 @@ is conflicting/provisional. The historical Windows profile remains a separate in
 session; none of the fresh Mac measurements changed. A separate contemporaneous observation
 reports M1 Pro / maximum graphics / 3456x2168 / idle plaza 65–80 FPS at `2208bcb`, not the controlled
 1080p indoor headless workload. No new runtime test or speedup follows from this correction.
+
+
+## Implemented effect/glow experiments: no established frame gain (2026-11-11)
+
+M1 Pro / Metal, 10 logical CPUs / 16 GiB, identical explicit High/HDR Full/no-AA settings and plugins,
+three paired rounds over five fixed 600-tick cases (30 launches), no capture/competing build during
+timing. Baseline 2208bcb SHA256 51cf256188b5e0446165cc2dc55ad90729768143683151f9c4e5182c41895fc5;
+candidate a22f6a0 plus source-manifest runtime edits, SHA256
+51002f989e04e2f8d72dc96bfa0fc55d1ce1c38ce17b7f776b7939f310cd07ab. Shader hashes match.
+
+Median frame ms before→after:quiet 5.5359→5.5493; frozenfire5.9949→5.9566; animated fire7.4000→7.3968;
+crowd 1080p13.5671→13.6421; crowd3456x2168 13.8773→13.8715. All 15 full gameplay-state pairs match.
+Ranges overlap, and 1080p crowd p99 bucket bounds worsen 23/23/23→24/25/26ms. Frozen contained-window
+median 5.9182→5.7931ms is secondary/mixed, not an established whole-game win. Swap 706→2339 MiB and
+~1.66 GiB system swapout traffic qualify interpretation. Complete trials/tails/methods:
+[performance-research.md](performance-research.md).
+
+The geometry helper improves ~0.242→0.0086 us, but 142 hypothetically changed quads save only ~0.033 ms;
+the frozen baseline already skipped unchanged geometry. Glow 30 actors / 1k-prefix saves ~0.0108 ms.
+These presentation helpers do not reduce NPC decisions, exact world sweeps, Rapier or draw count.
+Current crowd scopes remain millisecond-scale (median means: fixed 5.648 ms/call, graph 2.582,
+assets 1.951, prepare 1.035), overlap and include setup; the assets mean includes ~501 ms setup cost.
+
+Separate 1800-tick current-only sampled diagnostics conserve thread observations:shared static
+brush trace295quiet/710 crowd, optimized glow 10 crowd / quad pool 2 frozen. Crowd fixed-system 1527,
+physics-step 379 includes rebalance 141 / broadphase 161; do not sum ancestors/descendants or treat
+counts as milliseconds. Main 2101/2129 snapshots wait while workers run. The full brush-plane scan
+is shared by NPC/player hull traces, mostly NPC flight in this crowd. First validate/profile
+latest shared baseline including published flight/sight fixes before a new candidate-index
+experiment; preserve ordered exact plane/epsilon/start/all-solid/normal behavior and fallback
+brushes. This diagnosis is not a speedup measurement or a completed next-cycle change.
+
+All 6 fixed-exposure particle checks pass; fire/smoke images exact, ball 61 pixels / max 1 RGB remains
+unresolved. Ordinary HDR cross-build AND baseline-repeat byte checks fail; retained separately.
+No original 30 timing run was replaced by fixed-exposure timing. Evidence:
+`artifacts/performance-implementation-2026-11-11/paired-summary.json`,source/package manifest,
+raw reports/logs,controlled/regression summaries,CPU experiments and diagnostics/stack-summary.json.
+Windows/native matched timing and full-campaign/all-camera runtime parity remain **not tested**.

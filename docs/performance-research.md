@@ -1,10 +1,382 @@
-# Performance research: implementation leads and validation
+# Performance research and implementation results
 
-Research checkpoint: 2026-11-11. Runtime inspected at `2208bcb618adfd3072ea5fd00553babdcb9a7866`.
-This document records external implementation evidence, the corresponding HL2-RS code,
-and bounded experiments. No runtime optimization has been implemented in this checkpoint.
-Fresh local packaged measurements are complete and recorded below, separately from historical results.
-The measured baseline predates published upstream trace improvements; see revision scope below.
+Checkpoint: 2026-11-11. Two presentation-side CPU optimizations are implemented and tested,
+but the 30-run paired matrix establishes no end-to-end FPS gain. Helper cost falls in isolated
+experiments; quiet/active/crowd frame medians remain within variation and 1080p crowd tails worsen.
+The following result supersedes the earlier research-only disposition. The 18-run sensitivity
+study below remains preliminary context and is not an implementation A/B result.
+
+## Second-pass diagnosis: where the frame goes, and the next cycle (2026-11-11)
+
+This section supersedes the ranking further down. It re-reads the retained 30-run reports and
+1 ms stack samples and adds two 10 ms stack-sampled runs of the same candidate package (quiet
+and 30-manhack plaza, 2400 host ticks, M1 Pro / Metal, 1080p). Sampled runs are attribution
+only: both samplers suspend the game for roughly a third of wall time, so their frame times
+are not throughput figures. No runtime code changed in this pass.
+
+### Why the first cycle gained nothing
+
+1. **The targets were chosen by analogy, not from a budget.** The web survey suggested sprite
+   batching and repeated-lookup removal; nobody first asked how many milliseconds those paths own
+   here. In the retained crowd samples the two optimized helpers hold 10 and 2 of 3,454 busy
+   observations. At most about 0.05 ms of a 13.4 ms frame was ever available to them.
+2. **A microbenchmark ratio is not a frame budget.** 28x on a 0.24 microsecond helper called a
+   few hundred times a frame cannot exceed 0.1 ms. The ratio was reported before the call count.
+3. **The paired test could not see the predicted gain.** Run-to-run spread was about 1 to 3%
+   and the predicted saving under 0.5%, so the 30 runs could only return "no difference".
+4. **No instrument covered the whole frame.** The CPU scopes overlap, average over loading
+   frames (1,278 scope calls for 648 gameplay frames in the crowd run, so per-frame means read
+   about half their gameplay value) and leave part of the main schedule unmeasured (below).
+5. **The 1 ms sampler distorted what it measured.** Suspended wall time still accumulates
+   fixed ticks, so the simulation's share was inflated and counts could not be scaled to ms.
+6. **The baseline was stale.** Upstream had already removed repeated flight sweeps and sight
+   rays (`4805c93`, `7f0e9ff`), the largest item this profile still shows.
+
+### What bounds the frame
+
+- The main world bounds it, not the renderer or the GPU. In the samples the main thread is
+  inside the main schedule in 2,080 of 2,129 snapshots, the pipelined render thread is parked
+  in more than half of its snapshots, and 3.6 times the pixels changes the crowd frame by under 2%.
+- The work is serial. Four compute workers are each about 30% busy and their busy time sums
+  to about one core: one system at a time hops between workers. More threads will not help.
+- **The fixed step is amplified by the frame time.** One 15 ms tick costs `S` ms and runs
+  `T / 15` times per frame, so `T = N + S * T / 15`, or `T = N / (1 - S / 15)`, with `N` the
+  rest of the main schedule (valid up to the 50 ms clamp, three ticks per frame).
+
+| Case | Frame `T` | Tick `S` | Fixed per frame | `N` (rest of main schedule) |
+| --- | ---: | ---: | ---: | ---: |
+| M1 Pro quiet (measured) | 5.6 ms | 3.86 ms | 1.4 ms | 4.2 ms |
+| M1 Pro 30 manhacks (measured) | 13.4 ms | 5.64 ms | 5.0 ms | 8.4 ms |
+| Windows plaza, empty (retained profile) | 13.6 ms | 5.3 ms | 4.8 ms | 8.8 ms |
+| Windows plaza, 30 manhacks (retained profile) | 42.1 ms | 10.5 ms | 29.5 ms | 12.6 ms |
+
+`N` is derived from the model, not timed. On the Windows crowd every millisecond removed from
+a tick returns about 2.8 ms of frame, and every millisecond removed from `N` about 3.3 ms.
+A free simulation would still leave 8.8 to 12.6 ms (80 to 113 FPS) there: the reported 276 FPS
+needs `N` cut about threefold as well, not simulation work alone.
+
+### Fixed step: exclusive shares (10 ms samples, busy observations)
+
+| Path | 30 manhacks (914) | Quiet (633) |
+| --- | ---: | ---: |
+| NPC hull traces through the linear `trace_brushes` scan (flight carry and sweep, manhack steer, `tick_npcs`) | about 48% | about 19% |
+| Rapier step: SAP `update_regions`, query-tree rebuild, narrow phase | 25% | 41% |
+| `pose_npc_hitboxes` (`actor_matrices`) | 3.4% | 3.8% |
+| NPC think including sight rays | 3.6% | 1.4% |
+| `Scene::tick` (`Entity::class` lookups, attachments, filters) | about 5% | about 7% |
+| Ground-surface decal projection (`Impacts::locate`) | 1.5% | 2.7% |
+
+Scaled by the measured tick cost this is roughly 2.4 ms per crowd frame in brush traces and
+1.25 ms in Rapier; with four awake bodies and no contacts, Rapier's share is tree and
+broad-phase maintenance over all colliders, not solving.
+
+### Rest of the main schedule
+
+Of the crowd's roughly 8.4 ms, the scoped presentation systems hold about 4 ms once loading
+frames are excluded: `present_entities` about 1.6 ms (60% of its samples are CPU facial flexes,
+`apply_facial_flexes` and `vertex_deltas`; 13% pose composition), the shadow update about 1.6 ms
+(two thirds in CPU silhouette rasterization, `silhouette::draw`; 12,457 silhouettes in the run),
+eyes about 0.4 ms and model lighting about 0.3 ms. `actor_matrices` is composed again in
+hitboxes, animation, eyes, shadows and effects for the same actors.
+
+**About 4 ms per crowd frame (about 3 ms quiet) is in no scope and is not busy system time
+in the samples.** Candidates are executor hand-off between workers, Bevy's own schedules and
+extraction; this is the largest unexplained block and is **not measured**.
+
+On the render thread the sampled leaders are `allocate_and_free_meshes` (7 to 8% of wall
+while sampled) and `prepare_erased_assets` (5%): meshes re-uploaded each frame, consistent
+with CPU flexes and per-frame silhouette and effect meshes. It is not the bound today.
+
+### Machine load during these runs
+
+The two new sampled runs were taken on a loaded machine: load average about 4 on 10 logical
+CPUs, two unrelated processes at a full core each (an archive extraction among them) and
+4.6 GiB of swap in use, read shortly after the runs rather than during them. Their frame
+times (8.1 and 21.8 ms) are therefore not throughput evidence. The shares inside one run are
+less sensitive, and the sample-to-scope agreement holds within the same run, but they should
+be repeated on an idle machine. The first cycle's 30 runs recorded swap growth 706 to 2,339 MiB
+and no CPU load, so their absolute values carry the same doubt.
+
+### Rules for the next cycle
+
+0. Record available compute with every run (other processes' CPU, free memory, swap, thermal
+   state) and judge results per available compute; do not time on a busy machine.
+1. Write the budget first: owning system, ms per frame, call count, expected saving. Do not
+   start a change whose ceiling is under about 0.3 ms or under the measured run-to-run spread.
+2. Close the frame before optimizing: time the main schedule, the fixed loop, extraction and
+   the wait on the render thread per frame, gameplay frames only, and name the unscoped 4 ms.
+3. Judge simulation changes by tick cost at a fixed tick count, not by frame time; judge frame
+   changes with ticks per frame recorded. Keep stack sampling for attribution only, at 10 ms.
+4. Rebase on current upstream before measuring anything.
+
+### Ranked work, with ceilings from the tables above
+
+1. Merge upstream (flight single sweep, filtered sight ray), re-profile. Cost: a merge.
+2. Candidate rejection for `trace_brushes` (bounds per brush or a static tree), exact plane
+   order and results kept. Ceiling about 2.4 ms per crowd frame here before upstream's change;
+   on the Windows crowd the amplification makes it the largest single lever.
+3. Rapier maintenance with nearly everything asleep (DESIGN 14s query ownership, static and
+   kinematic colliders out of per-step broad-phase and tree rebuilds). Ceiling about 1.25 ms
+   crowd, 0.6 ms quiet per frame, on every map.
+4. The unscoped main-schedule time, once measured. Ceiling 3 to 4 ms per frame, every scene.
+5. Facial flexes on the GPU or only when weights change, and silhouettes redrawn only when
+   the pose or light changed. Ceiling about 1 ms each in the crowd, plus the mesh re-uploads.
+6. One pose composition per actor per tick shared by its consumers. Ceiling about 0.5 ms.
+7. Design choice for the owner: run the fixed step off the frame's critical path (its own
+   thread, or overlapped with rendering), which removes the amplification itself.
+
+Evidence: `artifacts/performance-cycle2/` (reports, 10 ms samples, logs) and the retained
+`artifacts/performance-implementation-2026-11-11/`. A per-system and a per-call-path reducer of
+the sampler's call graph produced the tables; they attribute each non-waiting self sample
+once, so rows are exclusive. Windows, a matched native run and upstream's tip are **not tested**.
+
+## Implemented changes: helper gains, no established frame-rate gain
+
+Two bounded changes were implemented after the research phase. Effect sprites reuse existing
+position/UV/color vectors, initialize new slots once and avoid unchanged material/visibility
+writes. Each quad retains its draw, ordering, layers and bounds; material-handle remaps still
+update. Manhack glows resolve first matching model instances once for multiple eligible actors,
+with zero/singleton fast paths; shared current attachment math, eligibility, actor order and
+first-instance behavior are unchanged. No shader, graphics quality, effect lifetime/count,
+AI cadence, dependency or collision behavior changed.
+
+Four effect-pool tests and three glow tests pass. An isolated release experiment measures
+geometry construction/patching at about 0.242→0.0086 microseconds/update; this excludes Assets,
+ECS, upload and GPU work. A 24-case equivalent-output glow experiment includes 30 actors behind
+1,000/10,000/50,000 unrelated instances: 28.590→17.789, 279.063→46.276 and 1379.215→175.059
+microseconds/collection. Small/front-loaded 30-actor cases add 0.43–0.59 microseconds and one-actor
+front-loaded cases about 0.027–0.033 microseconds. These are helper results, not AI or game FPS.
+
+### Thirty packaged runs do not establish end-to-end improvement
+
+M1 Pro / Metal, 10 logical CPUs / 16 GiB, isolated release baseline 2208bcb plus the candidate runtime
+changes; advanced-options/debug-tools plugins. Explicit High/HDR Full/no-AA settings, uncapped,
+muted headless profiling. Five 600 host-tick cases, three paired rounds AB/BA/AB, reversed workload
+order in round 2, no capture/build/test during timing. All 30 runs complete; all 15 paired final
+inventory/AI/projectile digests and reduced outcomes match exactly.
+
+| Workload | Baseline trials, ms | Current trials, ms | Median before → after, ms | Frame-time reduction |
+| --- | --- | --- | --- | ---: |
+| quiet | 5.568 / 5.536 / 5.521 | 5.632 / 5.549 / 5.530 | 5.5359 → 5.5493 | -0.24% |
+| frozen-fire | 6.049 / 5.972 / 5.995 | 5.957 / 5.847 / 6.040 | 5.9949 → 5.9566 | +0.64% |
+| animated-fire | 7.383 / 7.400 / 7.410 | 7.334 / 7.586 / 7.397 | 7.4000 → 7.3968 | +0.04% |
+| plaza-crowd | 13.903 / 13.567 / 13.503 | 13.400 / 13.642 / 13.914 | 13.5671 → 13.6421 | -0.55% |
+| plaza-crowd-retina | 14.131 / 13.877 / 13.847 | 13.871 / 13.927 / 13.845 | 13.8773 → 13.8715 | +0.04% |
+
+| Workload | Baseline p95 / p99 upper bounds, ms | Current p95 / p99 upper bounds, ms |
+| --- | --- | --- |
+| quiet | 9.000 / 9.000 / 9.000 / 13.000 / 12.000 / 12.000 | 9.000 / 9.000 / 9.000 / 12.000 / 11.000 / 11.000 |
+| frozen-fire | 7.000 / 7.000 / 7.000 / 13.000 / 13.000 / 13.000 | 7.000 / 7.000 / 8.000 / 13.000 / 13.000 / 13.000 |
+| animated-fire | 11.000 / 11.000 / 11.000 / 14.000 / 14.000 / 14.000 | 11.000 / 11.000 / 11.000 / 14.000 / 14.000 / 13.000 |
+| plaza-crowd | 21.000 / 19.000 / 19.000 / 23.000 / 23.000 / 23.000 | 21.000 / 21.000 / 22.000 / 24.000 / 25.000 / 26.000 |
+| plaza-crowd-retina | 23.000 / 21.000 / 21.000 / 27.000 / 25.000 / 24.000 | 21.000 / 23.000 / 20.000 / 25.000 / 26.000 / 24.000 |
+
+Positive reduction means faster. Trial ranges overlap; crowd 1080p p99 buckets worsen 23/23/23
+→24/25/26ms. No sustained game-FPS gain is established. Frozen-fire's secondary contained-window
+median 5.9182→5.7931ms (~2.1%) is not a robust general improvement: candidate window trials span
+5.738–6.010ms and include a slower pair. Quiet, animated and crowd controls remain neutral.
+
+Quiet has 0 sprites; frozen fire pauses at tick 86 with 142 quads / 130 particles; animated fire has
+four actual detonations from six input requests, 62 final / 110 peak pooled quads. Crowd cases have
+30 Combat/player-enemy manhacks, 1785 emitted sparks and 60 final eye quads; peak pools 597–612 vary
+with render cadence, not dropped particles. Retina uses 3456x2168 internal pixels with the same
+explicit settings, not the contributor's saved maximum settings. Actual dimensions are checked.
+
+The 120 render-frame warmup covers unequal initial simulation intervals. Secondary windows are
+weighted complete wall-clock windows with retained endpoints, not exact simulation alignment.
+P95/p99 are 1 ms histogram upper bounds; p50 is unavailable. CPU scopes overlap/include setup;
+render-graph CPU wall time is not GPU time. Occupied swap 706.00→2338.62MiB and about 1.66 GiB
+system swapout traffic qualify the matrix; this is not attribution of paging to these changes.
+Power/thermal status and complete custom-pass GPU timing are unavailable. Do not compare
+these absolute values with the earlier 18-run sensitivity session as an optimization gain;
+only the baseline/current pairs within this matrix test the implementation.
+
+### Visual and validation disposition
+
+All six original particle replays pass their assertions, but ordinary-HDR images are not
+byte-identical: fire 1,332,005 changed pixels/max 5 RGB, smoke 53,266 / max 5, ball 929,126 / max 4.
+Same-baseline repeated captures also differ (max 5/7/8), with different reported exposure.
+Those failed exact-image checks remain retained; they do not prove a geometry regression.
+
+A materially different untimed control uses existing `--tonemap-scale 1.0` and a 400 host-tick
+prewarm. All six control assertions pass, forced exposure 1 / readbacks 0 and equal converged bloom
+are verified. Fire and smoke are pixel-identical. Ball differs at 61 pixels, maximum 1 RGB, within
+[1257,841,1286,854] over the viewmodel glow; exact ball pixel parity remains **not established**.
+The capture approach stopped there; no further flags/tolerances turn that failure into a pass.
+Controlled particle counts/collisions/visibility/candidates agree, but these bounded views do
+not establish full campaign/all-camera/native parity. Evidence: `regression-summary.json`,
+`capture-control-summary.json` and `controlled-capture-summary.json` in the ignored experiment.
+The original 30 HDR timing runs were not rerun or replaced by fixed-exposure timing.
+
+`scripts/checks/validate.sh` and `scripts/checks/check_windows.sh` pass. The latter is cross-target
+strict Clippy, not Windows runtime testing. New source-only measurement tooling lives in
+`scripts/checks/check_effect_pool_performance.py` with authored tests and five JSON fixtures in
+`test-inputs/performance-research/`; the whitelist addition admits only those fixture sources.
+The driver requires isolated artifacts packages, restores regular config files, rejects config
+symlinks and changed full gameplay state, checks actual dimensions/outcomes and retains tails.
+No game content or executable is committed.
+
+Baseline executable SHA256:
+`51cf256188b5e0446165cc2dc55ad90729768143683151f9c4e5182c41895fc5`.
+Candidate SHA256:
+`51002f989e04e2f8d72dc96bfa0fc55d1ce1c38ce17b7f776b7939f310cd07ab`.
+The candidate build records a22f6a0 plus the uncommitted runtime source hashes pinned in
+`artifacts/performance-implementation-2026-11-11/package-source-identity.json`; do not identify
+it as an unchanged a22f6a0 build. Shaders match. Both builds omit four published upstream-main
+commits including flight/sight improvements; repeat fetch found main 6d0b2f6 / session53 1473203.
+
+Reproduction after preparing two isolated packages (use Python and `.exe` names appropriate
+to the platform):
+
+```text
+python3 scripts/checks/check_effect_pool_performance.py --baseline artifacts/performance-implementation-2026-11-11/baseline-game/hl2-bevy --current artifacts/performance-implementation-2026-11-11/current-game/hl2-bevy --output artifacts/performance-paired-new
+```
+
+The driver builds nothing. The ignored experiment retains all 30 reports/logs/configs,
+`paired-summary.json`, `paired-measurements.json`, environment snapshots, package/source identity,
+CPU experiment logs and rejected attempts in `rejections.md`. Full validation/release logs are
+retained there. Windows/macOS interactive performance, complete campaign regression coverage,
+matched native 276 FPS reproduction and latest-upstream runtime are **not tested**. The next
+high-value work remains existing 14s hitbox/query maintenance and render preparation attribution,
+not scaling these helper ratios into a promised FPS. Plugin rules read: yes; exceptions: none.
+
+
+## Why the helper wins did not become a frame-rate win
+
+The implementation removed real repeated work, but selected kernels whose likely frame budget
+was too small to explain the observed gap. The large isolated ratios were weak prioritization
+signals without invocation counts and critical-path cost. A useful next cycle must budget the
+absolute recoverable milliseconds before implementing a change, then measure the owning stage.
+This conclusion is based on the actual presentation path and local workload, not a transfer
+of an external demo's FPS or the historical Windows profile.
+
+## The sprite experiment speeds a fraction of a fraction
+
+The presentation system runs once in PostUpdate. It builds the effects once, then calls the
+world and viewmodel quad pools once each. For a slot that changes, the geometry microbenchmark
+saves approximately 0.233 microseconds of CPU construction. Multiplying that helper difference
+by 142 hypothetically changed quads gives 0.033 ms; at a 6 ms frame that is about 0.55%, before
+considering overlap and additional cost not covered by the microbenchmark. With every one of
+the largest observed 612 world-pool slots changing together, the estimate is 0.143 ms, about 1.05%
+of a 13.6 ms crowd frame. Those are optimistic scaling estimates for the measured helper,
+not timings of the complete effects system, ECS or uploads, and not a proven frame-speed limit.
+The peak pool is historical capacity; it does not mean 612 changing quads exist every frame.
+Final crowd snapshots have 60 eye quads, for which the same calculation is 0.014 ms (~0.10%).
+
+The frozen-fire workload is even more revealing: its 142 quads do not change after pausing.
+The original implementation already compared the previous quad and skipped geometry rebuilding
+when unchanged. Therefore the approximately 28x geometry helper improvement does not apply to
+that steady workload at all. Its new benefit is avoiding repeated unchanged material/visibility
+ECS commands. Command/asset extraction costs were not isolated in the geometry microbenchmark.
+The tiny whole-run frozen gain and mixed secondary windows are consistent with that distinction;
+they do not demonstrate a large buffer-rebuilding bottleneck.
+
+## The repeated model lookup has the same scale mismatch
+
+shot_effects calls manhack_glows once per presentation, not once per camera, attachment or
+collider trace. For 30 actors after 1,000 unrelated instances, the measured saving is 10.801 microseconds
+per complete collection, or 0.0108 ms. Even that artificial-prefix case is less than 0.08% of the
+13.6 ms frame. The much larger 10,000/50,000-prefix wins describe data arrangements not established
+in this map. The loader report records 570 successful model instances with no model errors;
+30 spawned manhacks append 30 model instances through Gameplay::insert_entity. Mesh/submesh counts
+must not be substituted for World::model_instances length. An exact live-vector observation
+is still needed before claiming a precise map-specific lookup saving.
+
+The microbenchmark's small/front-loaded 30-actor cases are 0.43–0.59 microseconds slower and the
+single-actor path still has around 0.03 microseconds of overhead. That retained evidence refutes
+a blanket claim that the new lookup is faster for all populations/orderings. It is a bounded
+large-prefix repeated-search improvement with neutral whole-frame evidence in this workload.
+
+## Millisecond-scale work remains outside both changes
+
+Across the three current 1080p crowd runs, median scope means are fixed simulation 5.648 ms per
+scope call, render graph 2.582 ms, render assets 1.951 ms, render prepare 1.035 ms, animation 0.786 ms
+and shadows 0.799 ms. Their p95 medians are 7.895, 4.021, 5.285, 1.422, 2.104 and 1.821 ms respectively.
+These are overlapping, setup-inclusive CPU wall scopes with different counts/denominators,
+not exclusive stages to sum. The render-assets mean includes a roughly 501 ms setup outlier;
+it is not a measured 1.95 ms steady per-frame upload bottleneck. Nonetheless they identify
+millisecond-scale ownership boundaries, while the chosen helper budgets are microseconds.
+A separate current-only sampled CPU diagnostic identifies the shared static world-brush
+trace as a concrete remaining candidate; its limitations and prerequisites follow below.
+
+The crowd's 3456x2168 image has about 3.61 times the pixels of 1080p, but its median frame changes
+only 13.642→13.871 ms in the candidate. This is consistent with a substantial resolution-insensitive
+cost, not proof that every GPU/custom pass is cheap. A faster GPU or an additional GPU culling
+setup cannot remove CPU physics, pose or preparation work automatically. The next intervention
+must follow measured critical-path ownership rather than adopt a GPU feature by headline.
+
+## Measurement uncertainty is larger than the predicted saving
+
+The paired frame ranges overlap; 1080p crowd p99 buckets worsen 23→24/25/26 ms. Whole-machine
+occupied swap increases 706.00→2338.62 MiB with about 1.66 GiB additional swapout traffic. Neither
+fact proves these edits caused a regression, but both prevent assigning small differences to
+the edits as clean throughput wins. The original HDR captures also use different exposure;
+unchanged particle clocks/counts do not make their framebuffer bytes comparable. Fixed-exposure
+controls must be reported separately from the original timing matrix.
+
+The next cycle first needs an up-to-date shared baseline including published 4805c93 flight
+single-sweep and 7f0e9ff sight-filter fixes (fetched main 6d0b2f6), then a new matched profile and
+unprofiled throughput check. This cycle's package/profile omits those four newer commits;
+repeated old flight sweeps can amplify the observed static scan. Do not implement a new index
+against a stale target. Coordinate the existing 14s lazy-hitbox/query-maintenance ownership.
+
+If the shared static-brush kernel remains dominant, investigate that ONE kernel's candidate
+rejection, with actual query/brush/plane/candidate counts and an absolute recoverable budget.
+Reuse existing Rapier swept-AABB candidate traversal where conservative mapping can be proven;
+retain exact fallback brushes for failed or unproven collider conversions. Existing BSP leaf-
+brush membership is flattened by loading, and PVS is not a collision index. Feed candidates
+in original stable brush order through one shared exact plane accumulator. Preserve contents,
+1/32 epsilon, start_solid, all_solid, fraction and normal; per-brush minimum merging is not
+identical when an all-solid brush follows an earlier normal. Cover tangent/stationary overlap,
+escaping/all-solid cases, equal-fraction corner contacts, clip masks, large/asymmetric hulls,
+failed conversion fallback and moving doors/props. Include candidate collection/sorting and
+query maintenance in the measured cost; do not shift waste into another hot stage.
+
+These task-specific lessons are recorded in this report and project design, not persistent
+memory. No next-cycle kernel implementation or projected FPS is claimed.
+
+
+## Current worker-thread stacks identify a stronger conditional target
+
+Separate current-only quiet, crowded and frozen workloads run to host tick 1800 with completed
+scripts; the crowd retains 30 Combat actors and the frozen workload 142 sprites. Five-second
+built-in sampled stacks are parsed by conserving parent/child observations per thread.
+These diagnostic runs perturb execution and are excluded from the paired throughput table.
+The parser accounts for 30 threads in quiet/crowd and 29 in frozen fire. Counts below are stack
+observations with keyword ancestry, not calls, milliseconds or exclusive frame percentages.
+
+| Diagnostic | Quiet | 30-manhack crowd | Frozen fire |
+| --- | ---: | ---: | ---: |
+| Total thread-state observations | 46,948 | 55,354 | 36,010 |
+| Known wait leaves | 43,888 | 51,900 | 33,060 |
+| Other observations, including unresolved states | 3,060 | 3,454 | 2,950 |
+| Fixed-system non-wait ancestry | 1,123 | 1,527 | 0 observed |
+| Static brush trace | 295 | 710 | 0 observed |
+| PhysicsPipeline step | 454 | 379 | 0 observed |
+| Qbvh rebalance, any captured context | 195 | 162 | 0 observed |
+| Broadphase | 196 | 161 | 0 observed |
+| Optimized glow lookup | 0 observed | 10 | 1 |
+| Optimized quad pool | 0 observed | 0 observed | 2 |
+
+These categories overlap: in the crowd 634 of 710 static-trace observations occur beneath flight
+traces, and 141 rebalance / 161 broadphase observations occur within the 379 physics-step group.
+Never add those parents and children. 710/1527 is about 46.5% of the tagged non-wait fixed-system
+observations, NOT 46.5% of total CPU or frame time. The main thread waits in 2101 of 2129 snapshots
+while compute workers contain the active simulation work; a main-thread-only trace would
+misidentify the problem. The residual non-wait denominator also contains unresolved thread
+entries, so it is not an exact active CPU-time denominator.
+
+Source inspection confirms modkit-core::trace_brushes visits the entire supplied static-brush
+slice, testing relevant planes. Physics uses the misleadingly named player_world_brushes for
+BOTH player and NPC hull queries; the crowd profile chiefly reaches it through NPC flight/
+sweep paths. 523 observations use a common Air::sweep helper and 95 a direct manhack-steer path;
+its module name does not mean the population is all birds. Render submissions and other
+stages remain substantial, but the samples support investigating this shared simulation
+kernel ahead of further micro-optimizing quad/glow helpers, after the latest-baseline check.
+No exact brush-count denominator is exposed by the reviewed reports.
+
+Evidence: `diagnostics/stack-summary.json`, its raw sampled stacks/parser and diagnostic reports;
+source audit: `artifacts/performance-research-2026-11-11/next-cycle-static-brush-audit.md`.
 
 ## Scope and the reported gap
 
@@ -272,11 +644,12 @@ Each timing fixture must finish its intended workload; a fixed frame cap can sam
 simulation duration. Pair visual comparisons with gameplay/trace assertions. Diagnostic runs
 that disable work establish attribution only and cannot qualify an optimization.
 
-Fresh local packaged tests: **18 valid completed sensitivity runs**, detailed below. Matched native RTX 3070 comparison:
+Preliminary local sensitivity tests: **18 valid completed runs**, detailed below; the subsequent
+30-run implementation comparison is recorded above. Matched native RTX 3070 comparison:
 **not tested**. Windows validation of any future runtime change: **not tested** here. No
 performance gain, sustained FPS target or complete campaign fidelity is established by this report.
 
-## Fresh packaged measurements: indoor station02 spawn
+## Preliminary sensitivity study: indoor station02 spawn
 
 The existing release package matches `2208bcb618adfd3072ea5fd00553babdcb9a7866`, SHA256
 `51cf256188b5e0446165cc2dc55ad90729768143683151f9c4e5182c41895fc5`.
@@ -335,7 +708,8 @@ configs, raw reports/logs, `measurements.json`, `summary.json`, environment snap
 rejected trials. A populated matrix is resumed rather than fresh evidence; independent reruns
 need a fresh isolated package/output set. The full report is
 `artifacts/performance-research-2026-11-11/reports/HL2RS performance research.md`.
-No new runtime dependency or production optimization was introduced.
+This earlier sensitivity phase introduced no runtime dependency or production optimization;
+the subsequent implementation and paired results are recorded at the top of this document.
 
 ## Research access limits
 

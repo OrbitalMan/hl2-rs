@@ -2,12 +2,12 @@
 mod gibs;
 mod material;
 mod model_reading;
+mod quads;
 mod shots;
 mod sprite_modes;
 use crate::{assets::LoadedMap, gameplay::Gameplay, rendering, simulation::Simulation};
 use bevy::{
     asset::RenderAssetUsages,
-    camera::primitives::MeshAabb,
     mesh::Indices,
     prelude::*,
     render::render_resource::{AsBindGroup, PrimitiveTopology},
@@ -16,6 +16,7 @@ pub use gibs::{gib_models, present_gibs};
 use hl2_simulation::{projectile_visuals::ProjectileVisuals, projectiles::ProjectileKind};
 pub(crate) use model_reading::read_effect_model_lod;
 use modkit_core::Surface;
+use quads::{QuadDraw, draw_pool};
 use source_assets::vpk::Vfs;
 use sprite_modes::{glows, shading};
 use std::collections::BTreeMap;
@@ -102,11 +103,6 @@ pub(crate) struct DecalDraw {
 #[derive(Component)]
 pub(crate) struct GrenadeDraw {
     id: u64,
-}
-struct QuadDraw {
-    entity: Entity,
-    mesh: Handle<Mesh>,
-    previous: Option<hl2_simulation::projectile_visuals::Quad>,
 }
 /// One projectile model surface: mesh and material.
 pub(crate) type ModelPart = (Handle<Mesh>, Handle<rendering::SourceMaterial>);
@@ -389,73 +385,6 @@ fn mesh(
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
     mesh
-}
-fn quad_mesh(quad: &hl2_simulation::projectile_visuals::Quad) -> Mesh {
-    mesh(
-        quad.positions
-            .iter()
-            .map(|p| crate::source_to_bevy(Vec3::from_array(p.to_array())).to_array())
-            .collect(),
-        quad.uv.to_vec(),
-        vec![quad.color.map(|c| f32::from(c) / 255.); 4],
-        vec![0, 1, 2, 0, 2, 3],
-        true,
-    )
-}
-/// Fill a pool of quad draws with this frame's quads (materials must hold each
-/// quad's material); `layer` puts them on another camera's render layer.
-fn draw_pool(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    pool: &mut Vec<QuadDraw>,
-    quads: &[hl2_simulation::projectile_visuals::Quad],
-    materials: &BTreeMap<String, Handle<EffectMaterial>>,
-    layer: Option<usize>,
-) {
-    let mut used = 0;
-    for quad in quads {
-        let Some(material) = materials.get(&quad.material).cloned() else {
-            continue;
-        };
-        if used == pool.len() {
-            let mesh = meshes.add(quad_mesh(quad));
-            let mut entity = commands.spawn((
-                crate::campaign::MapOwned,
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(material.clone()),
-                Transform::IDENTITY,
-            ));
-            if let Some(layer) = layer {
-                entity.insert(bevy::camera::visibility::RenderLayers::layer(layer));
-            }
-            pool.push(QuadDraw {
-                entity: entity.id(),
-                mesh,
-                previous: None,
-            });
-        }
-        let slot = &mut pool[used];
-        used += 1;
-        if slot.previous.as_ref() != Some(quad) {
-            let mesh = quad_mesh(quad);
-            let bounds = mesh.compute_aabb();
-            if let Some(mut old) = meshes.get_mut(&slot.mesh) {
-                *old = mesh;
-            }
-            if let (Some(bounds), Ok(mut cmd)) = (bounds, commands.get_entity(slot.entity)) {
-                cmd.insert(bounds);
-            }
-            slot.previous = Some(quad.clone());
-        }
-        if let Ok(mut cmd) = commands.get_entity(slot.entity) {
-            cmd.insert((MeshMaterial3d(material), Visibility::Visible));
-        }
-    }
-    for slot in pool.iter().skip(used) {
-        if let Ok(mut cmd) = commands.get_entity(slot.entity) {
-            cmd.insert(Visibility::Hidden);
-        }
-    }
 }
 /// The active viewmodel's posed rig (same clip choice as rendering::animate) and the
 /// SDK viewmodel sprites/beams as viewmodel-space quads.
