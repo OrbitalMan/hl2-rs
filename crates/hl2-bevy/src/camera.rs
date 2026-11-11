@@ -64,6 +64,20 @@ pub fn viewmodel_projection(
 
 type ViewmodelCameraFilter = (With<ViewmodelCamera>, Without<crate::FlyCamera>);
 
+/// The viewmodel camera in viewmodel space: the viewmodel sits at the eye plus its framing offset
+/// and the sway (CalcViewModelView), so the camera is that pose's inverse.
+fn viewmodel_camera(
+    framing: [f32; 3],
+    sway: hl2_simulation::viewmodel_sway::Sway,
+) -> (Transform, glam::Vec3) {
+    let back = sway.rotation.inverse();
+    let at = back * -(glam::Vec3::from_array(framing) + sway.offset);
+    let axis = |v: glam::Vec3| crate::source_to_bevy(Vec3::from_array(v.to_array()));
+    let transform = Transform::from_translation(axis(at))
+        .looking_to(axis(back * glam::Vec3::X), axis(back * glam::Vec3::Z));
+    (transform, at)
+}
+
 /// Publishes the view after the fixed simulation loop: a point_viewcontrol camera or env_zoom
 /// when active, otherwise the player's eye with the weapon punch and SetFOV zoom. Character
 /// motion itself remains in `simulation`.
@@ -73,6 +87,8 @@ pub fn present_player_view(
     mut cameras: Query<(&mut Transform, &mut Projection), With<crate::FlyCamera>>,
     mut viewmodel: Query<(&mut Transform, &mut Projection), ViewmodelCameraFilter>,
     frame: Option<Res<crate::video::GameFrame>>,
+    clock: Res<Time>,
+    mut effects: Option<ResMut<crate::effects::Effects>>,
 ) {
     let game = game.as_deref();
     let aspect = crate::video::frame_aspect(frame.as_deref());
@@ -92,10 +108,23 @@ pub fn present_player_view(
                 p.near = near;
             }
         }
-        let camera_translation = -crate::source_to_bevy(Vec3::from_array(framing.offset));
-        if transform.translation != camera_translation {
-            *transform =
-                Transform::from_translation(camera_translation).looking_to(Vec3::X, Vec3::Y);
+        let (yaw, pitch) = sim.view_angles();
+        let input = hl2_simulation::viewmodel_sway::SwayInput {
+            angles: glam::Vec3::new(-pitch.to_degrees(), yaw.to_degrees(), 0.),
+            speed: glam::Vec2::new(sim.player.velocity.x, sim.player.velocity.y).length(),
+            time: game.scene.time,
+            frame_time: clock.delta_secs(),
+        };
+        let mut sway = effects
+            .as_deref()
+            .map(|e| e.viewmodel_sway)
+            .unwrap_or_default();
+        let (camera, at) = viewmodel_camera(framing.offset, sway.place(input));
+        if let Some(effects) = effects.as_deref_mut() {
+            (effects.viewmodel_sway, effects.viewmodel_camera) = (sway, at);
+        }
+        if *transform != camera {
+            *transform = camera;
         }
     }
     if let Ok((mut camera, mut projection)) = cameras.single_mut() {

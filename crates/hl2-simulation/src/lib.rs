@@ -37,6 +37,7 @@ pub mod soundscapes;
 pub mod suit;
 pub mod view_punch;
 pub mod viewmodel_effects;
+pub mod viewmodel_sway;
 pub mod weapon_bugbait;
 pub mod weapon_crossbow;
 pub mod weapon_physcannon;
@@ -48,6 +49,7 @@ pub mod commentary;
 pub mod explosion_particles;
 pub mod impacts;
 pub mod pcf_runtime;
+pub mod point_spotlight;
 pub mod projectile_visuals;
 
 pub mod attention;
