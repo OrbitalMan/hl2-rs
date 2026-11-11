@@ -1,4 +1,5 @@
 //! Optional bounded CPU stage measurements; disabled for ordinary play.
+mod frame_stages;
 mod gpu_completion;
 mod pacing;
 use bevy::prelude::*;
@@ -106,6 +107,7 @@ struct RenderTimers(BTreeMap<&'static str, Instant>);
 pub fn install(app: &mut App) {
     use bevy::render::{Render, RenderApp, RenderSystems};
     let performance = gpu_completion::prepare(app);
+    frame_stages::install(app);
     app.insert_resource(performance.clone())
         .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
     let Some(render) = app.get_sub_app_mut(RenderApp) else {
@@ -174,6 +176,12 @@ pub fn install(app: &mut App) {
             ),
         );
     }
+    fence_prepare_stages(render);
+}
+
+/// Timings of the stages inside `Prepare`.
+fn fence_prepare_stages(render: &mut bevy::app::SubApp) {
+    use bevy::render::{Render, RenderSystems};
     // Subsets of Prepare are fenced inside their parent, so these intervals
     // measure only their own stage rather than accumulating previous work.
     for (name, previous, set, next) in [
@@ -285,5 +293,12 @@ impl Performance {
         if samples.calls > 30 && samples.values.len() < 4096 {
             samples.values.push(milliseconds);
         }
+    }
+}
+
+impl Performance {
+    /// Drops the stage samples collected so far (menu, loading and warm-up frames).
+    pub(crate) fn restart_stages(&self) {
+        self.0.lock().expect("CPU timing").clear();
     }
 }

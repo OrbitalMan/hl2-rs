@@ -158,8 +158,12 @@ pub struct Hud {
     diagnostic_font: Option<std::sync::Arc<source_ui::bitmap_text::BitmapFont>>,
 }
 impl Hud {
-    fn observe_frame(&mut self, now: f64, profile: bool) {
-        self.timing.observe(now, profile);
+    /// Stage timings restart when the warm-up ends, so they cover the benchmark's frames.
+    fn observe_frame(&mut self, now: f64, performance: Option<&crate::performance::Performance>) {
+        self.timing.observe(now, performance.is_some());
+        if let Some(performance) = performance.filter(|_| self.timing.frames_seen == 120) {
+            performance.restart_stages();
+        }
     }
     pub fn report(&self) -> serde_json::Value {
         let captions = &self.source.captions;
@@ -364,7 +368,7 @@ pub fn present(
         game_hud::draw(&hud, &game, &ui);
         draw_ai_disabled(&hud, &game, width, height);
     }
-    hud.observe_frame(clock.elapsed_secs_f64(), performance.is_some());
+    hud.observe_frame(clock.elapsed_secs_f64(), performance.as_deref());
     ui.source.draw(clock.elapsed_secs_f64());
     sim.with_extensions(|extension, simulation| {
         extension.present(

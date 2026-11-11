@@ -1,5 +1,22 @@
 # STATUS
 
+## Performance: the whole frame is timed; presentation is as large as the fixed loop (2026-11-11)
+
+`--profile` records `frame_total` and a `main_schedule.<name>` stage per main schedule; they add
+up to the frame, and stage samples now restart after the map's 120 warm-up frames (they used to
+include about 600 menu and loading frames, which halved per-frame stage means and lowered the
+tick). The markers cost nothing measurable (crowd 12.58 against 12.61 ms). M1 Pro / Metal, 1080p,
+600 ticks, four runs per case, load average 4.4 to 7.3 recorded per run. 30 manhacks, 12.35 ms:
+`PostUpdate` 5.17 (shadow silhouettes 1.56, entity presentation 1.50, eyes/lighting/PVS/HUD
+0.72, in no scope 1.39), fixed loop 4.96 (tick 5.91 ms, 0.83 per frame), `PreUpdate` 0.92,
+outside the main schedule 0.97; the render thread's fenced stages sum to 7.1. Quiet, 5.54 ms:
+`PostUpdate` 2.10, fixed loop 1.47, outside 1.35, render stages 3.6. The serial main world
+bounds both. Earlier absolute stage and tick figures below are too low; build-to-build
+directions stand. Next, by ceiling: brush-trace candidate rejection (about 2.1 ms), silhouettes
+only on change (1.56), flexes (within 1.50), Rapier maintenance (about 1.3, DESIGN 14s).
+`PostUpdate` 1.39 ms and `PreUpdate` 0.92 ms are **not measured** per system. Windows, a matched
+native run and replays after the merge are **not tested**. Plugin rules read: yes; exceptions: none.
+
 ## Performance: why cycle one gained nothing, and the next targets (2026-11-11)
 
 Second-pass diagnosis, no runtime change: `docs/performance-research.md`, first section.

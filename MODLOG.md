@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-11-11: whole-frame timing by main schedule; stage means corrected
+
+**Agent/model:** Claude Code desktop, claude-fable-5-2. No subagents.
+
+**Changed:** `--profile` adds `frame_total` and one `main_schedule.<name>` stage per main
+schedule (`performance/frame_stages.rs`: single-system marker schedules between the main
+schedules, installed only with `--profile`). Stage samples restart when the frame statistics'
+120-frame warm-up ends, so both cover the same frames. Ordinary play runs none of this.
+
+**Why:** about 4 ms of the crowd's main schedule was in no scope, and the frame had to close
+before the next optimization is chosen.
+
+**Tested how / Result:** one unit test (stages cover every main schedule, add up to the frame,
+restart empties them); validation passes. Packaged, M1 Pro / Metal, 1080p, 600 ticks, load
+recorded per run (4.4 to 22.9; the timed table at 4.4 to 7.3). Frame time before to after the
+markers, two interleaved pairs: crowd 12.58 to 12.61 ms, quiet 5.53 to 5.53 ms. The stages sum
+to the frame (crowd 12.35 ms: `PostUpdate` 5.17, fixed loop 4.96, `PreUpdate` 0.92, outside
+0.97). Found: stage means had included about 600 menu and loading frames; corrected, shadows
+are 1.56 ms and entity presentation 1.50 ms per crowd frame, the tick 5.91 ms.
+
+**Still broken or not tested:** 1.39 ms of `PostUpdate` and 0.92 ms of `PreUpdate` per crowd
+frame are not attributed to systems; a main schedule added after the markers is counted with
+its predecessor; Windows, a matched native run and replays after the merge are not tested.
+
+**Next:** brush-trace candidate rejection with a written budget (ceiling about 2.1 ms).
+Plugin rules read: yes; exceptions: none.
+
 ## 2026-11-11: upstream flight and sight fixes merged and measured
 
 **Agent/model:** Claude Code desktop, claude-fable-5-2. No subagents.

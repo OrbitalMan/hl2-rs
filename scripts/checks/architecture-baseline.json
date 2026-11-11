@@ -194,9 +194,6 @@
   "crates/hl2-bevy/src/input.rs::controls": [
    103
   ],
-  "crates/hl2-bevy/src/performance.rs::install": [
-   136
-  ],
   "crates/hl2-bevy/src/rendering.rs::build_model_draws": [
    121
   ],

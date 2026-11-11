@@ -114,6 +114,53 @@ hull traces through the linear brush scan 42% of the fixed step (310 of 733 busy
 from 48%), Rapier step 27%, `tick_npcs` hull traces within the first figure, hitbox posing 5%.
 The ranked list below is unchanged, with item 1 done.
 
+### The whole frame, timed: it closes, and the earlier stage means were diluted
+
+`--profile` now records `frame_total` and one `main_schedule.<name>` stage per main schedule
+(marker schedules between them, installed only with `--profile`); `main_schedule.outside` is
+the time between the last main schedule and the next frame's first one: extraction, the wait
+on the render thread and the window event loop. The stages add up to the frame. Two
+interleaved pairs of the same package with and without the markers: crowd 12.58 against
+12.61 ms, quiet 5.53 against 5.53 ms, so the markers cost nothing measurable.
+
+The first timed runs exposed a measurement fault: every CPU stage mean covered the whole
+process, including about 600 menu and loading frames and the menu background map's cheap
+ticks, while the frame statistics start after the map's 120 warm-up frames. Stage samples now
+restart when that warm-up ends, so both cover the same frames. Earlier stage figures in this
+document are therefore too low for per-frame stages (shadows 0.82 against 1.56 ms, animation
+0.79 against 1.50 ms) and for the tick (5.03 against 5.91 ms post-merge crowd). Comparisons
+between builds made with the same fault (the merge result above) keep their direction; their
+absolute tick values do not stand. The "4 ms in no scope" was mostly this dilution.
+
+Four runs per case of the merged build with the markers, 600 host ticks, M1 Pro / Metal,
+1080p, medians of per-run means; load average 4.4 to 7.3 on 10 logical CPUs, recorded per run:
+
+| Stage, ms per frame | Quiet | 30 manhacks |
+| --- | ---: | ---: |
+| Frame (`frame_total`; overlay 5.53 and 12.45) | 5.54 | 12.35 |
+| `PostUpdate` | 2.10 | 5.17 |
+| of it: shadow silhouettes | 0.03 | 1.56 |
+| of it: entity presentation (animation, flexes) | 0.65 | 1.50 |
+| of it: eyes, model lighting, PVS, HUD | 0.28 | 0.72 |
+| of it: in no scope | 1.14 | 1.39 |
+| `RunFixedMainLoop` (tick 3.85 and 5.91 ms, 0.37 and 0.83 per frame) | 1.47 | 4.96 |
+| `PreUpdate` (in no scope) | 0.33 | 0.92 |
+| Outside the main schedule | 1.35 | 0.97 |
+| `Last`, `First`, `Update`, `SpawnScene` | 0.27 | 0.31 |
+| Render thread, sum of its fenced stages (parallel) | 3.6 | 7.1 |
+
+- Crowd: the main schedule is 11.4 of 12.35 ms and waits under 1 ms for the renderer, whose
+  fenced stages fill 58% of the frame. The serial main world bounds the frame, now by direct
+  measurement. `PostUpdate` is as large as the fixed loop, which the diluted means hid.
+- Quiet: the main schedule is 4.2 of 5.54 ms and spends 1.35 ms outside it (extraction and
+  the wait on the renderer, whose fenced stages fill 65% of the frame). The main world still
+  bounds this scene, with the renderer the nearer second bound.
+- Frame model with the corrected tick: crowd `N` = 12.35 - 4.96 = 7.39 ms, `T` = 7.39 /
+  (1 - 5.91/15) = 12.19 ms against 12.35 ms measured. A millisecond off any per-frame stage
+  returns about 1.65 ms of crowd frame, because fewer ticks then fall in each frame.
+- Remaining unnamed: 1.39 ms in `PostUpdate` and 0.92 ms in `PreUpdate` per crowd frame are
+  bounded by schedule but not by system. **Not measured** per system.
+
 ### Machine load during these runs
 
 The two new sampled runs were taken on a loaded machine: load average about 4 on 10 logical
@@ -130,26 +177,30 @@ and no CPU load, so their absolute values carry the same doubt.
    state) and judge results per available compute; do not time on a busy machine.
 1. Write the budget first: owning system, ms per frame, call count, expected saving. Do not
    start a change whose ceiling is under about 0.3 ms or under the measured run-to-run spread.
-2. Close the frame before optimizing: time the main schedule, the fixed loop, extraction and
-   the wait on the render thread per frame, gameplay frames only, and name the unscoped 4 ms.
+2. Close the frame before optimizing: `frame_total` must equal the sum of the
+   `main_schedule.*` stages, over gameplay frames only; check it in every report.
 3. Judge simulation changes by tick cost at a fixed tick count, not by frame time; judge frame
    changes with ticks per frame recorded. Keep stack sampling for attribution only, at 10 ms.
 4. Rebase on current upstream before measuring anything.
 
-### Ranked work, with ceilings from the tables above
+### Ranked work, with ceilings from the timed frame
 
-1. Merge upstream (flight single sweep, filtered sight ray), re-profile. Cost: a merge.
-2. Candidate rejection for `trace_brushes` (bounds per brush or a static tree), exact plane
-   order and results kept. Ceiling about 2.4 ms per crowd frame here before upstream's change;
-   on the Windows crowd the amplification makes it the largest single lever.
-3. Rapier maintenance with nearly everything asleep (DESIGN 14s query ownership, static and
-   kinematic colliders out of per-step broad-phase and tree rebuilds). Ceiling about 1.25 ms
-   crowd, 0.6 ms quiet per frame, on every map.
-4. The unscoped main-schedule time, once measured. Ceiling 3 to 4 ms per frame, every scene.
-5. Facial flexes on the GPU or only when weights change, and silhouettes redrawn only when
-   the pose or light changed. Ceiling about 1 ms each in the crowd, plus the mesh re-uploads.
-6. One pose composition per actor per tick shared by its consumers. Ceiling about 0.5 ms.
-7. Design choice for the owner: run the fixed step off the frame's critical path (its own
+Ceilings are milliseconds per crowd frame from the whole-frame table (fixed-step shares from
+the post-merge sample applied to 4.96 ms); each returns about 1.65 times itself in frame time.
+
+1. Merge upstream (flight single sweep, filtered sight ray), re-profile. Done.
+2. Whole-frame timing. Done; it corrected the stage means and this ranking.
+3. Candidate rejection for `trace_brushes` (bounds per brush or a static tree), exact plane
+   order and results kept. Ceiling about 2.1 ms (42% of the fixed loop).
+4. Shadow silhouettes redrawn only when the pose or light changed. Ceiling 1.56 ms.
+5. Entity presentation: facial flexes on the GPU or only when weights change. Ceiling within
+   1.50 ms, plus the mesh re-uploads on the render thread (`render_assets` 2.39 ms).
+6. Rapier maintenance with nearly everything asleep (DESIGN 14s query ownership, static and
+   kinematic colliders out of per-step broad-phase and tree rebuilds). Ceiling about 1.3 ms
+   crowd (27% of the fixed loop), about 0.6 ms quiet, on every map.
+7. Name the 1.39 ms of `PostUpdate` and 0.92 ms of `PreUpdate` in no scope before spending on them.
+8. One pose composition per actor per tick shared by its consumers. Ceiling about 0.5 ms.
+9. Design choice for the owner: run the fixed step off the frame's critical path (its own
    thread, or overlapped with rendering), which removes the amplification itself.
 
 Evidence: `artifacts/performance-cycle2/` (reports, 10 ms samples, logs) and the retained
