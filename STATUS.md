@@ -12,8 +12,12 @@ first timed frame the crowd has gone from 13.85 to 11.04 ms (72 to 91 FPS) on th
 Shadow silhouettes (1.57 ms per crowd frame) already redraw only on change; the rest is the CPU
 rasterizer for casters that do change, and moving it to the GPU is an **owner decision, not
 started**. Replays were **not rerun** for the flex step (107 of 107 on the brush-set build).
-Windows runtime and a matched native run are **not tested**. Next candidates: Rapier maintenance
-(DESIGN 14s), the 1.4 ms of `PostUpdate` in no scope. Plugin rules read: yes; exceptions: none.
+Windows runtime and a matched native run are **not tested**. Rapier maintenance, located and not
+changed: about 1.3 ms per tick is fixed cost (the broad phase sweeps every proxy each step;
+the query tree's rebalance rebuilds its top five levels on every update) and the public query
+pipeline cannot refit without rebalancing. Removing it means owning the query tree and the
+broad phase: **owner decision**, see `docs/performance-research.md`. Other candidate: the
+1.4 ms of `PostUpdate` in no scope. Plugin rules read: yes; exceptions: none.
 
 ## Brush candidate rejection: measured, crowd tick 36% cheaper (2026-11-11)
 

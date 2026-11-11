@@ -253,6 +253,43 @@ found to remove. What remains is a design choice: draw silhouettes on the GPU in
 the original engine does, or keep the CPU rasterizer and tune its per-triangle setup for a
 fraction of the 1.1 ms. **Not started; owner decision.**
 
+### Rapier maintenance: both costs are fixed per step, and neither is reachable by a small change
+
+Read, not changed (rapier3d 0.26.1, parry3d 0.21.1) and attributed by call path in the 10 ms
+samples. Inside `PhysicsPipeline::step`, with about four bodies awake:
+
+| Per tick, M1 Pro | Share of the fixed step when sampled | About |
+| --- | ---: | ---: |
+| Broad phase, `SAPLayer::update_regions` | 13% crowd, 17% quiet | 0.65 to 0.75 ms |
+| Query tree update inside the step | 10% crowd, 15% quiet | 0.6 ms |
+| `refresh_entity_queries` (our own update of the same tree) | 2 to 3% | 0.1 ms |
+
+Together about 1.3 ms of a 3.3 ms quiet tick and of a 3.8 ms crowd tick: roughly 0.5 ms per
+quiet frame and 1.0 ms per crowd frame here, more where frames hold more ticks.
+
+- Broad phase: every update of a region marks all of its subregions to be updated, so the
+  sweep runs over every proxy on every step whether or not anything moved. The cost follows the
+  collider count (5,659 on this map), not motion.
+- Query tree: the step ends with `update_incremental(.., refit_and_rebalance = true)`, and
+  `Qbvh::rebalance` takes apart and rebuilds every node above depth 5 on each call, changed or
+  not (up to 1,024 subtrees re-split). Our own `refresh_entity_queries` pays the same again when
+  an entity moved. The public call ties refitting to rebalancing; the tree itself is private to
+  `QueryPipeline`, so "refit every tick, rebalance every N ticks" (plan 14s, step 2) cannot be
+  done through it.
+
+What would remove them, each a design choice rather than a tweak:
+
+1. Own the query tree: hold parry's `Qbvh` directly, refit every tick, rebalance every N ticks
+   or after large changes, and provide the handful of queries the game uses over it. Removes
+   most of the 0.7 ms per tick. Query contents stay the same; equal-distance ties may resolve in
+   a different order, which the replays must show harmless.
+2. Own the broad phase through Rapier's public `BroadPhase` trait, testing only colliders of
+   awake bodies and colliders that changed against a tree. Removes most of the other 0.7 ms.
+   It changes the order in which contact pairs are created, which can change solver results
+   slightly; the replays decide.
+
+Neither is started. **Owner decision.**
+
 ### Machine load during these runs
 
 The two new sampled runs were taken on a loaded machine: load average about 4 on 10 logical
@@ -289,9 +326,9 @@ the post-merge sample applied to 4.96 ms); each returns about 1.65 times itself 
 5. Facial flex deltas once per actor, cheap key hash. Done: `animation` 1.46 to 1.02 ms
    crowd, 0.72 to 0.55 ms quiet. Flexes on the GPU would remove the rest and the mesh
    re-uploads (`render_assets` about 2.5 ms on the render thread); not planned.
-6. Rapier maintenance with nearly everything asleep (DESIGN 14s query ownership, static and
-   kinematic colliders out of per-step broad-phase and tree rebuilds). Ceiling about 1.3 ms
-   crowd (27% of the fixed loop), about 0.6 ms quiet, on every map.
+6. Rapier maintenance: about 1.3 ms per tick is fixed cost of the broad phase and of the
+   query tree's rebalance, on every map. Needs our own query tree and our own broad phase;
+   see the section above. Owner decision.
 7. Name the 1.39 ms of `PostUpdate` and 0.92 ms of `PreUpdate` in no scope before spending on them.
 8. One pose composition per actor per tick shared by its consumers. Ceiling about 0.5 ms.
 9. Design choice for the owner: run the fixed step off the frame's critical path (its own
