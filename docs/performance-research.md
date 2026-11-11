@@ -216,6 +216,43 @@ Packaged replays of the candidate against the merged baseline: 107 of 107 checks
 not fail again on the candidate. The index returns the full scan's result bit for bit, so
 those two are treated as unstable checks, not as something this change fixed.
 
+### Facial flex deltas once per actor: measured; silhouettes already redraw only on change
+
+Both presentation items in the ranked list assumed work was repeated while nothing changed. The
+code already skips it: a silhouette is redrawn only when its caster moved, animates or got a new
+page fragment, and a face is redeformed only when its quantized weights changed. Their cost is
+paid by casters and faces that are changing, so each was looked at by call path (10 ms sample of
+the crowd, attribution only).
+
+Facial flexes were about 73% of entity presentation. Two wastes inside a changing face: the
+vertex deltas of the whole face model were rebuilt for every surface of the actor in the frame,
+and every vertex key was hashed with the default keyed hash, both when building and when
+reading. Now the frame's per-actor entry holds the weights, their signature and the deltas,
+built at most once, and the delta map uses a multiplicative hash of the key. Accumulation
+order and values are unchanged; a unit test compares the map with a default-hashed one bit for
+bit. Three interleaved pairs against the brush-set build, 600 ticks, M1 Pro / Metal, 1080p, load
+average 4.4 to 12.4 recorded per run (the first pair followed a build):
+
+| Case | `animation` stage before | after | Frame before | Frame after |
+| --- | ---: | ---: | ---: | ---: |
+| 30 manhacks | 1.46 ms | 1.02 ms | 11.36 ms (11.25 to 11.40) | 11.04 ms (11.02 to 11.14) |
+| Quiet | 0.72 ms | 0.55 ms | 5.87 ms (5.86 to 5.91) | 5.86 ms (5.83 to 5.87) |
+
+The crowd frame is 2.8% shorter with no range overlap. The quiet stage is 0.17 ms cheaper but
+its frame does not move: `PostUpdate` falls from 2.41 to 2.27 ms and the time outside the main
+schedule rises by about as much, the renderer being the nearer bound there. The tick reads 0.03
+ms higher in both cases (3.80 to 3.83, 3.33 to 3.37 ms); the change does not touch the fixed
+step, so this is taken as build-to-build variation, **not investigated**. Packaged replays were
+**not rerun** for this step.
+
+Shadow silhouettes (1.57 ms per crowd frame): 71% of the shadow system's samples are the CPU
+triangle rasterizer and its caller, 8% posing and skinning the silhouette mesh, 7% decal
+clipping. Thirty manhacks move and animate every frame, so thirty silhouettes are legitimately
+redrawn, and each redraw also re-uploads the 1024 by 1024 coverage page. No repeated work was
+found to remove. What remains is a design choice: draw silhouettes on the GPU into the page, as
+the original engine does, or keep the CPU rasterizer and tune its per-triangle setup for a
+fraction of the 1.1 ms. **Not started; owner decision.**
+
 ### Machine load during these runs
 
 The two new sampled runs were taken on a loaded machine: load average about 4 on 10 logical
@@ -247,9 +284,11 @@ the post-merge sample applied to 4.96 ms); each returns about 1.65 times itself 
 2. Whole-frame timing. Done; it corrected the stage means and this ranking.
 3. Candidate rejection for world brush traces. Done: crowd tick 6.03 to 3.84 ms, frame
    13.85 to 11.18 ms; quiet tick 3.89 to 3.32 ms. The ceilings below predate it.
-4. Shadow silhouettes redrawn only when the pose or light changed. Ceiling 1.56 ms.
-5. Entity presentation: facial flexes on the GPU or only when weights change. Ceiling within
-   1.50 ms, plus the mesh re-uploads on the render thread (`render_assets` 2.39 ms).
+4. Shadow silhouettes: already redrawn only on change. Remaining 1.57 ms is the CPU
+   rasterizer for casters that do change; drawing them on the GPU is an owner decision.
+5. Facial flex deltas once per actor, cheap key hash. Done: `animation` 1.46 to 1.02 ms
+   crowd, 0.72 to 0.55 ms quiet. Flexes on the GPU would remove the rest and the mesh
+   re-uploads (`render_assets` about 2.5 ms on the render thread); not planned.
 6. Rapier maintenance with nearly everything asleep (DESIGN 14s query ownership, static and
    kinematic colliders out of per-step broad-phase and tree rebuilds). Ceiling about 1.3 ms
    crowd (27% of the fixed loop), about 0.6 ms quiet, on every map.

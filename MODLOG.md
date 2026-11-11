@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-11-11: facial flex deltas once per actor; silhouette cost attributed
+
+**Agent/model:** Claude Code desktop, claude-fable-5-2. No subagents.
+
+**Changed:** `rendering/face_flex.rs` keeps one entry per actor and model per frame with the
+weights, their signature and the vertex deltas, built at most once; `FlexModel::vertex_deltas`
+returns a map with a multiplicative key hash (`VertexDeltas`). DESIGN plan D.
+
+**Why:** the deltas of the whole face model were rebuilt for every surface of an actor, and the
+default keyed hash was most of a face update. Flexes were about 73% of entity presentation.
+
+**Tested how / Result:** unit test: the delta map equals a default-hashed accumulation bit for
+bit; owned flex parse test and validation pass. Three interleaved packaged pairs against the
+brush-set build, 600 ticks, M1 Pro / Metal, 1080p, load average 4.4 to 12.4 recorded per run.
+Frame time before to after: 30 manhacks 11.36 to 11.04 ms (no range overlap), quiet 5.87 to
+5.86 ms. `animation` stage: 1.46 to 1.02 ms and 0.72 to 0.55 ms. Silhouettes attributed by call
+path: 71% CPU rasterizer, already redrawn only on change; nothing removed.
+
+**Still broken or not tested:** replays not rerun for this step; the tick reads 0.03 ms higher
+(not investigated, the fixed step is untouched); Windows runtime and a matched native run.
+
+**Next:** owner decision on GPU silhouettes; otherwise Rapier maintenance (DESIGN 14s).
+Plugin rules read: yes; exceptions: none.
+
 ## 2026-11-11: brush candidate rejection measured and completed
 
 **Agent/model:** Claude Code desktop, claude-fable-5-2 (review, measurement, replays, report).

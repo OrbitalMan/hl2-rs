@@ -1,5 +1,20 @@
 # STATUS
 
+## Performance: flex deltas once per actor; silhouettes need a design decision (2026-11-11)
+
+Since the brush set (next section): facial flex vertex deltas are built once per actor per frame
+instead of once per surface, and their map uses a multiplicative key hash; values are
+bit-identical (unit test). Three interleaved pairs against the brush-set build, M1 Pro / Metal,
+1080p, 600 ticks, load average 4.4 to 12.4 recorded per run: `animation` stage 1.46 to 1.02 ms
+(30 manhacks) and 0.72 to 0.55 ms (quiet); crowd frame 11.36 to 11.04 ms, no range overlap;
+quiet frame unchanged (5.87 to 5.86 ms), the renderer being the nearer bound there. From the
+first timed frame the crowd has gone from 13.85 to 11.04 ms (72 to 91 FPS) on the same merge.
+Shadow silhouettes (1.57 ms per crowd frame) already redraw only on change; the rest is the CPU
+rasterizer for casters that do change, and moving it to the GPU is an **owner decision, not
+started**. Replays were **not rerun** for the flex step (107 of 107 on the brush-set build).
+Windows runtime and a matched native run are **not tested**. Next candidates: Rapier maintenance
+(DESIGN 14s), the 1.4 ms of `PostUpdate` in no scope. Plugin rules read: yes; exceptions: none.
+
 ## Brush candidate rejection: measured, crowd tick 36% cheaper (2026-11-11)
 
 `modkit_core::BrushSet` (static bounds tree from each brush's own axial planes, candidates run

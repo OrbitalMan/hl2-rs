@@ -121,6 +121,28 @@ and unbounded-brush cases) and, as an owned-install test, on sweeps through a ca
 Measurement: tick cost at a fixed tick count, interleaved pairs, load recorded. Reversible by
 restoring the two call sites.
 
+### D. Facial flex deltas once per actor (2026-11-11, bounded plan)
+
+Budget (sampled crowd, M1 Pro): entity presentation is 1.45 ms of an 11.1 ms crowd frame and
+0.70 ms of a 5.8 ms quiet frame; facial flexes are about 73% of its samples (the per-vertex
+loop 43%, `vertex_deltas` 24%, descriptor weights 7%). The deformation is already skipped while
+an actor's quantized weights are unchanged, so the cost is paid by faces that are moving.
+
+Waste found: the vertex deltas of the whole face model are rebuilt for every surface of the
+actor in the same frame, although all its surfaces share one set of weights; and both building
+and reading them hash every vertex key with the default keyed hash.
+
+Design: the frame's per-actor entry keeps the weights, their signature and the deltas, built at
+most once and only when a surface's signature differs. The delta map keeps its key and its
+accumulation order (so sums are bit-identical) and uses a plain multiplicative hash of the
+three 16-bit key parts. Not part of this step: moving flexes to the GPU, changing the
+quantization, or changing which vertices are written to the mesh.
+
+Validation: a unit test that the delta map equals the default-hashed one entry for entry on
+generated flex data; the existing owned-file flex tests; packaged replays (face and scene
+checks). Measurement: frame time and the `animation` stage, interleaved pairs, load recorded.
+Reversible by restoring `face_flex.rs` and the map's hasher.
+
 ## Performance research and benchmark plan (2026-11-11)
 
 Before runtime implementation, map author-documented crowd, particle and renderer techniques to
