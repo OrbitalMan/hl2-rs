@@ -1,5 +1,22 @@
 # Design
 
+## Performance research and benchmark plan (2026-11-11)
+
+Before runtime implementation, map author-documented crowd, particle and renderer techniques to
+current costs and existing optimizations; record sources, applicability and rejection reasons in
+`docs/performance-research.md`. Keep the existing 14s on-demand hitbox/query-maintenance plan
+as the first measured implementation candidate. Upstream `4805c93` and `7f0e9ff` already remove
+repeated flight/sight queries; validate and reuse that work rather than duplicate it. Research
+claims are not HL2-RS gains.
+
+Establish isolated packaged release measurements with declared settings, view, workload, warmup,
+completed scripts and repeated alternating trials. Separate fresh contributor results from retained
+Windows profiles and the owner's unmatched RTX 5070 station02 observation. Attribute fixed ticks,
+render preparation, per-view work and custom GPU passes without adding overlapping scopes.
+Preserve source behavior, current bounds, monitor views and exact trace results. Any later runtime
+experiment receives its own bounded design, regression checks and before/after frame-time evidence;
+this checkpoint changes documentation only. Fresh timings remain pending.
+
 ## Current-count integration disposition (2026-11-03 HH)
 
 HH admits the integration described below through authored full/partial-cap andFP controls. Count identity uses the same active stopped event/lifetime/generation andnested sidecar, with both wrapper words joined to each independent current model-wrapper read. The remaining bounded action is a fresh-root native observation after ownership clears, preserving current-count versus earlier-getter history andstatic type-candidate versus entity identity. HF's earlier cutoff stays frozen; HH has a separate seal.

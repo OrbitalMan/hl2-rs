@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-11-11: performance research source checkpoint
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. Materially involved
+research subagents used the same model family for rendering and simulation research; packaged
+benchmark work is coordinated separately and is pending at this checkpoint.
+
+**Changed:** `docs/performance-research.md` records implementation-backed crowd, particle,
+rendering, animation and shader cases; current code opportunities; existing optimizations;
+ranked reversible experiments and measurement boundaries, including already published upstream
+flight/sight improvements omitted by the local baseline. `docs/DESIGN.md` records the
+bounded research/benchmark plan before any runtime implementation.
+
+**Why:** the owner requested broad performance research, local testing and a report after observing
+250+ FPS in native HL2 versus roughly 60+ FPS in the rewrite on RTX 5070/station02. Matching
+settings, view and workload are not yet established.
+
+**Tested how / Result:** author explanations, accessible technical replies and primary code were
+reviewed against runtime source and retained measurements. `python3 scripts/checks/architecture.py`
+passed with no baseline growth; `git diff --check` passed. No runtime files changed; no new
+performance gain is claimed.
+
+**Still broken or not tested:** fresh local timings pending; matched native RTX 5070 measurement,
+new Windows runtime checks, complete GPU-frame attribution and future optimizations are **not tested**.
+
+**Next:** complete isolated packaged local measurements, retain failures and update the report;
+then choose a bounded measured optimization with behavior and visual regression checks.
+
 ## 2026-11-10 session 52b: idle manhacks stop wobbling; the Windows plaza profile (Claude Code desktop, claude-opus-5-5)
 
 **Agent/model:** Claude Code desktop, claude-opus-5-5. No subagents.
