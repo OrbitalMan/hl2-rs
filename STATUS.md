@@ -2,8 +2,12 @@
 
 ## Performance research and packaged sensitivity checkpoint (2026-11-11)
 
+Implementation and validation are now in progress at the owner's clarification: implement
+techniques and test them before the final report. The existing research report is preliminary,
+with no new speedup established. The bounded effect-quad storage/ECS-write plan is at the top
+of docs/DESIGN.md; a simulation candidate remains under audit, not selected for code changes.
 Broad author/source research and 18 valid packaged fixed-tick station02 indoor-spawn trials
-are complete; see docs/performance-research.md. The measured existing release package is
+are complete as preliminary evidence; see docs/performance-research.md. The measured existing release package is
 2208bcb (SHA256 51cf256188b5e0446165cc2dc55ad90729768143683151f9c4e5182c41895fc5), M1 Pro / Metal,
 muted headless uncapped/profiled, 1080p explicit High/HDR Full/no-AA settings. Baseline median
 5.811 ms/frame (~172 FPS); no-PVS 7.736, CPU skinning 12.568; 720p/partition differences are
@@ -13,8 +17,11 @@ lit stairwell view, not a plaza/crowd comparison. All accepted scripts finish ti
 
 The package predates upstream main6d0b2f6 by four commits, including completed flight/sight query
 improvements. Latest fetched session53 tip1473203 still plans the14s lazy-hitbox/query-maintenance
-work; avoid duplicating it. Owner RTX5070 station02 native250+/rewrite60+ remains unmatched:
-CPU, resolution/settings/view/workload are unknown. Windows/native comparisons, local crowds,
+work; avoid duplicating it. Subsequent direct clarification identifies the original native 276 FPS
+plaza/manhack observation as RTX 3070, a 16-thread CPU at 4 GHz and 64 GB RAM at 3200; exact CPU model
+and native/rewrite settings/view/actor count remain unknown. The earlier RTX 5070 identification
+conflicts and remains provisional. Rewrite barely 60 FPS average/lower with crowds and a separate
+M1 Pro max 3456x2168 idle-plaza 65–80 FPS observation remain unmatched to the local indoor test. Windows/native comparisons, local crowds,
 interactive presentation and future optimized builds are **not tested**. Reproduce with
 `python3 artifacts/performance-research-2026-11-11/benchmark.py`; raw accepted/rejected reports
 remain there. Next: matched Windows owner fixture, reuse upstream tracing improvements, then

@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-11-11: corrected original performance observation provenance
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. Rendering/research
+synthesis subagent applied the correction using the coordinator's direct clarification.
+
+**Changed:** corrected the current report and STATUS/performance evidence: the original native
+276 FPS station02 plaza/manhack observation identifies RTX 3070, a 16-thread CPU at 4 GHz and
+64 GB RAM at 3200. The earlier user-supplied RTX 5070 identification conflicts and remains
+provisional. Exact CPU model, settings, view and actor count remain unknown. Added the separate
+M1 Pro maximum-graphics 3456x2168 idle-plaza 65–80 FPS observation at2208bcb; it is not the local
+indoor benchmark. Prior entries retain their original checkpoint context and are superseded
+on hardware provenance by this correction.
+
+**Why:** subsequent direct clarification of the original observation changed the benchmark
+context; local test data and external demo hardware must not be conflated with it.
+
+**Tested how / Result:** documentation compared with the clarified original observation;
+all 18 accepted local trials, their numbers, package identity and limitations are unchanged.
+No runtime source or settings changed. `git diff --check` and
+`python3 scripts/checks/architecture.py` passed with no baseline growth.
+
+**Still broken or not tested:** matched native/rewrite Windows measurement remains **not tested**;
+this clarification provides no new throughput result or optimized build.
+
+**Next:** match the original RTX 3070 plaza/crowd fixture and exact settings before comparing
+engines; retain the distinct indoor Mac evidence. Plugin rules read: yes; exceptions: none.
+
 ## 2026-11-11: packaged performance research measurement checkpoint
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. Materially involved

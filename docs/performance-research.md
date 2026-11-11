@@ -8,10 +8,16 @@ The measured baseline predates published upstream trace improvements; see revisi
 
 ## Scope and the reported gap
 
-The owner reports 250+ FPS in original Half-Life 2 versus roughly 60+ FPS in HL2-RS on an
-RTX 5070, on `d1_trainstation_02`. This is a user-supplied observation, not a matched
-benchmark recorded here. Resolution, quality settings, view, actor population and elapsed
-scene time are not established. At exactly 60 and 250 FPS, frame budgets are 16.67 and
+Subsequent direct clarification of the original observation identifies an RTX 3070: native
+`d1_trainstation_02` plaza, many manhacks colliding and sparking, 276 FPS; the rewrite barely
+60 FPS on average and much lower with many manhacks. The observer describes a 16-thread CPU
+at 4 GHz and 64 GB RAM at 3200; its exact CPU model is not established. The earlier user-supplied
+RTX 5070 identification conflicts with that original account and remains provisional; use
+RTX 3070 as the reported hardware for this comparison. These are observations, not a matched
+benchmark recorded here. Native/rewrite resolution, quality, exact view, actor count and scene
+time remain unestablished. A separate contemporaneous contributor observation reports M1 Pro,
+maximum graphics at 3456x2168, idle plaza 65–80 FPS at `2208bcb`; that interactive observation
+is not the controlled indoor test below. At exactly 60 and 250 FPS, frame budgets are 16.67 and
 4.00 ms: the difference is 12.67 ms of critical-path time. A small shader improvement
 cannot by itself remove that gap if simulation and render preparation dominate.
 
@@ -25,7 +31,8 @@ their authors and are not independently reproduced HL2-RS improvements.
 
 The November 10 Windows profile in [performance.md](performance.md) used an RTX 3070,
 Ryzen 7 3700X, release package `078d8d1`, 1080p owner settings and temporary reverted probes.
-It must remain separate from the owner's RTX 5070 report and fresh contributor measurements.
+It remains a separately instrumented session, not a matched reproduction of the original
+276 FPS observation or the fresh contributor measurements.
 
 | Retained Windows scenario | Mean frame | Relevant measured work |
 | --- | ---: | --- |
@@ -62,7 +69,7 @@ local measured baseline. Two changes already address the repeated-trace opportun
 - `7f0e9ff` replaces repeated sight rays and exclusion-vector growth with one filtered ray.
   Upstream records crowd frames 37.1–39.8 → 27.9/28.4 ms, and fixed ticks
   7.75–7.95 → 7.22/7.29 ms. These are retained upstream Windows results, not fresh local
-  measurements or a matched RTX 5070 comparison. [Sight change](https://github.com/kvalls/hl2-rs/commit/7f0e9ff),
+  measurements or a matched RTX 3070 comparison. [Sight change](https://github.com/kvalls/hl2-rs/commit/7f0e9ff),
   [measurement scope](https://github.com/kvalls/hl2-rs/blob/6d0b2f6/docs/performance.md).
 
 The newest fetched published session53 tip is `1473203`, with additional manhack appearance,
@@ -265,7 +272,7 @@ Each timing fixture must finish its intended workload; a fixed frame cap can sam
 simulation duration. Pair visual comparisons with gameplay/trace assertions. Diagnostic runs
 that disable work establish attribution only and cannot qualify an optimization.
 
-Fresh local packaged tests: **18 valid completed sensitivity runs**, detailed below. Matched native RTX 5070 comparison:
+Fresh local packaged tests: **18 valid completed sensitivity runs**, detailed below. Matched native RTX 3070 comparison:
 **not tested**. Windows validation of any future runtime change: **not tested** here. No
 performance gain, sustained FPS target or complete campaign fidelity is established by this report.
 
@@ -276,8 +283,8 @@ The existing release package matches `2208bcb618adfd3072ea5fd00553babdcb9a7866`,
 Apple M1 Pro / Metal, 10 logical CPUs, 16 GiB, advanced-options/debug-tools plugins;
 muted headless uncapped profiling. Explicit baseline: 1920x1080, FOV 75, HDR Full,
 High model/texture/shader/shadow, World water, no AA, trilinear, motion blur and color
-correction on, multicore on, VSync off. These are controlled settings, not the owner's
-unestablished RTX 5070 settings or the local saved configuration.
+correction on, multicore on, VSync off. These are controlled settings, not the observer's
+unestablished RTX 3070 settings or the local saved configuration.
 
 Six variants ran in three sequential interleaved orders. Each completed the same script at
 host tick 600; the 12,000-frame limit is only a safety cap. All 18 valid launches exited 0,
@@ -315,7 +322,7 @@ simulation intervals; this is not a cycle-isolated skinning test. CPU scopes inc
 discard 30 calls, overlap, and are not GPU timing. Existing compressed memory and about
 640 MiB swap qualify results; unchanged swap occupancy does not establish zero paging.
 Power/thermal sensors, full custom-pass GPU timestamps, live windowed FPS, heavy crowds
-locally and Windows RTX 5070/native comparison are **not tested**.
+locally and Windows RTX 3070/native comparison are **not tested**.
 
 Reproduce from the repository root:
 

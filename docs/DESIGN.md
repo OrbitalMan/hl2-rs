@@ -1,5 +1,56 @@
 # Design
 
+## Performance implementation and validation phase (2026-11-11)
+
+The owner clarified that techniques must be implemented and tested before the final report.
+Existing research and sensitivity results are preliminary. No new speedup is established.
+Keep the clarified RTX 3070 / station02 plaza / native276FPS observation distinct from the
+local M1 Pro indoor workload; native/rewrite settings and exact CPU model remain unknown.
+
+### A. Reuse effect-quad storage and avoid unchanged ECS writes
+
+Implement a bounded host-adapter change in the existing effects quad pool, without a new
+graphics pipeline, dependency or crate edge. Reuse the shadow draw module's existing pattern
+for persistent mesh attribute storage rather than constructing replacement vectors/meshes on
+every changed quad. Search and reuse shared buffer helpers where suitable. A newly allocated
+pool slot must receive its quad geometry once, rather than creating a mesh and immediately
+replacing it again. Keep mesh handles and ECS entities pooled; skip redundant material,
+visibility and bounds commands when their values are unchanged. Do not expand files already
+over architecture size limits: place the concern in a child module as needed.
+
+Preserve exact vertex/index order, UVs/colors, blend/material semantics, alpha sorting,
+render layers, camera eligibility, AABBs and show/hide transitions. No particle simulation,
+RNG, clocks, lifetimes, Source behavior or graphics quality changes belong to this step.
+Moving cameras and monitor/viewmodel paths must retain current geometry and visibility.
+
+Validate geometry arrays and final images against the retained baseline; cover new slots,
+changed/unchanged quads, material changes, shrinking/growing/empty pools and reuse after hiding.
+Use meaningful assertions on exact output and state, not tests that mirror setter calls.
+Run relevant crate tests, strict Clippy, formatting and architecture checks; packaged effects
+replays must complete with expected gameplay outcomes and no pose/visibility mismatches.
+Retain rejected attempts and actual captures alongside accepted results.
+
+Measure isolated packaged baseline/current builds in at least three interleaved rounds for
+both zero-effects and dense-effects completed fixed-duration workloads. Keep settings, scene
+time/view, plugins, warmup and profiling status explicit; separate screenshot readback from
+timing. Record total frame mean/tails, effects CPU, render-asset preparation and allocation/
+upload work where available. CPU wall scopes are not GPU timestamps. A zero-effects regression
+is not excused by a dense-effects win. Report variation and any unavailable counters; claim a
+speedup only after the before/after evidence supports it, with visual/behavior checks passing.
+Keep each validated change independently reversible and reviewable.
+
+### B. Hold the simulation candidate for its audit
+
+A simulation candidate is still being audited. No implementation is selected or approved by
+this plan. Preserve the published upstream flight/sight improvements and the existing14s
+hitbox/query-maintenance ownership. Record the candidate's exact source/correctness boundary,
+retail evidence and bounded validation design before any simulation code change. Do not
+combine hypothetical savings with the effect-pool result.
+
+The final report follows completed implementation/testing, and must separate accepted gains,
+neutral results, rejected experiments and work still not tested. Update MODLOG and STATUS with
+actual measured results rather than promoting the preliminary sensitivity study as a new gain.
+
 ## Performance research and benchmark plan (2026-11-11)
 
 Before runtime implementation, map author-documented crowd, particle and renderer techniques to

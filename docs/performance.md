@@ -1112,9 +1112,22 @@ The 120-frame warmup covers different simulation intervals at different throughp
 windows include setup and overlap; graph CPU wall intervals are not GPU timestamps. Existing
 compression/about 640 MiB swap qualify timings; full GPU/power/thermal counters are unavailable.
 The package omits four newer upstream-main commits, including flight/sight query improvements.
-Windows RTX 5070, live presentation, local crowds, native matched settings and general FPS
+Windows RTX 3070 matched reproduction, live presentation, local crowds, native settings and general FPS
 improvements are **not tested**. No source/build modification or installed-game write occurred.
 
 Evidence and reproduction: `artifacts/performance-research-2026-11-11/summary.json`,
 `measurements.json`, per-run reports/logs/configs, `baseline-visual.png`, environment snapshots;
 `python3 artifacts/performance-research-2026-11-11/benchmark.py` from the repository root.
+
+
+### Correction: original performance observation hardware (2026-11-11)
+
+Subsequent direct clarification of the original observation identifies RTX 3070, not the
+previously supplied RTX 5070: native station02 plaza with many colliding/sparking manhacks
+read 276 FPS, while the rewrite reportedly averaged barely 60 FPS and less with many manhacks.
+The observer reports a 16-thread CPU at 4 GHz and 64 GB RAM at 3200; exact CPU model, resolution,
+quality, view, actor count and timing method are not established. The earlier RTX 5070 account
+is conflicting/provisional. The historical Windows profile remains a separate instrumented
+session; none of the fresh Mac measurements changed. A separate contemporaneous observation
+reports M1 Pro / maximum graphics / 3456x2168 / idle plaza 65–80 FPS at `2208bcb`, not the controlled
+1080p indoor headless workload. No new runtime test or speedup follows from this correction.
