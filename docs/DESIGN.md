@@ -89,6 +89,38 @@ clip-mask/large-hull/fallback cases and owned-map sweeps against the full-scan o
 candidate sorting, scratch allocation and maintenance cost in before/after measurements. No new
 index, API/contract change, persistent memory note or projected FPS is part of this cycle.
 
+### C. Exact candidate rejection for world brush traces (2026-11-11, bounded plan)
+
+Budget (timed frame, M1 Pro, 30 manhacks): world brush hull traces are about 42% of a 5.91 ms
+tick, about 2.1 ms per 12.35 ms frame; each call scans every world brush and most of their
+planes. Expected saving: most of that share in the crowd, about 0.3 ms per quiet frame.
+
+Design: `modkit_core::BrushSet` owns the world brushes with a static bounds tree built once at
+map load, and `BrushSet::trace` replaces the full scan for the player hull and NPC hull traces.
+A brush's box comes only from its own axis-aligned planes (BSP bevel planes); a brush lacking
+one of the six is checked individually against the axial sides it does have. A brush is skipped only when the swept hull's box is
+farther than a slack well above the 1/32 collision epsilon from that box on some axis: then one
+of the brush's own axial planes has the hull outside it by more than the epsilon at both ends,
+for which the plane loop itself yields no hit and no solid flag. Candidates run through the one
+existing plane accumulator in ascending brush order, so epsilon, contents, equal-hit normal
+ownership, start_solid and all_solid are unchanged. Candidates are gathered into a fixed stack
+buffer and sorted; overflow, invalid hull ordering, non-finite inputs or sweep coordinates/hull
+extents beyond magnitude 65,536 fall back to the full scan. Non-finite brush planes or distances
+beyond that limit stay in the unconditional candidate list. This bounds axial arithmetic rounding
+well below the 0.125-unit slack; no claim of exact rejection is made outside that domain. No allocation
+per trace, no new dependency, no change to the collision contract.
+
+This replaces the earlier idea of reusing the physics query tree with a collider-to-brush map:
+that tree's boxes come from converted hulls, not from the brush's planes, so skipping by them
+is not provably exact, it needs a fallback set for unconverted brushes, and plan 14s intends
+to take static colliders out of its per-step maintenance.
+
+Validation: unit tests compare `BrushSet::trace` with the full scan bit for bit on generated
+brush fields (touching, overlapping, start-solid, all-solid, corner, mask, large-hull, overflow
+and unbounded-brush cases) and, as an owned-install test, on sweeps through a campaign map.
+Measurement: tick cost at a fixed tick count, interleaved pairs, load recorded. Reversible by
+restoring the two call sites.
+
 ## Performance research and benchmark plan (2026-11-11)
 
 Before runtime implementation, map author-documented crowd, particle and renderer techniques to

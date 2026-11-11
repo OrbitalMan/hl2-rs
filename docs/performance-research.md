@@ -161,6 +161,61 @@ Four runs per case of the merged build with the markers, 600 host ticks, M1 Pro 
 - Remaining unnamed: 1.39 ms in `PostUpdate` and 0.92 ms in `PreUpdate` per crowd frame are
   bounded by schedule but not by system. **Not measured** per system.
 
+### Exact world-brush candidate rejection: implementation and correctness
+
+The next implementation starts from a fresh upstream merge, `a49ce84` (upstream main
+`9561759`), rather than the older timed package above. Its baseline includes the newer lighting,
+viewmodel and manhack rendering fixes. `BrushSet` builds a static median-split bounds tree once
+from each world's brush list. Player and NPC hull traces gather nearby candidates into a
+128-entry stack buffer, sort their original indices, and use the original plane accumulator.
+Equal-hit normals and the normal retained before an all-solid result keep their list order.
+There is no per-query allocation, no cadence reduction and no change to the hull or contents mask.
+
+Only a brush's own axial planes justify rejection. Missing sides remain unbounded; a brush
+without a complete box is checked individually. Non-finite data, unordered hull bounds,
+coordinates/extents beyond magnitude 65,536, or candidate/stack overflow use conservative
+fallbacks. The coordinate bound keeps axial arithmetic rounding below the 0.125-unit padding.
+The tree does not depend on converted Rapier shapes, so missing conversion cannot remove collision.
+
+Six synthetic tests cover 24,000 generated sweeps, face/epsilon boundaries, partial boxes,
+overflow, contents masks, equal-hit normal ownership, all-solid accumulation, coordinate limits,
+non-finite inputs and malformed planes. An owned-install test in `source-assets`, using normal
+installation discovery, compares another 18,000 sweeps bit for bit with the full scan:
+
+| Map | Brushes | Incomplete boxes | Mean candidates, all 6,000 sweeps | Full-scan fallbacks | Mean candidates, 4,000 short sweeps | Short fallbacks |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| d1_trainstation_02 | 1,913 | 0 | 47.41 | 137 | 2.11 | 0 |
+| d1_canals_01 | 2,039 | 0 | 60.88 | 165 | 2.68 | 0 |
+| d2_coast_01 | 536 | 0 | 9.47 | 45 | 3.74 | 0 |
+
+Candidate means count every brush when the buffer falls back. The broad workload includes
+deliberate 32,000-unit sweeps; short sweeps use component displacement scales up to 30 units.
+These are generated correctness probes, **not live-game candidate counts or FPS gains**.
+All three maps exercise hundreds of hits and start-solid cases. The existing source whitelist
+admits the new Rust modules without exceptions. Native layout/assets remain read-only.
+
+### Exact world-brush candidate rejection: measured
+
+Three interleaved pairs per case of two packages from the same merge (`a49ce84`), without and
+with `BrushSet`; 600 host ticks, M1 Pro / Metal, 1080p, all 12 runs exit 0 at tick 600. Load
+average 3.6 to 4.4 on 10 logical CPUs, recorded before every run. Medians, with ranges:
+
+| Case | Tick before | Tick after | Frame before | Frame after |
+| --- | ---: | ---: | ---: | ---: |
+| 30 manhacks | 6.03 ms (6.00 to 6.05) | 3.84 ms (3.84 to 3.85) | 13.85 ms (13.70 to 14.02) | 11.18 ms (11.17 to 11.26) |
+| Quiet | 3.89 ms (3.86 to 3.94) | 3.32 ms (3.32 to 3.34) | 6.04 ms (6.04 to 6.06) | 5.79 ms (5.76 to 5.81) |
+
+No range overlaps. The crowd tick is 36% cheaper and its frame 19% shorter (72 to 89 frames per
+second); the quiet tick is 15% cheaper and its frame 4% shorter. Per crowd frame the fixed loop
+falls from 5.65 to 2.94 ms, at 0.93 and then 0.75 ticks per frame; the 2.7 ms saved is above
+the 2.1 ms ceiling, which was a sampled share of a slightly cheaper tick. Tick p95 falls from
+7.26 to 4.38 ms in the crowd. `PostUpdate` (5.51 ms) is now half of the 11.1 ms crowd frame.
+
+Packaged replays of the candidate against the merged baseline: 107 of 107 checks pass (1,839 s). The merged baseline had 105 of 107: its
+`flashlight_viewmodel` off-light image control and `monitors-kleiner-scene` gib count did
+not fail again on the candidate. The index returns the full scan's result bit for bit, so
+those two are treated as unstable checks, not as something this change fixed.
+
 ### Machine load during these runs
 
 The two new sampled runs were taken on a loaded machine: load average about 4 on 10 logical
@@ -190,8 +245,8 @@ the post-merge sample applied to 4.96 ms); each returns about 1.65 times itself 
 
 1. Merge upstream (flight single sweep, filtered sight ray), re-profile. Done.
 2. Whole-frame timing. Done; it corrected the stage means and this ranking.
-3. Candidate rejection for `trace_brushes` (bounds per brush or a static tree), exact plane
-   order and results kept. Ceiling about 2.1 ms (42% of the fixed loop).
+3. Candidate rejection for world brush traces. Done: crowd tick 6.03 to 3.84 ms, frame
+   13.85 to 11.18 ms; quiet tick 3.89 to 3.32 ms. The ceilings below predate it.
 4. Shadow silhouettes redrawn only when the pose or light changed. Ceiling 1.56 ms.
 5. Entity presentation: facial flexes on the GPU or only when weights change. Ceiling within
    1.50 ms, plus the mesh re-uploads on the render thread (`render_assets` 2.39 ms).

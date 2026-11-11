@@ -1,7 +1,9 @@
 //! Rapier collision/rigid-body adapter. This is not Valve's proprietary VPhysics solver.
 use crate::npc_probe::{ActorHull, Hull, HullTrace, NpcCollisionWorld, Query, CONTENTS_MONSTER};
 use glam::{Mat4, Quat, Vec3};
-use modkit_core::{movement::CollisionWorld, trace_brushes, Brush, Surface, Trace, World};
+use modkit_core::{
+    movement::CollisionWorld, trace_brushes, Brush, BrushSet, Surface, Trace, World,
+};
 use rapier3d::parry::query::ShapeCastOptions;
 use rapier3d::prelude::*;
 use std::collections::{BTreeMap, HashMap};
@@ -655,7 +657,7 @@ pub struct Physics {
     world_brush_contents: HashMap<ColliderHandle, u32>,
     pub world_sides: WorldSideMaterials,
     npc_collider_contents: HashMap<ColliderHandle, u32>,
-    player_world_brushes: Vec<Brush>,
+    player_world_brushes: BrushSet,
     player_convex_cache: Mutex<player_convex::ConvexCache>,
     pub dynamic: BTreeMap<usize, RigidBodyHandle>,
     /// Surfaceprop of each authored VPhysics prop (entity id -> lowercase name).
@@ -810,7 +812,7 @@ fn apply_drag(
 impl Physics {
     pub fn new(world: &World) -> Self {
         let mut p = Self {
-            player_world_brushes: world.brushes.clone(),
+            player_world_brushes: BrushSet::new(world.brushes.clone()),
             air_density: crate::drag::AIR_DENSITY,
             ..Self::default()
         };
@@ -3256,14 +3258,9 @@ impl CollisionWorld for Physics {
             (start.y + center.y) * SCALE,
             (start.z + center.z) * SCALE,
         );
-        let mut result = trace_brushes(
-            &self.player_world_brushes,
-            start,
-            end,
-            mins,
-            maxs,
-            PLAYER_BRUSH_MASK,
-        );
+        let mut result = self
+            .player_world_brushes
+            .trace(start, end, mins, maxs, PLAYER_BRUSH_MASK);
         // Continuous SAT for cuboids/convex polyhedra includes their face planes,
         // player box face axes, and every convex-edge/box-edge bevel axis. Cache
         // planes by current shape/pose and only query broadphase candidates.

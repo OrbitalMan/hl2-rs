@@ -1,5 +1,21 @@
 # STATUS
 
+## Brush candidate rejection: measured, crowd tick 36% cheaper (2026-11-11)
+
+`modkit_core::BrushSet` (static bounds tree from each brush's own axial planes, candidates run
+through the unchanged plane loop in list order) serves the player and NPC world-brush hull
+traces. Six synthetic tests and 18,000 owned-map sweeps match the full scan bit for bit. Three
+interleaved pairs of packages from merge `a49ce84`, 600 ticks, M1 Pro / Metal, 1080p, load
+average 3.6 to 4.4 recorded per run, no range overlap: 30 manhacks tick 6.03 to 3.84 ms and
+frame 13.85 to 11.18 ms (72 to 89 FPS); quiet tick 3.89 to 3.32 ms and frame 6.04 to 5.79 ms.
+Crowd fixed loop per frame 5.65 to 2.94 ms; `PostUpdate` (5.51 ms: shadow silhouettes 1.57,
+entity presentation 1.45) is now half the crowd frame. Candidate replays: 107 of 107 pass; the
+merged baseline's two failures (`flashlight_viewmodel` off-light control, Kleiner gib count)
+did not recur and are treated as unstable checks. Full validation and Windows cross-target
+Clippy pass. Windows runtime and a matched native run are **not tested**. Next, by ceiling:
+silhouettes only on change, facial flexes, Rapier maintenance (DESIGN 14s).
+Plugin rules read: yes; exceptions: none.
+
 ## Performance: the whole frame is timed; presentation is as large as the fixed loop (2026-11-11)
 
 `--profile` records `frame_total` and a `main_schedule.<name>` stage per main schedule; they add

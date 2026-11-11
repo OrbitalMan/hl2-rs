@@ -2,6 +2,8 @@
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 pub mod animation;
+mod brush_set;
+pub use brush_set::BrushSet;
 pub mod decals;
 pub mod lighting;
 pub mod movement;
@@ -571,16 +573,38 @@ pub fn trace_brushes(
     maxs: Vec3,
     contents_mask: u32,
 ) -> Trace {
-    let mut result = Trace {
-        fraction: 1.,
-        normal: Vec3::ZERO,
-        start_solid: false,
-        all_solid: false,
-    };
+    let mut result = Trace::miss();
     for brush in brushes {
-        if brush.contents & contents_mask == 0 || brush.planes.is_empty() {
-            continue;
+        if brush.contents & contents_mask != 0 {
+            sweep_brush(brush, start, end, mins, maxs, &mut result);
         }
+    }
+    result
+}
+
+impl Trace {
+    /// A sweep that met nothing.
+    pub(crate) fn miss() -> Self {
+        Self {
+            fraction: 1.,
+            normal: Vec3::ZERO,
+            start_solid: false,
+            all_solid: false,
+        }
+    }
+}
+
+/// Adds one brush to a sweep's result. Brushes must be added in their list order: the first
+/// brush owns an equal-fraction normal, and a solid end keeps the normal found before it.
+pub(crate) fn sweep_brush(
+    brush: &Brush,
+    start: Vec3,
+    end: Vec3,
+    mins: Vec3,
+    maxs: Vec3,
+    result: &mut Trace,
+) {
+    if !brush.planes.is_empty() {
         let mut enter = -1f32;
         let mut leave = 1f32;
         let mut normal = Vec3::ZERO;
@@ -623,7 +647,7 @@ pub fn trace_brushes(
             }
         }
         if reject {
-            continue;
+            return;
         }
         if start_inside {
             result.start_solid = true;
@@ -631,14 +655,13 @@ pub fn trace_brushes(
                 result.all_solid = true;
                 result.fraction = 0.;
             }
-            continue;
+            return;
         }
         if enter >= 0. && enter < leave && enter < result.fraction {
             result.fraction = enter;
             result.normal = normal;
         }
     }
-    result
 }
 
 /// Hosts supply assets and collision; mods add portable content without depending on Source.

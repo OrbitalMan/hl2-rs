@@ -276,8 +276,7 @@ impl NpcCollisionWorld for Physics {
         }
         let sweep = Sweep::new(start, end, hull);
         let mut result = HullTrace {
-            trace: trace_brushes(
-                &self.player_world_brushes,
+            trace: self.player_world_brushes.trace(
                 start,
                 end,
                 hull.mins,

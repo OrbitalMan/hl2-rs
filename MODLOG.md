@@ -1,5 +1,52 @@
 # MODLOG
 
+## 2026-11-11: brush candidate rejection measured and completed
+
+**Agent/model:** Claude Code desktop, claude-fable-5-2 (review, measurement, replays, report).
+Implementation by Claude Code and Codex desktop as in the entry below. No subagents.
+
+**Changed:** no code beyond the checkpoint below; results recorded in
+`docs/performance-research.md` and STATUS.
+
+**Why:** the checkpoint had exactness evidence but no measurement and no candidate replays.
+
+**Tested how / Result:** review of the index and its fallbacks found nothing to change. Three
+interleaved packaged pairs from merge `a49ce84`, 600 ticks, M1 Pro / Metal, 1080p, load average
+3.6 to 4.4 recorded per run, all exit 0 at tick 600. Frame time before to after: 30 manhacks
+13.85 to 11.18 ms, quiet 6.04 to 5.79 ms. Tick: crowd 6.03 to 3.84 ms, quiet 3.89 to 3.32 ms;
+no range overlap. Candidate replays 107 of 107 (baseline 105 of 107; its two failures did not
+recur). Validation passes.
+
+**Still broken or not tested:** Windows runtime and a matched native run; the two replay checks
+that failed once on the baseline are unstable and not investigated.
+
+**Next:** shadow silhouettes only on change (1.57 ms per crowd frame), with a written budget.
+Plugin rules read: yes; exceptions: none.
+
+## 2026-11-11: brush candidate rejection exactness checkpoint; measurement pending
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier not exposed. Initial index and
+plane-loop extraction by Claude Code, `claude-fable-5-2`, as recorded in the handoff. No subagents
+in this continuation.
+
+**Changed / Why:** continue the static axial-bounds tree for player/NPC world-brush sweeps on
+fresh upstream merge `a49ce84`. Preserve ordered exact plane accumulation; add conservative
+fallbacks for invalid/extreme inputs and owned-map equivalence coverage. No per-query allocation.
+
+**Tested how / Result:** six synthetic tests and 18,000 installed-map sweeps pass bitwise result
+comparisons. Station02 short probes average 2.11 candidates of 1,913 brushes, with zero buffer
+fallbacks; generated probes are not live performance results. Full validation passes: 1,677 Rust
+tests, 55 Python helpers, all plugin selections, strict Clippy, formatting, architecture and
+isolation. Windows cross-target checks and packaged release build pass. Merged baseline replays
+pass 105/107: existing flashlight off-image control and Kleiner gib-count failures retained in
+STATUS. Architecture baseline only shrinks.
+
+**Still broken or not tested:** candidate packaged replays and actual paired tick/frame benchmarks
+remain pending at the usage handoff; no speedup claim. Windows runtime and matched native remain
+not tested. **Next:** finish these measurements against the fresh merged baseline, compare replay
+outcomes, update the report and commit the completed optimization locally; do not push.
+Plugin rules read: yes; exceptions: none.
+
 ## 2026-11-11: refresh the performance branch from upstream main
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

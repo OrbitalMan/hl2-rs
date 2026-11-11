@@ -1,5 +1,20 @@
 # Local validation — 2026-10-05
 
+## Exact brush candidate rejection (2026-11-11)
+
+`cargo test --locked -p modkit-core brush_set` passes six synthetic exactness tests.
+`cargo test --locked -p source-assets owned_campaign_brush_set_matches_ordered_full_scan -- --ignored --nocapture`
+passes 18,000 installed-map comparisons across station02, canals01 and coast01. Fraction and
+normal compare by floating-point bits; both solid flags compare exactly. See
+[performance-research.md](performance-research.md) for candidate counts and fallback coverage.
+The owned-file test belongs to the asset crate, keeping core independent of file-system access.
+
+Full validation passes on both the fresh upstream merge and the candidate: architecture,
+55 Python helper tests, all four plugin selections, workspace tests, strict Clippy, formatting
+and repository isolation. Candidate Windows cross-target strict Clippy passes. Windows runtime
+and matched native performance are **not tested**. Packaged benchmark and replay results follow
+in the performance report.
+
 ## Effect geometry/glow implementation validation (2026-11-11)
 
 Four effect-pool tests verify exact positions/UV/color/index/normal/UV1 output, storage reuse,
@@ -21,7 +36,7 @@ with 400 host-tick prewarm yields identical fire/smoke images; ball differs 61 p
 [1257,841,1286,854]. Exact ball pixel parity and full-campaign/all-camera equivalence remain
 unproven; no tolerance/extra flags promote the failure. Original timing settings are unchanged.
 
-The source-only measurement driver and 9 authored tests cover workload rejection, actual internal
+The source-only measurement driver and 11 authored tests cover workload rejection, actual internal
 resolution, weighted complete windows, config restoration/path confinement, config symlink
 rejection and full paired gameplay-state mismatch. Fixture whitelist admits only five JSON
 sources. Root-level final helper/document checks are recorded with the checkpoint; runtime

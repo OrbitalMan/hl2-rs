@@ -757,6 +757,9 @@ fn texinfo_material(
 }
 
 #[cfg(test)]
+mod brush_set_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
