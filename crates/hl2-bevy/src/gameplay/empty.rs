@@ -27,7 +27,7 @@ impl Gameplay {
         )
     }
     pub(super) fn from_prepared(world: World, prepared: PreparedGameplay) -> Self {
-        Self {
+        let mut game = Self {
             scene: prepared.scene,
             world: Arc::new(world),
             inventory: Inventory::default(),
@@ -87,8 +87,11 @@ impl Gameplay {
             pickup_requests: Vec::new(),
             npc_requests: Vec::new(),
             weapon_requests: Vec::new(),
+            weapon_load_failed: BTreeSet::new(),
             model_draws: Vec::new(),
-        }
+        };
+        game.sync_pickup_blocked();
+        game
     }
 }
 pub(super) struct PreparedGameplay {

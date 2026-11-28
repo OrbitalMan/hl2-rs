@@ -24,6 +24,9 @@ pub(crate) fn class_sound_cues(class: &str) -> Vec<&'static str> {
         "npc_crow" | "npc_pigeon" | "npc_seagull" => hl2_simulation::ai::bird::SOUNDS.to_vec(),
         "npc_manhack" => hl2_simulation::ai::manhack::SOUNDS.to_vec(),
         "npc_cscanner" | "npc_clawscanner" => hl2_simulation::ai::scanner::SOUNDS.to_vec(),
+        // Soldiers throw frag grenades (npc_combine.cpp), whose bounce and fuse cues come
+        // with weapon_frag; a map-placed soldier gets them from the map's preload.
+        "npc_combine_s" => hl2_simulation::gameplay::extra_sound_cues("weapon_frag").to_vec(),
         _ => Vec::new(),
     }
 }
@@ -247,6 +250,12 @@ mod tests {
         for class in ["npc_cscanner", "npc_clawscanner"] {
             assert_eq!(class_sound_cues(class), hl2_simulation::ai::scanner::SOUNDS);
         }
+        // A late soldier's grenades bounce and tick like the player's frags.
+        assert_eq!(
+            class_sound_cues("npc_combine_s"),
+            hl2_simulation::gameplay::extra_sound_cues("weapon_frag")
+        );
+        assert!(!class_sound_cues("npc_combine_s").is_empty());
         assert!(class_sound_cues("npc_citizen").is_empty());
         assert!(class_sound_cues("prop_physics").is_empty());
         assert!(class_sound_cues("").is_empty());

@@ -133,14 +133,16 @@ pub(crate) fn load(input: LoadInput<'_>, mode: LoadMode) -> Result<LoadedMap> {
         decal_errors,
     } = prepare_world(&bsp, &vfs, map, config, &mut timing, &mode)?;
     progress.report(0.50, "LoadingProgress_SignonDataLocal");
-    let mut gameplay = prepare_gameplay(
-        world,
-        &vfs,
-        bsp.revision,
-        new_game,
-        config,
-        &mode.extra_weapons,
-    )?;
+    // The player weapons the map's NPCs carry load with the map, as retail creates (and
+    // precaches, viewmodel included) their weapon entities then: a dropped one can be picked
+    // up at once. `prepare_gameplay` keeps only player weapons of this set.
+    let mut player_weapons = mode.extra_weapons.clone();
+    player_weapons.extend(hl2_simulation::npc_weapons::equipped_npc_weapons(
+        &world,
+        &mode.extra_npc_weapons,
+    ));
+    let mut gameplay =
+        prepare_gameplay(world, &vfs, bsp.revision, new_game, config, &player_weapons)?;
     let world = gameplay.world.clone();
     timing.mark("gameplay");
     mode.cancel.check()?;

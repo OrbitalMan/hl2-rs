@@ -1,5 +1,40 @@
 # MODLOG
 
+## 2026-11-28 — Fix five O50 weapon-precache defects: pickups before assets, retries, clones, sounds (O50)
+
+- Agent/model — Claude Code desktop (claude-opus-5-5); the defects were found by claude-sonnet-5-5 review subagents
+  (each confirmed by a second, skeptical reviewer) in the O50 Workstream A commit.
+- Changed — (1) A player weapon whose assets are not loaded cannot be picked up: `Inventory::pickup_blocked`
+  (hl2-simulation, checked by `takes_weapon` in `gameplay/pickups.rs`, where `give_ammo` also moved so
+  `gameplay.rs` shrinks 2760 -> 2741 lines) is kept by the host (`gameplay/weapon_loads.rs`: synced at construction
+  and after a changelevel's inventory carry, cleared per class by `mark_weapon_loaded`), and a weapon entity created
+  in play (an NPC's drop, `ent_create`) requests its assets at once (`request_weapon_assets` from `insert_entity`;
+  `PendingWeaponGrant::give: false` loads without giving). The player weapons the map's NPCs carry
+  (`npc_weapons::equipped_npc_weapons`: `additionalequipment`, `GiveWeapon`, script extras; the developer spawn
+  pools left out) load with the map, as retail creates and precaches those weapon entities with it
+  (`CBaseCombatWeapon::Precache`, viewmodel included). (2) A failed late load is reported once and recorded in
+  `Gameplay::weapon_load_failed`; neither the tick-stage safety net nor `enqueue_requests` queues it again.
+  (3) `RuntimeWeapons::known` shares one snapshot of the material, texture, model and physics tables across weapon
+  jobs, rebuilt only when a table grew (a loadout cloned them once per weapon on the main thread). (4) NPC weapon
+  fire and reload sounds load with the map for every NPC weapon (`collect_weapon_cues` adds the scripts of
+  `required_npc_weapons`), and a late NPC loads its weapons' sounds (`runtime_npcs::prepare_audio`). (5) A late
+  `npc_combine_s` loads the frag cues (`class_sound_cues`).
+- Why — owner: fix them at once. Before, picking up an NPC's dropped weapon on a map that did not precache it gave
+  the player a weapon with no viewmodel, sounds or projectile until its async load finished; a failed load was
+  retried every frame forever with a console line each time; on unarmed maps NPC weapons could fire silently.
+- Tested how — unit tests `a_weapon_whose_assets_are_still_loading_stays_where_it_lies`,
+  `unloaded_weapons_cannot_be_picked_up_until_their_assets_are_in`,
+  `a_failed_load_is_reported_once_and_a_load_only_request_gives_nothing`,
+  `npc_weapon_sounds_load_on_a_map_where_the_player_has_no_weapons`, the extended
+  `required_npc_weapons_limits_unpooled_maps_and_tracks_pool_and_outputs` and
+  `class_sound_cues_gates_expected_npc_classes`; owned-install `runtime_weapons` tests; validate; replays.
+- Result — see the commit message for the replay and load-time numbers.
+- Still broken or not tested — live play of a pickup during a pending load and Windows **not tested**. Codex's
+  Workstream B patch (shared background dispatch, a late-prefetch worker limit) was set aside, not landed: its
+  one-worker trial made a cold zombie wait `81.2 -> 88.5 ms` with no frame-time gain, the two-worker variant was
+  not measured.
+- Next — back to O9 (the GPU silhouette first-use frame, the effect blends).
+
 ## 2026-11-28 — Warm the HUD's blend states and every map draw behind the loading cover (O9)
 
 - Agent/model — Claude Code desktop (claude-opus-5-5); the HUD design brief and the review of the viewmodel

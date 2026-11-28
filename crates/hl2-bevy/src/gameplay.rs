@@ -6,6 +6,7 @@ mod npc_spawn;
 mod player_outcome;
 mod shot_effect;
 mod tick_stages;
+mod weapon_loads;
 mod weapons_stage;
 mod zombies;
 use anyhow::Result;
@@ -223,6 +224,8 @@ pub struct Gameplay {
     pub npc_requests: Vec<PendingNpcSpawn>,
     /// Weapons waiting for on-demand asynchronous viewmodel/asset late precaching.
     pub weapon_requests: Vec<crate::runtime_weapons::PendingWeaponGrant>,
+    /// Weapons whose late load failed this map: reported once, not requested again.
+    pub weapon_load_failed: std::collections::BTreeSet<String>,
     /// Runtime entities whose model draws the host builds next frame (dropped weapons).
     pub model_draws: Vec<usize>,
 }
@@ -423,6 +426,7 @@ impl Gameplay {
             self.weapon_requests
                 .push(crate::runtime_weapons::PendingWeaponGrant {
                     weapon_id: "weapon_crowbar".into(),
+                    give: true,
                     equip: true,
                     refill_ammo: true,
                     priority: true,
@@ -439,6 +443,7 @@ impl Gameplay {
                 self.weapon_requests
                     .push(crate::runtime_weapons::PendingWeaponGrant {
                         weapon_id: name.clone(),
+                        give: true,
                         equip: false,
                         refill_ammo: true,
                         priority: false,
@@ -511,6 +516,7 @@ impl Gameplay {
         }
         self.runtime_entities.push(id);
         self.ai.add_actor(id, &entity);
+        self.request_weapon_assets(entity.class());
         Ok(id)
     }
     /// CNPC_PoisonZombie AE_ZOMBIE_POISON_THROW_CRAB (DESIGN 14o session 38): a

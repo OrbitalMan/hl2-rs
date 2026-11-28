@@ -1,3 +1,41 @@
+use super::{Inventory, Weapon};
+use std::collections::BTreeMap;
+
+impl Inventory {
+    /// Whether touching a weapon entity of `class` picks it up: a player weapon whose assets
+    /// the host has loaded. One whose viewmodel is still loading stays where it lies, so the
+    /// player never holds a weapon that cannot be drawn or heard (retail precaches every weapon
+    /// entity's viewmodel when it is created, `CBaseCombatWeapon::Precache`).
+    pub(super) fn takes_weapon(&self, class: &str, weapons: &BTreeMap<String, Weapon>) -> bool {
+        weapons.contains_key(class) && !self.pickup_blocked.contains(class)
+    }
+
+    pub fn give_ammo(
+        &mut self,
+        ammo_type: &str,
+        amount: i32,
+        weapons: &BTreeMap<String, Weapon>,
+    ) -> i32 {
+        let Some((canonical, maximum)) = weapons.values().find_map(|w| {
+            if w.ammo_type.eq_ignore_ascii_case(ammo_type) && w.ammo_max > 0 {
+                Some((&w.ammo_type, w.ammo_max))
+            } else if w.secondary_ammo_type.eq_ignore_ascii_case(ammo_type)
+                && w.secondary_ammo_max > 0
+            {
+                Some((&w.secondary_ammo_type, w.secondary_ammo_max))
+            } else {
+                None
+            }
+        }) else {
+            return 0;
+        };
+        let old = self.ammo(canonical);
+        let added = amount.max(0).min((maximum - old).max(0));
+        self.set_ammo(canonical, old + added);
+        added
+    }
+}
+
 // SDK items.h/item_ammo.cpp quantities/aliases; difficulty scaling and crates remain separate.
 pub(super) fn ammo_pickup(class: &str) -> Option<(&'static str, i32)> {
     Some(match class {

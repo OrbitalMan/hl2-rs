@@ -118,6 +118,16 @@ fn collect_weapon_cues(game: &crate::gameplay::Gameplay, cues: &mut BTreeSet<Str
                 .map(str::to_owned),
         );
     }
+    // The NPCs' own weapons fire and reload with their script's sounds (`single_shot_npc`,
+    // `reload_npc`) on a map where the player has none of those weapons.
+    let npc_weapons =
+        hl2_simulation::npc_weapons::required_npc_weapons(&game.world, &BTreeSet::new());
+    for weapon in npc_weapons
+        .iter()
+        .filter_map(|class| game.weapons.get(class))
+    {
+        cues.extend(weapon.sounds.values().cloned());
+    }
     if !game.precached_weapons.contains("weapon_frag")
         && game
             .world
@@ -269,4 +279,35 @@ fn ambient(
         );
     }
     ambient
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn npc_weapon_sounds_load_on_a_map_where_the_player_has_no_weapons() {
+        let world = modkit_core::World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("additionalequipment".into(), "weapon_pistol".into()),
+                ],
+            }],
+            ..Default::default()
+        };
+        let mut game = crate::gameplay::Gameplay::synthetic(world);
+        let mut pistol = hl2_simulation::gameplay::Weapon {
+            class: "weapon_pistol".into(),
+            ..Default::default()
+        };
+        pistol
+            .sounds
+            .insert("single_shot_npc".into(), "Weapon_Pistol.NPC_Single".into());
+        game.weapons.insert("weapon_pistol".into(), pistol);
+        assert!(game.precached_weapons.is_empty());
+        let mut cues = BTreeSet::new();
+        super::collect_weapon_cues(&game, &mut cues);
+        assert!(cues.contains("Weapon_Pistol.NPC_Single"));
+    }
 }

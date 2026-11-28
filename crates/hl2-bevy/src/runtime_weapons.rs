@@ -80,6 +80,9 @@ impl WeaponBundleSpec {
 #[derive(Clone, Debug)]
 pub struct PendingWeaponGrant {
     pub weapon_id: String,
+    /// `false` only loads the weapon's assets (a weapon entity appeared in the world): the
+    /// player gets it by picking it up once they are in.
+    pub give: bool,
     pub equip: bool,
     pub refill_ammo: bool,
     pub priority: bool,
@@ -88,6 +91,17 @@ pub struct PendingWeaponGrant {
 
 type Slot = Arc<Mutex<Option<Result<PreparedWeaponBundle, String>>>>;
 
+/// What the map already has, which a weapon job skips loading again. Shared by every job and
+/// rebuilt only when one of the tables grew (they only grow during a map), so queueing a
+/// loadout does not clone the material table once per weapon on the main thread.
+struct Known {
+    sizes: [usize; 4],
+    defs: BTreeMap<String, MaterialData>,
+    textures: BTreeSet<String>,
+    models: BTreeSet<String>,
+    physics: BTreeSet<String>,
+}
+
 /// Mounted VFS, shared audio cache, and in-flight worker jobs for late-precached weapons.
 #[derive(Resource)]
 pub struct RuntimeWeapons {
@@ -95,6 +109,7 @@ pub struct RuntimeWeapons {
     audio_reuse: Arc<crate::audio::reuse::AudioReuse>,
     jobs: BTreeMap<String, Job>,
     loaded: BTreeSet<String>,
+    known: Option<Arc<Known>>,
 }
 
 struct Job {
@@ -115,7 +130,29 @@ impl RuntimeWeapons {
             audio_reuse,
             jobs: BTreeMap::new(),
             loaded: precached_weapons,
+            known: None,
         }
+    }
+    /// The current `Known` tables, cloned again only when the map's tables have grown.
+    fn known(&mut self, cache: &ModelCache, world: &modkit_core::World) -> Arc<Known> {
+        let sizes = [
+            cache.definitions.len(),
+            cache.textures.len(),
+            world.model_assets.len(),
+            world.model_physics.len(),
+        ];
+        if let Some(known) = self.known.as_ref().filter(|k| k.sizes == sizes) {
+            return known.clone();
+        }
+        let known = Arc::new(Known {
+            sizes,
+            defs: cache.definitions.clone(),
+            textures: cache.textures.keys().cloned().collect(),
+            models: world.model_assets.keys().cloned().collect(),
+            physics: world.model_physics.keys().cloned().collect(),
+        });
+        self.known = Some(known.clone());
+        known
     }
 }
 
@@ -142,10 +179,7 @@ struct WorkerInput {
     audio_reuse: Arc<crate::audio::reuse::AudioReuse>,
     weapon: Weapon,
     spec: WeaponBundleSpec,
-    known_defs: BTreeMap<String, MaterialData>,
-    known_textures: BTreeSet<String>,
-    existing_models: BTreeSet<String>,
-    existing_physics: BTreeSet<String>,
+    known: Arc<Known>,
     loaded_waves: BTreeSet<String>,
     config: hl2_ui::config::Config,
     cpu_skinning: bool,
@@ -172,7 +206,7 @@ fn load_extra_models(input: &WorkerInput, mini_world: &mut modkit_core::World) {
     let root_lod = input.config.video.root_lod();
     for att in &input.spec.attachments {
         let key = format!("{}#{}", att.model.to_lowercase(), att.skin);
-        if input.existing_models.contains(&key) || mini_world.model_assets.contains_key(&key) {
+        if input.known.models.contains(&key) || mini_world.model_assets.contains_key(&key) {
             continue;
         }
         if let Ok(surfaces) =
@@ -276,7 +310,7 @@ fn load_projectile_models(
     let mut gibs = BTreeMap::new();
     for path in &input.spec.projectile_models {
         let key = hl2_simulation::gibs::render_key(path, 0);
-        if input.existing_models.contains(&key) || gibs.contains_key(&key) {
+        if input.known.models.contains(&key) || gibs.contains_key(&key) {
             continue;
         }
         match crate::effects::read_effect_model_lod(&input.vfs, path, 0, root_lod) {
@@ -287,7 +321,7 @@ fn load_projectile_models(
         }
     }
     if input.spec.weapon_id == "weapon_frag" {
-        load_frag_projectile_physics(mini_world, &input.vfs, &input.existing_physics);
+        load_frag_projectile_physics(mini_world, &input.vfs, &input.known.physics);
     }
     gibs
 }
@@ -303,7 +337,7 @@ fn decode_bundle_materials(
         .chain(gibs.values())
         .flatten()
         .map(|s| s.material.clone())
-        .filter(|m| !input.known_defs.contains_key(m))
+        .filter(|m| !input.known.defs.contains_key(m))
         .collect();
     let (picmip, hdr, allow_bc) = (
         input.config.video.picmip(),
@@ -314,7 +348,7 @@ fn decode_bundle_materials(
     let (mut tex_cache, mut frame_cache, mut decoded, mut errors) =
         (BTreeMap::new(), BTreeMap::new(), 0usize, Vec::new());
     let mut material_defs = BTreeMap::new();
-    let mut seen_textures = input.known_textures.clone();
+    let mut seen_textures = input.known.textures.clone();
     let mut prebuilt_images = Vec::new();
     for name in names {
         let mut material = load_material(
@@ -366,7 +400,7 @@ fn build_weapon_draws(
     let lookup_def = |name: &str| {
         material_defs
             .get(name)
-            .or_else(|| input.known_defs.get(name))
+            .or_else(|| input.known.defs.get(name))
     };
     let mut batches: BTreeMap<(String, usize), Batch> = BTreeMap::new();
     let mut transparent_id = 0usize;
@@ -482,6 +516,9 @@ fn prepare_weapon_bundle(input: WorkerInput) -> Result<PreparedWeaponBundle> {
 }
 
 fn complete_grant(game: &mut Gameplay, pending: &PendingWeaponGrant) {
+    if !pending.give {
+        return;
+    }
     if pending.equip {
         game.inventory
             .give(&pending.weapon_id, &game.weapons, game.scene.time);
@@ -521,12 +558,14 @@ fn enqueue_requests(
     let mut requests = std::mem::take(&mut host.game.weapon_requests);
     for class in host.game.inventory.owned.keys() {
         if !host.game.precached_weapons.contains(class)
+            && !host.game.weapon_load_failed.contains(class)
             && !weapons.loaded.contains(class)
             && !weapons.jobs.contains_key(class)
             && !requests.iter().any(|r| &r.weapon_id == class)
         {
             requests.push(PendingWeaponGrant {
                 weapon_id: class.clone(),
+                give: true,
                 equip: false,
                 refill_ammo: false,
                 priority: false,
@@ -538,10 +577,12 @@ fn enqueue_requests(
         if host.game.precached_weapons.contains(&pending.weapon_id)
             || weapons.loaded.contains(&pending.weapon_id)
         {
-            host.game
-                .precached_weapons
-                .insert(pending.weapon_id.clone());
+            host.game.mark_weapon_loaded(&pending.weapon_id);
             complete_grant(&mut host.game, &pending);
+            continue;
+        }
+        // A load that failed once is not tried again this map (it was reported then).
+        if host.game.weapon_load_failed.contains(&pending.weapon_id) {
             continue;
         }
         if let Some(job) = weapons.jobs.get_mut(&pending.weapon_id) {
@@ -561,10 +602,7 @@ fn enqueue_requests(
             audio_reuse: weapons.audio_reuse.clone(),
             weapon,
             spec,
-            known_defs: render.cache.definitions.clone(),
-            known_textures: render.cache.textures.keys().cloned().collect(),
-            existing_models: host.game.world.model_assets.keys().cloned().collect(),
-            existing_physics: host.game.world.model_physics.keys().cloned().collect(),
+            known: weapons.known(&render.cache, &host.game.world),
             loaded_waves: host
                 .audio
                 .as_deref()
@@ -714,7 +752,7 @@ fn install_bundle(
         cpu_skinning,
     );
     weapons.loaded.insert(weapon_id.clone());
-    host.game.precached_weapons.insert(weapon_id);
+    host.game.mark_weapon_loaded(&weapon_id);
     for pending in waiters {
         complete_grant(&mut host.game, &pending);
     }
@@ -751,9 +789,11 @@ pub fn poll(
             job.waiters,
         ),
         Err(error) => {
+            // Reported once; the weapon stays unavailable (its pickups lie where they are).
             host.console
                 .source
                 .log(format!("Can't precache {} ({load_ms:.0} ms): {error}", key));
+            host.game.weapon_load_failed.insert(key);
         }
     }
 }
@@ -898,6 +938,7 @@ mod tests {
                         priority,
                         waiters: vec![PendingWeaponGrant {
                             weapon_id: weapon.class.clone(),
+                            give: true,
                             equip,
                             refill_ammo: false,
                             priority,
@@ -948,21 +989,87 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_load_is_reported_once_and_a_load_only_request_gives_nothing() {
+        let pistol = weapon_def("weapon_pistol");
+        let smg = weapon_def("weapon_smg1");
+        let defs = [
+            ("weapon_pistol".into(), pistol.clone()),
+            ("weapon_smg1".into(), smg.clone()),
+        ]
+        .into_iter()
+        .collect();
+        let mut app = test_app(defs);
+        let job = |result: Result<PreparedWeaponBundle, String>, class: &str| {
+            let slot: Slot = Arc::new(Mutex::new(Some(result)));
+            Job {
+                started: Instant::now(),
+                priority: false,
+                waiters: vec![PendingWeaponGrant {
+                    weapon_id: class.into(),
+                    give: false,
+                    equip: false,
+                    refill_ammo: false,
+                    priority: false,
+                    attachments: Vec::new(),
+                }],
+                result: slot,
+            }
+        };
+        {
+            let mut runtime = app.world_mut().resource_mut::<RuntimeWeapons>();
+            runtime.jobs.insert(
+                "weapon_pistol".into(),
+                job(Err("broken".into()), "weapon_pistol"),
+            );
+            runtime.jobs.insert(
+                "weapon_smg1".into(),
+                job(Ok(synthetic_bundle(&smg)), "weapon_smg1"),
+            );
+        }
+        // The player somehow owns the broken weapon: the safety net must not re-queue it.
+        app.world_mut()
+            .resource_mut::<Gameplay>()
+            .inventory
+            .owned
+            .insert("weapon_pistol".into(), 0);
+        for _ in 0..4 {
+            app.update();
+        }
+        let game = app.world().resource::<Gameplay>();
+        assert!(game.weapon_load_failed.contains("weapon_pistol"));
+        assert!(!game.precached_weapons.contains("weapon_pistol"));
+        assert!(game.weapon_requests.is_empty());
+        assert!(app.world().resource::<RuntimeWeapons>().jobs.is_empty());
+        // The load-only request installed the SMG's assets but did not give it.
+        let game = app.world().resource::<Gameplay>();
+        assert!(game.precached_weapons.contains("weapon_smg1"));
+        assert!(!game.inventory.owned.contains_key("weapon_smg1"));
+        assert!(!game.inventory.pickup_blocked.contains("weapon_smg1"));
+    }
+
+    #[test]
     #[ignore = "requires owned HL2 installation"]
     fn owned_unarmed_station02_skips_viewmodels_until_async_loadout_equips_crowbar_first() {
         let root = source_assets::install::discover().expect("owned install");
         let loaded = crate::assets::load(&root, "hl2", "d1_trainstation_02").expect("load map");
-        assert!(
-            loaded.gameplay.precached_weapons.is_empty(),
-            "unarmed station 02 must not preload player viewmodels"
+        // The player has nothing on station 02; only the SMG its plaza metrocops carry is
+        // loaded with the map (retail precaches an NPC's weapon entity, viewmodel included).
+        assert_eq!(
+            loaded.gameplay.precached_weapons,
+            ["weapon_smg1".to_owned()].into(),
+            "only the NPCs' player weapons preload on station 02"
         );
+        let viewmodels: Vec<_> = loaded
+            .world
+            .model_assets
+            .keys()
+            .filter(|k| k.starts_with("models/weapons/v_"))
+            .collect();
         assert!(
-            !loaded
-                .world
-                .model_assets
-                .keys()
-                .any(|k| k.starts_with("models/weapons/v_")),
-            "no v_*.mdl should be loaded on unarmed station 02"
+            viewmodels
+                .iter()
+                .all(|k| k.starts_with("models/weapons/v_smg1")),
+            "only the SMG's viewmodel loads on station 02: {viewmodels:?}"
         );
 
         let mut app = App::new();

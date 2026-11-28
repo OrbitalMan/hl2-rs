@@ -430,6 +430,8 @@ pub(super) fn carry_state(
             .gameplay
             .inventory
             .rebase_clock(game.scene.time, loaded.gameplay.scene.time);
+        // The carried inventory gates pickups on the new map's loaded weapons.
+        loaded.gameplay.sync_pickup_blocked();
     }
 }
 

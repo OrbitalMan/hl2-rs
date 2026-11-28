@@ -43,6 +43,7 @@ impl Gameplay {
         self.attack_stage(carrying, physics, player, eye, direction);
         for class in self.inventory.owned.keys() {
             if !self.precached_weapons.contains(class)
+                && !self.weapon_load_failed.contains(class)
                 && !self
                     .weapon_requests
                     .iter()
@@ -51,6 +52,7 @@ impl Gameplay {
                 self.weapon_requests
                     .push(crate::runtime_weapons::PendingWeaponGrant {
                         weapon_id: class.clone(),
+                        give: true,
                         equip: false,
                         refill_ammo: false,
                         priority: self.inventory.active == *class,

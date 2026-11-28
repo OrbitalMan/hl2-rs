@@ -375,6 +375,10 @@ pub struct Inventory {
     pub suit: bool,
     pub active: String,
     pub owned: BTreeMap<String, i32>,
+    /// Player weapons whose assets the host has not loaded: touching one leaves it lying
+    /// (`takes_weapon`) until they are, so no weapon is held without its viewmodel.
+    #[serde(skip)]
+    pub pickup_blocked: std::collections::BTreeSet<String>,
     /// Existing reports/consumers retain this authoritative Pistol reserve.
     pub pistol_ammo: i32,
     pub reserve_ammo: BTreeMap<String, i32>,
@@ -454,6 +458,7 @@ pub struct Inventory {
 impl Default for Inventory {
     fn default() -> Self {
         Self {
+            pickup_blocked: Default::default(),
             tracer_requests: Vec::new(),
             ar2_impacts: Vec::new(),
             tracer_count: 0,
@@ -540,30 +545,6 @@ impl Inventory {
         }
     }
     /// Returns rounds actually accepted, so full pickups remain in the map.
-    pub fn give_ammo(
-        &mut self,
-        ammo_type: &str,
-        amount: i32,
-        weapons: &BTreeMap<String, Weapon>,
-    ) -> i32 {
-        let Some((canonical, maximum)) = weapons.values().find_map(|w| {
-            if w.ammo_type.eq_ignore_ascii_case(ammo_type) && w.ammo_max > 0 {
-                Some((&w.ammo_type, w.ammo_max))
-            } else if w.secondary_ammo_type.eq_ignore_ascii_case(ammo_type)
-                && w.secondary_ammo_max > 0
-            {
-                Some((&w.secondary_ammo_type, w.secondary_ammo_max))
-            } else {
-                None
-            }
-        }) else {
-            return 0;
-        };
-        let old = self.ammo(canonical);
-        let added = amount.max(0).min((maximum - old).max(0));
-        self.set_ammo(canonical, old + added);
-        added
-    }
     pub fn refill_ammo(&mut self, weapons: &BTreeMap<String, Weapon>) {
         for w in weapons.values().filter(|w| w.ammo_max > 0) {
             self.set_ammo(&w.ammo_type, w.ammo_max);
@@ -816,7 +797,7 @@ impl Inventory {
                         self.armor = (self.armor + 15.).min(100.);
                         true
                     }
-                    class if weapons.contains_key(class) => {
+                    class if self.takes_weapon(class, weapons) => {
                         let w = &weapons[class];
                         if !self.owned.contains_key(class) {
                             self.give(class, weapons, scene.time);

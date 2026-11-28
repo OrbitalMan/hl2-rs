@@ -266,6 +266,19 @@ fn prepare_audio(
                 .map(str::to_owned),
         );
     }
+    // The weapons it carries fire and reload with their scripts' sounds, which the map may
+    // not have loaded (no NPC of the map carries them).
+    let extra: BTreeSet<String> = (!input.equipment.trim().is_empty())
+        .then(|| input.equipment.trim().to_ascii_lowercase())
+        .into_iter()
+        .collect();
+    if let Ok(defs) = hl2_simulation::npc_weapons::definitions(input.vfs) {
+        for class in hl2_simulation::npc_weapons::required_npc_weapons(mini_world, &extra) {
+            if let Some(def) = defs.get(&class) {
+                cues.extend(def.sounds.values().cloned());
+            }
+        }
+    }
     crate::audio::late::prepare_npc_audio(input.vfs, input.audio_reuse, input.loaded_waves, &cues)
 }
 

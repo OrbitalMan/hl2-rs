@@ -433,26 +433,39 @@ pub fn campaign_loadout(npc_class: &str) -> &'static [&'static str] {
         .find(|(c, _)| c.eq_ignore_ascii_case(npc_class))
         .map_or(&[], |(_, w)| *w)
 }
-/// NPC weapons required on `world`: map NPC `additionalequipment`, `<npc>,GiveWeapon`
-/// outputs, pooled template classes' campaign/default weapons, and `extra`.
+/// The weapons the map's own NPCs carry: `additionalequipment` (map NPCs, templates, makers),
+/// `<npc>,GiveWeapon` outputs, and `extra`. Retail creates (and so precaches,
+/// `CBaseCombatWeapon::Precache`, viewmodel included) each of these weapon entities with
+/// the map, which the player can then pick up when the NPC drops it.
+pub fn equipped_npc_weapons(
+    world: &modkit_core::World,
+    extra: &std::collections::BTreeSet<String>,
+) -> std::collections::BTreeSet<String> {
+    let named = |weapon: &str| {
+        let lower = weapon.trim().to_ascii_lowercase();
+        (!lower.is_empty() && lower != "0" && lower != "none").then_some(lower)
+    };
+    let mut equipped: std::collections::BTreeSet<String> =
+        extra.iter().filter_map(|w| named(w)).collect();
+    equipped.extend(
+        world
+            .entities
+            .iter()
+            .filter_map(|e| e.get("additionalequipment").and_then(named)),
+    );
+    for given in given_weapons(world).into_values() {
+        equipped.extend(given.iter().filter_map(|w| named(w)));
+    }
+    equipped
+}
+/// NPC weapons required on `world`: what its NPCs carry (`equipped_npc_weapons`) and the
+/// pooled template classes' campaign/default weapons.
 pub fn required_npc_weapons(
     world: &modkit_core::World,
     extra: &std::collections::BTreeSet<String>,
 ) -> std::collections::BTreeSet<String> {
-    let mut required = std::collections::BTreeSet::new();
-    for weapon in extra {
-        let lower = weapon.trim().to_ascii_lowercase();
-        if !lower.is_empty() && lower != "0" && lower != "none" {
-            required.insert(lower);
-        }
-    }
+    let mut required = equipped_npc_weapons(world, extra);
     for entity in &world.entities {
-        if let Some(equip) = entity.get("additionalequipment") {
-            let lower = equip.trim().to_ascii_lowercase();
-            if !lower.is_empty() && lower != "0" && lower != "none" {
-                required.insert(lower);
-            }
-        }
         if let Some(label) = entity.get(crate::ai::spawn::POOL_KEY) {
             for &weapon in campaign_loadout(entity.class()) {
                 required.insert(weapon.to_owned());
@@ -460,13 +473,6 @@ pub fn required_npc_weapons(
             let default = crate::ai::spawn::default_weapon(label);
             if !default.is_empty() {
                 required.insert(default.to_owned());
-            }
-        }
-    }
-    for given in given_weapons(world).into_values() {
-        for weapon in given {
-            if weapon != "0" && weapon != "none" {
-                required.insert(weapon);
             }
         }
     }
@@ -1282,6 +1288,14 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect()
+        );
+        // What the map's NPCs carry leaves out the developer spawn pools' loadouts.
+        assert_eq!(
+            equipped_npc_weapons(&with_pool, &extra),
+            ["weapon_stunstick", "weapon_alyxgun", "weapon_smg1"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
         );
     }
 
