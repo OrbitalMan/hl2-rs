@@ -113,6 +113,79 @@ pub(crate) fn requested_npc_classes(commands: &[Command]) -> std::collections::B
     classes
 }
 
+/// Scans movement-script `Action::Loadout`, `impulse 101`, pickup spawns, and NPC equipment
+/// commands so script replays keep deterministic weapon availability at map load.
+pub(crate) fn requested_weapons(
+    commands: &[Command],
+) -> (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+) {
+    use hl2_simulation::{ai::spawn, gameplay::IMPLEMENTED};
+    let mut console = spawn::Console::default();
+    let (mut player, mut npc) = (
+        std::collections::BTreeSet::new(),
+        std::collections::BTreeSet::new(),
+    );
+    let mut grant_all = false;
+    let insert_player_if_implemented = |player: &mut std::collections::BTreeSet<String>,
+                                        w: &str| {
+        if IMPLEMENTED.contains(&w) {
+            player.insert(w.to_owned());
+        }
+    };
+    for cmd in commands {
+        if cmd
+            .actions
+            .iter()
+            .any(|action| matches!(action, crate::gameplay::Action::Loadout))
+        {
+            grant_all = true;
+        }
+        for action in &cmd.ui {
+            let crate::ui_host::Action::Command { command } = action else {
+                continue;
+            };
+            for segment in command.split(';') {
+                let mut words = segment.split_whitespace();
+                if words
+                    .next()
+                    .is_some_and(|w| w.eq_ignore_ascii_case("impulse"))
+                    && words.next() == Some("101")
+                    && words.next().is_none()
+                {
+                    grant_all = true;
+                    continue;
+                }
+                match console.parse(segment) {
+                    Ok(Some(spawn::Command::SpawnPickup(class, _))) => {
+                        insert_player_if_implemented(&mut player, &class.to_ascii_lowercase());
+                    }
+                    Ok(Some(spawn::Command::SetEquipment(eq))) => {
+                        let lower = eq.trim().to_ascii_lowercase();
+                        if !lower.is_empty() {
+                            insert_player_if_implemented(&mut player, &lower);
+                            npc.insert(lower);
+                        }
+                    }
+                    Ok(Some(spawn::Command::Spawn(req))) => {
+                        let lower = req.equipment.trim().to_ascii_lowercase();
+                        if !lower.is_empty() {
+                            insert_player_if_implemented(&mut player, &lower);
+                            npc.insert(lower);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    if grant_all {
+        player.extend(IMPLEMENTED.into_iter().map(str::to_owned));
+    }
+    (player, npc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +196,38 @@ mod tests {
             .map(|line| serde_json::json!({ "action": "command", "command": line }))
             .collect();
         serde_json::from_value(serde_json::json!({ "tick": tick, "ui": ui })).unwrap()
+    }
+
+    #[test]
+    fn requested_weapons_collects_loadout_impulse_pickups_and_npc_equipment() {
+        let mut loadout_cmd = command_at(1, &["sv_cheats 1"]);
+        loadout_cmd.actions.push(crate::gameplay::Action::Loadout);
+        let (player, npc) = requested_weapons(&[loadout_cmd]);
+        assert_eq!(player.len(), hl2_simulation::gameplay::IMPLEMENTED.len());
+        assert!(npc.is_empty());
+
+        let (player, npc) = requested_weapons(&[
+            command_at(1, &["sv_cheats 1; impulse   101"]),
+            command_at(2, &["npc_create_equipment weapon_stunstick"]),
+        ]);
+        assert_eq!(player.len(), hl2_simulation::gameplay::IMPLEMENTED.len());
+        assert_eq!(npc, ["weapon_stunstick".to_owned()].into());
+
+        let (player, npc) = requested_weapons(&[
+            command_at(1, &["ent_create weapon_pistol"]),
+            command_at(
+                2,
+                &["ent_create npc_metropolice additionalequipment weapon_smg1"],
+            ),
+        ]);
+        assert_eq!(
+            player,
+            ["weapon_pistol", "weapon_smg1"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        );
+        assert_eq!(npc, ["weapon_smg1".to_owned()].into());
     }
 
     #[test]

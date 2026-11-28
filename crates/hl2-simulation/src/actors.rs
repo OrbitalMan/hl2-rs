@@ -491,7 +491,28 @@ pub fn prepare_weapons(
     vfs: &Vfs,
     weapons: &std::collections::BTreeMap<String, crate::gameplay::Weapon>,
 ) -> Result<()> {
-    let wanted = [
+    let selected: std::collections::BTreeSet<String> = weapons.keys().cloned().collect();
+    prepare_selected_weapons(world, vfs, weapons, &selected)
+}
+
+/// Preloads only `selected` weapons from `weapons`.
+pub fn prepare_selected_weapons(
+    world: &mut World,
+    vfs: &Vfs,
+    weapons: &std::collections::BTreeMap<String, crate::gameplay::Weapon>,
+    selected: &std::collections::BTreeSet<String>,
+) -> Result<()> {
+    for class in selected {
+        if let Some(w) = weapons.get(class) {
+            prepare_weapon(world, vfs, w)?;
+        }
+    }
+    Ok(())
+}
+
+/// Loads one weapon's `#0`/`#1` viewmodels and animation rig into `world`.
+pub fn prepare_weapon(world: &mut World, vfs: &Vfs, w: &crate::gameplay::Weapon) -> Result<()> {
+    let mut wanted: std::collections::BTreeSet<String> = [
         "idle01",
         "idle01empty",
         "idle",
@@ -532,9 +553,9 @@ pub fn prepare_weapons(
     ]
     .into_iter()
     .map(String::from)
-    .collect::<std::collections::BTreeSet<String>>();
-    // The remaining arsenal resolves its sequences from activities (SendWeaponAnim),
-    // so those viewmodels load every sequence carrying one of these activities.
+    .collect();
+    // The remaining arsenal (and custom mod weapons) resolve sequences from activities
+    // (SendWeaponAnim), so those viewmodels load every sequence carrying these activities.
     let activities = [
         "act_vm_draw",
         "act_vm_idle",
@@ -551,35 +572,38 @@ pub fn prepare_weapons(
         "act_vm_idle_to_lowered",
         "act_crossbow_draw_unloaded",
     ];
-    for w in weapons.values() {
-        let mut wanted = wanted.clone();
-        if matches!(
-            w.class.as_str(),
-            "weapon_crossbow" | "weapon_rpg" | "weapon_bugbait" | "weapon_physcannon"
-        ) {
-            wanted.extend(activities.iter().map(|a| (*a).to_owned()));
-        }
-        let key = format!("{}#0", w.viewmodel.to_lowercase());
-        let base = source_assets::models::read_model(vfs, &w.viewmodel, 0)?;
-        // Skin 1 (the crossbow's glowing bolt, CWeaponCrossbow::SetSkin): kept when any
-        // surface material differs; the host draws only the differing surfaces.
-        let alternate = source_assets::models::read_model(vfs, &w.viewmodel, 1)?;
-        if alternate.len() == base.len()
-            && alternate
-                .iter()
-                .zip(&base)
-                .any(|(a, b)| a.material != b.material)
-        {
-            world
-                .model_assets
-                .insert(format!("{}#1", w.viewmodel.to_lowercase()), alternate);
-        }
-        world.model_assets.insert(key.clone(), base);
-        world.rigs.insert(
-            key,
-            source_assets::animation::load(vfs, &w.viewmodel, &wanted)?,
-        );
+    if !matches!(
+        w.class.as_str(),
+        "weapon_crowbar"
+            | "weapon_pistol"
+            | "weapon_357"
+            | "weapon_smg1"
+            | "weapon_ar2"
+            | "weapon_shotgun"
+            | "weapon_frag"
+    ) {
+        wanted.extend(activities.iter().map(|a| (*a).to_owned()));
     }
+    let key = format!("{}#0", w.viewmodel.to_lowercase());
+    let base = source_assets::models::read_model(vfs, &w.viewmodel, 0)?;
+    // Skin 1 (the crossbow's glowing bolt, CWeaponCrossbow::SetSkin): kept when any
+    // surface material differs; the host draws only the differing surfaces.
+    let alternate = source_assets::models::read_model(vfs, &w.viewmodel, 1)?;
+    if alternate.len() == base.len()
+        && alternate
+            .iter()
+            .zip(&base)
+            .any(|(a, b)| a.material != b.material)
+    {
+        world
+            .model_assets
+            .insert(format!("{}#1", w.viewmodel.to_lowercase()), alternate);
+    }
+    world.model_assets.insert(key.clone(), base);
+    world.rigs.insert(
+        key,
+        source_assets::animation::load(vfs, &w.viewmodel, &wanted)?,
+    );
     Ok(())
 }
 

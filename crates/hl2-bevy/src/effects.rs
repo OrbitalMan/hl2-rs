@@ -53,19 +53,38 @@ impl PreparedEffects {
     }
 
     pub fn load_with_lod(vfs: &Vfs, world: &modkit_core::World, root_lod: usize) -> Self {
+        let all: std::collections::BTreeSet<String> = hl2_simulation::gameplay::IMPLEMENTED
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        Self::load_with_lod_for_weapons(vfs, world, root_lod, &all)
+    }
+
+    /// Loads only the projectile models required by `precached_weapons` (plus Combine soldier
+    /// frag grenades when present), alongside the map's breakable-prop gibs.
+    pub fn load_with_lod_for_weapons(
+        vfs: &Vfs,
+        world: &modkit_core::World,
+        root_lod: usize,
+        precached_weapons: &std::collections::BTreeSet<String>,
+    ) -> Self {
         let mut model_errors = Vec::new();
         let mut loaded = BTreeMap::new();
         let gibs = gib_models(world);
-        let fixed = [
-            hl2_simulation::projectiles::GRENADE_MODEL,
-            hl2_simulation::projectiles::FRAG_MODEL,
-            hl2_simulation::weapon_crossbow::BOLT_MODEL,
-            hl2_simulation::weapon_rpg::MISSILE_LAUNCH_MODEL,
-            hl2_simulation::weapon_rpg::MISSILE_MODEL,
-            hl2_simulation::weapon_bugbait::BAIT_MODEL,
-        ]
-        .into_iter()
-        .map(|path| (path.to_string(), 0));
+        let combine_frag = world
+            .entities
+            .iter()
+            .any(|e| e.class() == "npc_combine_s")
+            .then_some(hl2_simulation::projectiles::FRAG_MODEL);
+        let fixed = precached_weapons
+            .iter()
+            .flat_map(|c| {
+                hl2_simulation::gameplay::projectile_models(c)
+                    .iter()
+                    .copied()
+            })
+            .chain(combine_frag)
+            .map(|path| (path.to_string(), 0));
         for (path, skin) in fixed.chain(gibs) {
             let key = hl2_simulation::gibs::render_key(&path, skin);
             if loaded.contains_key(&key) {

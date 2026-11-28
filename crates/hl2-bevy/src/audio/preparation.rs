@@ -39,9 +39,7 @@ impl PreparedAudio {
                 .values()
                 .filter_map(|m| m.break_sound.clone()),
         );
-        for weapon in game.weapons.values() {
-            cues.extend(weapon.sounds.values().cloned());
-        }
+        collect_weapon_cues(game, &mut cues);
         // Player-ally speech (talker response rules: scene speak sounds, die sounds).
         cues.extend(game.ai.speech_cues());
         // Studio client sound events: viewmodels and NPC sequences (5004 sounds and
@@ -106,6 +104,37 @@ impl PreparedAudio {
             soundscapes,
         }
     }
+}
+
+fn collect_weapon_cues(game: &crate::gameplay::Gameplay, cues: &mut BTreeSet<String>) {
+    for class in &game.precached_weapons {
+        if let Some(weapon) = game.weapons.get(class) {
+            cues.extend(weapon.sounds.values().cloned());
+        }
+        cues.extend(
+            hl2_simulation::gameplay::extra_sound_cues(class)
+                .iter()
+                .copied()
+                .map(str::to_owned),
+        );
+    }
+    if !game.precached_weapons.contains("weapon_frag")
+        && game
+            .world
+            .entities
+            .iter()
+            .any(|e| e.class() == "npc_combine_s")
+    {
+        cues.extend(
+            hl2_simulation::gameplay::extra_sound_cues("weapon_frag")
+                .iter()
+                .copied()
+                .map(str::to_owned),
+        );
+    }
+}
+
+impl PreparedAudio {
     /// No sample, VOX, scene or soundscape decoding for the startup placeholder.
     pub fn silent() -> Self {
         Self {

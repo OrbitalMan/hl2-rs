@@ -345,7 +345,7 @@ pub fn spawn_runtime_draws(
 }
 /// The material of one runtime model draw: the definition's textures, the entity's render
 /// color, and fallback model lighting until the first light sample.
-pub(super) fn draw_material(
+pub(crate) fn draw_material(
     cache: &super::ModelCache,
     definition: &super::MaterialData,
     lit: bool,

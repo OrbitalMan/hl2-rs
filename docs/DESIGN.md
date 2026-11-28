@@ -3062,3 +3062,49 @@ Plan (presentation only; simulation, replays and gameplay traces stay on tick va
 - Measure: `--profile` `fixed_simulation` and `animation` before and after in a prop-heavy
   scene; the owner checks carrying while turning and walking, the train ride, a lift, the pause
   menu and a map change.
+
+## Selective weapon precaching and mid-play async loading (2026-11-28)
+
+Problem: every map currently preloads and warms all 11 player weapon viewmodels, all NPC weapon
+world models (`definitions`), and all 6 weapon-specific projectile models even on unarmed maps
+such as `d1_trainstation_01` and `d1_trainstation_02`. That wastes map-load time and memory and
+does not scale to mods adding many custom guns and attachments. Meanwhile, mid-play asynchronous
+loaders (`runtime_npcs`, `runtime_props`, LUT reads, screenshot saves, map drops) spawn raw
+threads at interactive QoS on macOS and still construct Bevy meshes, LODs, images and colliders on
+the main thread in `PostUpdate`.
+
+Plan:
+1. **Workstream A — Selective map-load + on-demand async weapon precaching (`hl2-simulation`, `hl2-bevy`):**
+   - Keep `hl2_simulation::gameplay::definitions` lightweight (`.txt` scripts only).
+   - Compute `required_weapons` at map load from BSP weapon entities, `game_player_equip`,
+     map-authored NPC equipment/outputs, carried inventory across transitions, and replay script
+     commands (`Action::Loadout`, `impulse 101`, pickup/NPC-equipment commands) so replays remain
+     deterministic while unarmed maps load and warm zero viewmodels.
+   - Filter map-load viewmodels/rigs (`actors::prepare_selected_weapons`), viewmodel materials
+     (`assets::names`), weapon sound cues (`audio::preparation`), NPC weapon world models/rigs/physics
+     (`assets::loading::prepare_models` + `runtime_npcs` for late NPC spawns), and weapon-specific
+     projectile models (`effects::PreparedEffects`) by the map's required weapons. Keep player
+     viewmodel loading cleanly split from shared NPC world-weapon/physics helpers reused across map
+     load and `runtime_npcs`.
+   - Add `runtime_weapons.rs` with generic, mod-ready bundle types (`WeaponBundleSpec`,
+     `AttachmentSpec`, `PendingWeaponGrant`). Gate `grant_loadout` (`F3` / `impulse 101`) and
+     runtime weapon acquisition on precached state: precached weapons grant synchronously; uncached
+     weapons prepare off-thread on `AsyncComputeTaskPool` (`Priority::Background`) — building `#0`/`#1`
+     meshes, planned skeletons, rigs, `Image`s, projectile models, and late audio — and install in
+     `PostUpdate` at most 1 completed weapon per frame (`weapon_crowbar` prioritized on `F3`), before
+     granting inventory/switching so gameplay never sees a half-loaded weapon.
+2. **Workstream B — Cross-platform Bevy 0.20.1 async optimizations (`priority.rs`, `runtime_npcs.rs`, `runtime_props.rs`):**
+   - Rebalance `TaskPoolOptions` (`io = 1`, `async_compute = 1..=2`, rest `compute`) and set
+     `Priority::Frame` on Bevy's pipelined `"Render thread"` in `RenderStartup`.
+   - Route mid-play background work onto `AsyncComputeTaskPool` / `Priority::Background` and cap
+     inner model-prefetch fan-out during live play.
+   - Move `runtime_npcs` and `runtime_props` mesh/LOD/Image/collider construction off-thread and
+     amortize template/prop installs per frame; set `RenderAssetBytesPerFrame` during live play
+     (unlimited while `sim.loading()`). Account for Bevy 0.20.1's synchronous macOS pipeline
+     compilation and uncached `wgpu::PipelineCache` by relying on startup representative shader-def
+     warming behind the loading cover.
+
+Validation: unit tests for selective weapon/projectile/script filtering, `runtime_weapons`
+amortized async grant, owned `d1_trainstation_02` unarmed load + uncached `F3` test, full
+`scripts/checks/validate.sh`, Windows target Clippy, before/after load-time/profile comparisons,
+and `111/111` packaged replays.

@@ -433,6 +433,45 @@ pub fn campaign_loadout(npc_class: &str) -> &'static [&'static str] {
         .find(|(c, _)| c.eq_ignore_ascii_case(npc_class))
         .map_or(&[], |(_, w)| *w)
 }
+/// NPC weapons required on `world`: map NPC `additionalequipment`, `<npc>,GiveWeapon`
+/// outputs, pooled template classes' campaign/default weapons, and `extra`.
+pub fn required_npc_weapons(
+    world: &modkit_core::World,
+    extra: &std::collections::BTreeSet<String>,
+) -> std::collections::BTreeSet<String> {
+    let mut required = std::collections::BTreeSet::new();
+    for weapon in extra {
+        let lower = weapon.trim().to_ascii_lowercase();
+        if !lower.is_empty() && lower != "0" && lower != "none" {
+            required.insert(lower);
+        }
+    }
+    for entity in &world.entities {
+        if let Some(equip) = entity.get("additionalequipment") {
+            let lower = equip.trim().to_ascii_lowercase();
+            if !lower.is_empty() && lower != "0" && lower != "none" {
+                required.insert(lower);
+            }
+        }
+        if let Some(label) = entity.get(crate::ai::spawn::POOL_KEY) {
+            for &weapon in campaign_loadout(entity.class()) {
+                required.insert(weapon.to_owned());
+            }
+            let default = crate::ai::spawn::default_weapon(label);
+            if !default.is_empty() {
+                required.insert(default.to_owned());
+            }
+        }
+    }
+    for given in given_weapons(world).into_values() {
+        for weapon in given {
+            if weapon != "0" && weapon != "none" {
+                required.insert(weapon);
+            }
+        }
+    }
+    required
+}
 /// The weapons an NPC class can be given, for bits_CAP_USE_WEAPONS classes: its
 /// campaign loadout (equipped at spawn without Weapon_CanUse) first, then the other
 /// weapons Weapon_CanUse accepts on its model's activities (upper case; NPC pickups).
@@ -1185,6 +1224,67 @@ mod tests {
         assert!(citizen.starts_with(&["weapon_smg1".to_owned()]));
         assert!(usable("npc_zombie", "models/zombie/classic.mdl").is_empty());
     }
+    #[test]
+    fn required_npc_weapons_limits_unpooled_maps_and_tracks_pool_and_outputs() {
+        use std::collections::BTreeSet;
+        let world = modkit_core::World {
+            entities: vec![
+                modkit_core::Entity {
+                    properties: vec![("classname".into(), "npc_citizen".into())],
+                },
+                modkit_core::Entity {
+                    properties: vec![
+                        ("classname".into(), "npc_metropolice".into()),
+                        ("additionalequipment".into(), "weapon_stunstick".into()),
+                    ],
+                },
+                modkit_core::Entity {
+                    properties: vec![
+                        ("classname".into(), "logic_auto".into()),
+                        (
+                            "OnMapSpawn".into(),
+                            "alyx,GiveWeapon,weapon_alyxgun,0,-1".into(),
+                        ),
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            required_npc_weapons(&world, &BTreeSet::new()),
+            ["weapon_stunstick", "weapon_alyxgun"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        );
+        let extra: BTreeSet<String> = ["weapon_smg1".to_owned(), "none".to_owned()]
+            .into_iter()
+            .collect();
+        let mut with_pool = world;
+        with_pool.entities.push(modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), "npc_combine_s".into()),
+                (
+                    crate::ai::spawn::POOL_KEY.into(),
+                    "npc_combine_s_elite".into(),
+                ),
+            ],
+        });
+        assert_eq!(
+            required_npc_weapons(&with_pool, &extra),
+            [
+                "weapon_stunstick",
+                "weapon_alyxgun",
+                "weapon_smg1",
+                "weapon_ar2",
+                "weapon_shotgun",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+        );
+    }
+
     #[test]
     fn humanoid_model_preloads_cover_every_acttable_result_of_their_weapons() {
         let preloaded = source_assets::models::HUMANOID_AI_ACTIVITIES;

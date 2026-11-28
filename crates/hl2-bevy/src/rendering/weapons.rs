@@ -30,7 +30,7 @@ pub struct WeaponMesh(pub String);
 /// A viewmodel draw that belongs to one skin only (surfaces whose material differs
 /// between skins 0 and 1).
 #[derive(Component)]
-pub struct WeaponSkin(pub(super) u8);
+pub struct WeaponSkin(pub(crate) u8);
 
 /// Show only the active, unholstered weapon's viewmodel draws for its current skin.
 pub fn present_weapons(

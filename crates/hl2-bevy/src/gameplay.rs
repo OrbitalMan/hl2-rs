@@ -130,6 +130,8 @@ pub struct Gameplay {
     pub scene: Scene,
     pub inventory: Inventory,
     pub weapons: BTreeMap<String, Weapon>,
+    /// Player weapons whose viewmodels, rigs, materials, projectiles, and audio are loaded.
+    pub precached_weapons: std::collections::BTreeSet<String>,
     pub selection: Selection,
     pub npcs: Controller,
     pub projectiles: Projectiles,
@@ -219,6 +221,8 @@ pub struct Gameplay {
     pub(crate) pickup_requests: Vec<crate::runtime_props::Request>,
     /// npc_create / ent_create requests waiting for asynchronous NPC late precaching.
     pub npc_requests: Vec<PendingNpcSpawn>,
+    /// Weapons waiting for on-demand asynchronous viewmodel/asset late precaching.
+    pub weapon_requests: Vec<crate::runtime_weapons::PendingWeaponGrant>,
     /// Runtime entities whose model draws the host builds next frame (dropped weapons).
     pub model_draws: Vec<usize>,
 }
@@ -336,10 +340,26 @@ impl Gameplay {
         }
     }
     pub fn load_with_campaign(
+        world: World,
+        vfs: &Vfs,
+        revision: u32,
+        new_game: bool,
+    ) -> Result<Self> {
+        Self::load_with_campaign_weapons(
+            world,
+            vfs,
+            revision,
+            new_game,
+            &std::collections::BTreeSet::new(),
+        )
+    }
+
+    pub fn load_with_campaign_weapons(
         mut world: World,
         vfs: &Vfs,
         revision: u32,
         new_game: bool,
+        extra_weapons: &std::collections::BTreeSet<String>,
     ) -> Result<Self> {
         let mut scene = Scene::with_campaign(&world, new_game);
         scene.load_choreography(&world, vfs)?;
@@ -347,7 +367,9 @@ impl Gameplay {
         let map = world.name.clone();
         let npcs = actors::prepare_npcs(&mut world, vfs, &map, revision);
         let weapons = hl2_simulation::gameplay::definitions(vfs)?;
-        actors::prepare_weapons(&mut world, vfs, &weapons)?;
+        let precached_weapons =
+            hl2_simulation::gameplay::required_weapons(&world, &weapons, extra_weapons);
+        actors::prepare_selected_weapons(&mut world, vfs, &weapons, &precached_weapons)?;
         let impacts = hl2_simulation::impacts::Impacts::new(vfs, &world);
         let skill = vfs
             .read("cfg/skill.cfg")?
@@ -369,9 +391,62 @@ impl Gameplay {
                 impacts,
                 scene,
                 weapons,
+                precached_weapons,
                 npcs,
             },
         ))
+    }
+
+    /// Grants the implemented loadout (`F3` / `impulse 101`). Already-precached weapons equip at
+    /// once; any uncached weapons are queued for asynchronous late precaching with
+    /// `weapon_crowbar` prioritized first. Returns `true` when everything was already precached.
+    pub fn request_loadout(&mut self) -> bool {
+        self.inventory.suit = true;
+        self.inventory.refill_ammo(&self.weapons);
+        let all_precached = self
+            .weapons
+            .keys()
+            .all(|name| self.precached_weapons.contains(name));
+        if all_precached {
+            for name in self.weapons.keys() {
+                self.inventory.give(name, &self.weapons, self.scene.time);
+            }
+            self.inventory.refill_ammo(&self.weapons);
+            self.inventory
+                .give("weapon_crowbar", &self.weapons, self.scene.time);
+            return true;
+        }
+        if self.precached_weapons.contains("weapon_crowbar") {
+            self.inventory
+                .give("weapon_crowbar", &self.weapons, self.scene.time);
+        } else if self.weapons.contains_key("weapon_crowbar") {
+            self.weapon_requests
+                .push(crate::runtime_weapons::PendingWeaponGrant {
+                    weapon_id: "weapon_crowbar".into(),
+                    equip: true,
+                    refill_ammo: true,
+                    priority: true,
+                    attachments: Vec::new(),
+                });
+        }
+        for name in self.weapons.keys() {
+            if name == "weapon_crowbar" {
+                continue;
+            }
+            if self.precached_weapons.contains(name) {
+                self.inventory.grant_without_switch(name, &self.weapons);
+            } else {
+                self.weapon_requests
+                    .push(crate::runtime_weapons::PendingWeaponGrant {
+                        weapon_id: name.clone(),
+                        equip: false,
+                        refill_ammo: true,
+                        priority: false,
+                        attachments: Vec::new(),
+                    });
+            }
+        }
+        false
     }
     /// CreateEntityByName + DispatchSpawn + Activate of a copy of a loaded entity (an F4
     /// class template or a maker's template NPC; DESIGN 14r part A): the template's

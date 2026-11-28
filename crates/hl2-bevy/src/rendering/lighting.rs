@@ -45,7 +45,7 @@ pub struct ModelLit {
 }
 
 impl ModelLit {
-    pub(super) fn new(entity: Option<usize>, key: String, scale: f32, half_lambert: bool) -> Self {
+    pub(crate) fn new(entity: Option<usize>, key: String, scale: f32, half_lambert: bool) -> Self {
         Self {
             entity,
             key,
@@ -124,7 +124,7 @@ impl ModelLit {
     }
     /// Its material reflects the cubemap sample near it. A model loaded late has no mask for it
     /// yet, and without one a reflection is far too strong, so those do not reflect.
-    pub(super) fn reflecting(mut self, reflects: bool) -> Self {
+    pub(crate) fn reflecting(mut self, reflects: bool) -> Self {
         self.cubemap = reflects.then_some(usize::MAX);
         self
     }

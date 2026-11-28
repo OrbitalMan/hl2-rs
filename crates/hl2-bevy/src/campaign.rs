@@ -168,7 +168,7 @@ fn start_or_continue_job(
     let Some(request) = next_map_request(options, campaign, ui, game) else {
         return false;
     };
-    loading::activate_request(request, options, campaign, ui, sim, audio)
+    loading::activate_request(request, options, campaign, ui, game, sim, audio)
 }
 
 pub fn poll(

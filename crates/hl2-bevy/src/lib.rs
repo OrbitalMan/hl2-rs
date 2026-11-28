@@ -34,6 +34,7 @@ pub mod rcon;
 pub mod rendering;
 pub mod runtime_npcs;
 pub mod runtime_props;
+pub mod runtime_weapons;
 mod setup;
 mod shader_rows;
 mod shadows;
@@ -142,6 +143,10 @@ struct Options {
     startup_commands: Vec<String>,
     /// NPC pool labels requested by the startup `--movement-script` for selective preloading.
     pub(crate) script_npc_classes: std::collections::BTreeSet<String>,
+    /// Player weapons requested by the startup `--movement-script` for selective preloading.
+    pub(crate) script_weapons: std::collections::BTreeSet<String>,
+    /// NPC weapons requested by the startup `--movement-script` for selective preloading.
+    pub(crate) script_npc_weapons: std::collections::BTreeSet<String>,
     /// Subsystem isolation flags from CLI arguments.
     pub isolation: crate::isolation::Isolation,
     /// Persisted user configuration.
@@ -283,6 +288,8 @@ pub fn run(application: extensions::Application) -> Result<()> {
         .transpose()?
         .unwrap_or_default();
     options.script_npc_classes = simulation::script::requested_npc_classes(&movement_commands);
+    (options.script_weapons, options.script_npc_weapons) =
+        simulation::script::requested_weapons(&movement_commands);
     let mut simulation = simulation::Simulation::new(
         &loaded.world,
         options

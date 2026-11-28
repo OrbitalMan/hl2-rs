@@ -41,6 +41,23 @@ impl Gameplay {
             self.secondary_consumed |= self.secondary;
         }
         self.attack_stage(carrying, physics, player, eye, direction);
+        for class in self.inventory.owned.keys() {
+            if !self.precached_weapons.contains(class)
+                && !self
+                    .weapon_requests
+                    .iter()
+                    .any(|req| req.weapon_id == *class)
+            {
+                self.weapon_requests
+                    .push(crate::runtime_weapons::PendingWeaponGrant {
+                        weapon_id: class.clone(),
+                        equip: false,
+                        refill_ammo: false,
+                        priority: self.inventory.active == *class,
+                        attachments: Vec::new(),
+                    });
+            }
+        }
         // weapon_physcannon: ItemPreFrame/ItemPostFrame on the Rapier props (weapons stage).
         self.inventory.physcannon_frame(
             &self.weapons,

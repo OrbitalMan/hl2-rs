@@ -5,7 +5,10 @@ use hl2_simulation::{
     selection::Selection,
 };
 use modkit_core::World;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 impl Gameplay {
     pub(crate) fn synthetic(world: World) -> Self {
         let scene = Scene::new(&world);
@@ -14,6 +17,7 @@ impl Gameplay {
             PreparedGameplay {
                 scene,
                 weapons: BTreeMap::new(),
+                precached_weapons: BTreeSet::new(),
                 npcs: Controller::new(None, Default::default()),
                 impacts: Default::default(),
                 player_damage: Default::default(),
@@ -28,6 +32,7 @@ impl Gameplay {
             world: Arc::new(world),
             inventory: Inventory::default(),
             weapons: prepared.weapons,
+            precached_weapons: prepared.precached_weapons,
             selection: Selection::new(),
             npcs: prepared.npcs,
             projectiles: Projectiles::default(),
@@ -81,6 +86,7 @@ impl Gameplay {
             prop_requests: Vec::new(),
             pickup_requests: Vec::new(),
             npc_requests: Vec::new(),
+            weapon_requests: Vec::new(),
             model_draws: Vec::new(),
         }
     }
@@ -88,6 +94,7 @@ impl Gameplay {
 pub(super) struct PreparedGameplay {
     pub scene: Scene,
     pub weapons: BTreeMap<String, hl2_simulation::gameplay::Weapon>,
+    pub precached_weapons: BTreeSet<String>,
     pub npcs: Controller,
     pub impacts: hl2_simulation::impacts::Impacts,
     pub player_damage: hl2_simulation::player_damage::PlayerDamage,

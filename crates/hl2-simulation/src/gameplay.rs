@@ -17,9 +17,11 @@ use std::collections::BTreeMap;
 
 mod health;
 mod hits;
+mod precache;
 mod rebase;
 pub use health::{npc_health, npc_max_health, npc_spawn_health};
 pub use hits::{breakable_health, prop_data_of};
+pub use precache::{extra_sound_cues, projectile_models, required_weapons};
 
 #[derive(Clone, Default)]
 pub struct Weapon {
@@ -50,7 +52,7 @@ pub struct Weapon {
     pub no_autoswitch_to: bool,
     pub no_autoswitch_from: bool,
 }
-const IMPLEMENTED: [&str; 11] = [
+pub const IMPLEMENTED: [&str; 11] = [
     "weapon_crowbar",
     "weapon_pistol",
     "weapon_357",
@@ -644,26 +646,7 @@ impl Inventory {
         }
     }
     pub fn give(&mut self, class: &str, weapons: &BTreeMap<String, Weapon>, time: f64) {
-        if let Some(w) = weapons.get(class) {
-            if w.magazine < 0 && !self.owned.contains_key(class) && w.ammo_max > 0 {
-                // CBaseCombatWeapon::GiveDefaultAmmo: a clipless weapon's default clip
-                // is reserve ammunition.
-                self.owned.insert(class.into(), -1);
-                let ammo = w.ammo_type.clone();
-                self.give_ammo(&ammo, w.default_clip.max(0), weapons);
-            }
-            if !self.owned.contains_key(class) {
-                // CBaseCombatCharacter::Weapon_Equip: a default clip larger than the clip
-                // fills the clip and gives the rest as reserve (crossbow 5 = 1 + 4).
-                let clip = if w.magazine > 0 && w.default_clip > w.magazine {
-                    let ammo = w.ammo_type.clone();
-                    self.give_ammo(&ammo, w.default_clip - w.magazine, weapons);
-                    w.magazine
-                } else {
-                    w.default_clip
-                };
-                self.owned.insert(class.into(), clip);
-            }
+        if self.insert_owned(class, weapons) {
             if self.active == class {
                 return;
             }

@@ -21,8 +21,8 @@ pub use animated::{AnimatedMesh, present_entities};
 mod cpu_skin;
 pub(crate) mod cubemaps;
 pub(crate) mod drawing;
-mod face_flex;
-mod face_split;
+pub(crate) mod face_flex;
+pub(crate) mod face_split;
 pub use face_flex::FlexModels;
 mod lighting;
 pub(crate) use lighting::ModelLit;
@@ -56,7 +56,7 @@ pub use model_cache::ModelCache;
 use model_cache::strip_pixels;
 pub use runtime::{despawn_killed_runtime_draws, spawn_runtime_draws, swap_runtime_bodies};
 pub use weapons::{WeaponMesh, present_weapons, sync_viewmodel_camera};
-pub(super) use weapons::{WeaponSkin, viewmodel_sample};
+pub(crate) use weapons::{WeaponSkin, viewmodel_sample};
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 #[bind_group_data(MaterialKey)]
@@ -130,20 +130,20 @@ pub struct SourceMaterial {
 }
 /// A model draw lit from its entity's (or the view's) illumination origin.
 #[derive(Default)]
-struct Batch {
-    decal_layer: Option<crate::assets::DecalLayer>,
-    positions: Vec<[f32; 3]>,
-    uvs: Vec<[f32; 2]>,
-    light_uvs: Vec<[f32; 2]>,
-    colors: Vec<[f32; 4]>,
+pub(crate) struct Batch {
+    pub(crate) decal_layer: Option<crate::assets::DecalLayer>,
+    pub(crate) positions: Vec<[f32; 3]>,
+    pub(crate) uvs: Vec<[f32; 2]>,
+    pub(crate) light_uvs: Vec<[f32; 2]>,
+    pub(crate) colors: Vec<[f32; 4]>,
     /// Source-space unit normals.
-    normals: Vec<glam::Vec3>,
+    pub(crate) normals: Vec<glam::Vec3>,
     /// Studio-model surfaces (lit per entity rather than by lightmap).
-    model: bool,
-    indices: Vec<u32>,
-    skin: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
+    pub(crate) model: bool,
+    pub(crate) indices: Vec<u32>,
+    pub(crate) skin: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
     /// Studio (bodypart, mesh, mesh-local vertex) of each vertex, for facial flexes.
-    flex: Vec<Option<[u16; 3]>>,
+    pub(crate) flex: Vec<Option<[u16; 3]>>,
 }
 impl Batch {
     /// Group whole triangles, never cut them at cell boundaries. Actual mesh
@@ -186,7 +186,12 @@ impl Batch {
         self.flex.reserve(verts);
         self.indices.reserve(surface.indices.len());
     }
-    fn append(&mut self, surface: &Surface, transform: Mat4, material: Option<&MaterialData>) {
+    pub(crate) fn append(
+        &mut self,
+        surface: &Surface,
+        transform: Mat4,
+        material: Option<&MaterialData>,
+    ) {
         self.reserve_for(surface);
         let offset = self.positions.len() as u32;
         self.model |= surface.flex_source.is_some();
@@ -250,7 +255,7 @@ impl Batch {
             self.normals.push(normal);
         }
     }
-    fn mesh(mut self) -> Mesh {
+    pub(crate) fn mesh(mut self) -> Mesh {
         self.anchor_decal_layer_bounds();
         let count = self.positions.len();
         let mut mesh = Mesh::new(

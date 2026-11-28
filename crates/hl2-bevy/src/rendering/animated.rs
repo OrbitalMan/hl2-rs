@@ -16,13 +16,13 @@ use std::{
 #[derive(Component)]
 pub struct AnimatedMesh {
     pub(super) sampled: Option<(String, u32, u64)>,
-    pub(super) gpu: Option<crate::gpu_skinning::Skeleton>,
+    pub(crate) gpu: Option<crate::gpu_skinning::Skeleton>,
     pub(super) entity: Option<usize>,
     pub(super) weapon: Option<String>,
     pub(super) key: String,
     pub(super) scale: f32,
     /// Shared immutable bind positions, normals and facial flex vertex references.
-    pub(super) vertices: Arc<lod::Vertices>,
+    pub(crate) vertices: Arc<lod::Vertices>,
     /// Deformed bind positions for the CPU skinning path when facial flexes are active.
     pub(super) deformed: Option<Vec<glam::Vec3>>,
     /// Per-draw facial flex morph channels when using GPU skinning + Bevy morph targets.
@@ -31,7 +31,7 @@ pub struct AnimatedMesh {
 }
 
 impl AnimatedMesh {
-    pub(super) fn insert_into(self, draw: &mut bevy::ecs::system::EntityCommands) {
+    pub(crate) fn insert_into(self, draw: &mut bevy::ecs::system::EntityCommands) {
         if let Some(morph) = &self.morph {
             draw.insert(morph.weights_component());
         }
@@ -39,7 +39,7 @@ impl AnimatedMesh {
     }
 
     /// A batch's animation data (its skin taken; facial flexes only for an entity's own model).
-    pub(super) fn from_batch(
+    pub(crate) fn from_batch(
         batch: &mut Batch,
         (entity, weapon): (Option<usize>, Option<String>),
         (key, scale): (String, f32),

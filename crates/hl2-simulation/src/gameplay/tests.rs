@@ -1900,3 +1900,97 @@ fn exploding_props_credit_their_last_attacker_or_recent_physics_attacker() {
         [Attacker::Player, Attacker::Player, Attacker::Entity(3)]
     );
 }
+#[test]
+fn required_weapons_collects_bsp_equip_and_extra_sources_and_excludes_npc_only_weapons() {
+    use std::collections::BTreeSet;
+    let defs: BTreeMap<String, Weapon> = [
+        ("weapon_crowbar", "None", -1, 0),
+        ("weapon_pistol", "Pistol", 18, 18),
+        ("weapon_smg1", "SMG1", 45, 45),
+        ("weapon_rpg", "RPG_Round", -1, 3),
+        ("weapon_physcannon", "None", -1, 0),
+    ]
+    .into_iter()
+    .map(|(class, ammo, mag, clip)| {
+        (
+            class.into(),
+            Weapon {
+                class: class.into(),
+                ammo_type: ammo.into(),
+                ammo_max: 150,
+                magazine: mag,
+                default_clip: clip,
+                ..Default::default()
+            },
+        )
+    })
+    .collect();
+
+    let unarmed = World {
+        entities: vec![
+            modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("additionalequipment".into(), "weapon_pistol".into()),
+                ],
+            },
+            modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "trigger_once".into()),
+                    (
+                        "OnStartTouch".into(),
+                        "barney,GiveWeapon,weapon_smg1,0,-1".into(),
+                    ),
+                ],
+            },
+        ],
+        ..Default::default()
+    };
+    assert!(required_weapons(&unarmed, &defs, &BTreeSet::new()).is_empty());
+
+    let map = World {
+        entities: vec![
+            modkit_core::Entity {
+                properties: vec![("classname".into(), "weapon_pistol".into())],
+            },
+            modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "game_player_equip".into()),
+                    ("weapon_crowbar".into(), "1".into()),
+                    ("weapon_smg1".into(), "0".into()),
+                ],
+            },
+            modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "npc_citizen".into()),
+                    ("additionalequipment".into(), "weapon_rpg".into()),
+                ],
+            },
+        ],
+        ..Default::default()
+    };
+    let extra: BTreeSet<String> = ["weapon_physcannon".to_owned(), "weapon_unknown".to_owned()]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        required_weapons(&map, &defs, &extra),
+        ["weapon_crowbar", "weapon_pistol", "weapon_physcannon"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    assert_eq!(
+        projectile_models("weapon_rpg"),
+        [
+            crate::weapon_rpg::MISSILE_LAUNCH_MODEL,
+            crate::weapon_rpg::MISSILE_MODEL,
+        ]
+    );
+    assert!(projectile_models("weapon_crowbar").is_empty());
+
+    let mut inv = Inventory::default();
+    inv.give("weapon_crowbar", &defs, 1.0);
+    inv.grant_without_switch("weapon_pistol", &defs);
+    assert_eq!(inv.active, "weapon_crowbar");
+    assert_eq!(inv.owned.get("weapon_pistol"), Some(&18));
+}

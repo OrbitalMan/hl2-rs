@@ -87,6 +87,8 @@ impl Options {
             rcon_password_file: None,
             startup_commands: Vec::new(),
             script_npc_classes: std::collections::BTreeSet::new(),
+            script_weapons: std::collections::BTreeSet::new(),
+            script_npc_weapons: std::collections::BTreeSet::new(),
             isolation: Default::default(),
             config,
         }

@@ -87,8 +87,10 @@ pub(crate) struct PrepareInput<'a> {
     pub vfs: &'a source_assets::vpk::Vfs,
     pub map_name: &'a str,
     pub label: &'a str,
+    pub equipment: &'a str,
     pub known: &'a BTreeSet<String>,
     pub existing_templates: &'a BTreeSet<String>,
+    pub existing_models: &'a BTreeSet<String>,
     pub loaded_waves: &'a BTreeSet<String>,
     pub audio_reuse: &'a crate::audio::reuse::AudioReuse,
     pub config: &'a hl2_ui::config::Config,
@@ -100,21 +102,29 @@ fn load_gibs_and_materials(
     vfs: &source_assets::vpk::Vfs,
     known: &BTreeSet<String>,
     (root_lod, picmip, hdr, allow_bc): (usize, i32, bool, bool),
-) -> (
-    BTreeMap<String, Vec<modkit_core::Surface>>,
-    BTreeMap<String, MaterialData>,
-) {
-    let mut gibs = BTreeMap::new();
+    gibs: &mut BTreeMap<String, Vec<modkit_core::Surface>>,
+) -> BTreeMap<String, MaterialData> {
     for (path, skin) in crate::effects::gib_models(mini_world) {
+        let key = hl2_simulation::gibs::render_key(&path, skin);
+        if gibs.contains_key(&key) {
+            continue;
+        }
         match crate::effects::read_effect_model_lod(vfs, &path, skin, root_lod) {
             Ok(surfaces) => {
-                gibs.insert(hl2_simulation::gibs::render_key(&path, skin), surfaces);
+                gibs.insert(key, surfaces);
             }
             Err(e) => mini_world.warnings.push(format!("{path}: {e:#}")),
         }
     }
     let material_names: BTreeSet<String> = names::rendered_material_names(mini_world)
         .into_iter()
+        .chain(
+            mini_world
+                .model_assets
+                .values()
+                .flatten()
+                .map(|s| s.material.clone()),
+        )
         .chain(gibs.values().flatten().map(|s| s.material.clone()))
         .filter(|m| !known.contains(m))
         .collect();
@@ -134,7 +144,56 @@ fn load_gibs_and_materials(
         materials.insert(name, material);
     }
     mini_world.warnings.extend(errors);
-    (gibs, materials)
+    materials
+}
+
+fn load_late_npc_weapons(
+    mini_world: &mut modkit_core::World,
+    input: &PrepareInput<'_>,
+    root_lod: usize,
+    gibs: &mut BTreeMap<String, Vec<modkit_core::Surface>>,
+) {
+    let extra: BTreeSet<String> = (!input.equipment.trim().is_empty())
+        .then(|| input.equipment.trim().to_ascii_lowercase())
+        .into_iter()
+        .collect();
+    let mut needed = hl2_simulation::npc_weapons::required_npc_weapons(mini_world, &extra);
+    if let Ok(defs) = hl2_simulation::npc_weapons::definitions(input.vfs) {
+        for (id, entity) in mini_world.entities.iter().enumerate() {
+            if let Some(inst) = mini_world
+                .model_instances
+                .iter()
+                .find(|i| i.entity == Some(id))
+                && let Some(rig) = mini_world.rigs.get(&inst.asset_key())
+            {
+                needed.extend(hl2_simulation::npc_weapons::usable_weapons(
+                    entity.class(),
+                    &rig.activities,
+                    &defs,
+                ));
+            }
+        }
+    }
+    crate::runtime_weapons::load_world_weapon_models(
+        mini_world,
+        input.vfs,
+        &needed,
+        root_lod,
+        input.existing_models,
+    );
+    if mini_world
+        .entities
+        .iter()
+        .any(|e| e.class() == "npc_combine_s")
+    {
+        crate::runtime_weapons::load_frag_projectile(
+            mini_world,
+            input.vfs,
+            root_lod,
+            input.existing_models,
+            gibs,
+        );
+    }
 }
 
 fn build_template_entities(
@@ -250,7 +309,9 @@ pub(crate) fn prepare_npc_template(input: PrepareInput<'_>) -> anyhow::Result<Pr
     }
     let _ = source_assets::models::append_break_physics(&mut mini_world, input.vfs);
     let actors = prepare_actors(&mut mini_world, input.vfs);
-    let (gibs, materials) = load_gibs_and_materials(
+    let mut gibs = BTreeMap::new();
+    load_late_npc_weapons(&mut mini_world, &input, root_lod, &mut gibs);
+    let materials = load_gibs_and_materials(
         &mut mini_world,
         input.vfs,
         input.known,
@@ -260,6 +321,7 @@ pub(crate) fn prepare_npc_template(input: PrepareInput<'_>) -> anyhow::Result<Pr
             input.config.video.hdr.is_hdr(),
             input.allow_bc,
         ),
+        &mut gibs,
     );
     let mut face_errors = Vec::new();
     let faces = faces::load(input.vfs, &mini_world, &mut face_errors);
@@ -329,6 +391,9 @@ fn enqueue_requests(npcs: &mut RuntimeNpcs, host: &mut HostState<'_>, render: &R
         let map_name = host.game.world.name.clone();
         let known: BTreeSet<String> = render.cache.definitions.keys().cloned().collect();
         let existing_templates = existing_pool_labels(&host.game.world);
+        let existing_models: BTreeSet<String> =
+            host.game.world.model_assets.keys().cloned().collect();
+        let equipment = pending.request.equipment.clone();
         let loaded_waves = host
             .audio
             .as_deref()
@@ -343,8 +408,10 @@ fn enqueue_requests(npcs: &mut RuntimeNpcs, host: &mut HostState<'_>, render: &R
                 vfs: &vfs,
                 map_name: &map_name,
                 label: &class_label,
+                equipment: &equipment,
                 known: &known,
                 existing_templates: &existing_templates,
+                existing_models: &existing_models,
                 loaded_waves: &loaded_waves,
                 audio_reuse: &audio_reuse,
                 config: &config,
@@ -1030,6 +1097,7 @@ mod tests {
         let config = hl2_ui::config::Config::default();
         let known = BTreeSet::new();
         let existing_templates = BTreeSet::new();
+        let existing_models = BTreeSet::new();
         let loaded_waves = BTreeSet::new();
         let audio_reuse = crate::audio::reuse::AudioReuse::default();
         for class in ["npc_vortigaunt", "npc_combine_s"] {
@@ -1037,8 +1105,10 @@ mod tests {
                 vfs: &vfs,
                 map_name: "background02",
                 label: class,
+                equipment: "",
                 known: &known,
                 existing_templates: &existing_templates,
+                existing_models: &existing_models,
                 loaded_waves: &loaded_waves,
                 audio_reuse: &audio_reuse,
                 config: &config,

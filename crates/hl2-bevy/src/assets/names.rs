@@ -102,7 +102,10 @@ pub(super) fn map_material_names(
             names.extend(surfaces.iter().map(|s| s.material.clone()));
         }
     }
-    for weapon in gameplay.weapons.values() {
+    for class in &gameplay.precached_weapons {
+        let Some(weapon) = gameplay.weapons.get(class) else {
+            continue;
+        };
         for skin in 0..2 {
             if let Some(surfaces) = world
                 .model_assets

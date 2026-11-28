@@ -35,6 +35,7 @@ pub(super) fn activate_request(
     options: &crate::Options,
     campaign: &mut super::Campaign,
     ui: &mut ui_host::Console,
+    game: &crate::gameplay::Gameplay,
     sim: &mut crate::simulation::Simulation,
     (audio, pending, allow_bc_textures): (
         Option<&crate::audio::Audio>,
@@ -90,6 +91,7 @@ pub(super) fn activate_request(
         request,
         options,
         ui,
+        game,
         sim,
         (campaign.audio_reuse.clone(), allow_bc_textures),
     ) {
@@ -111,12 +113,13 @@ pub(super) fn begin(
     request: Request,
     options: &crate::Options,
     ui: &mut ui_host::Console,
+    game: &crate::gameplay::Gameplay,
     sim: &mut crate::simulation::Simulation,
     (reuse, allow_bc_textures): (std::sync::Arc<crate::audio::reuse::AudioReuse>, bool),
 ) -> Result<super::Job, String> {
     sim.background_audio_pending = false;
     let started = std::time::Instant::now();
-    let result = spawn_worker(&request, options, ui, reuse, allow_bc_textures)?;
+    let result = spawn_worker(&request, options, ui, game, reuse, allow_bc_textures)?;
     sim.notify_loading(ui, &request.map, request.background, None);
     start(&request, ui);
     sim.loading = true;
@@ -131,6 +134,7 @@ pub(super) fn spawn_worker(
     request: &Request,
     options: &crate::Options,
     ui: &ui_host::Console,
+    game: &crate::gameplay::Gameplay,
     audio_reuse: std::sync::Arc<crate::audio::reuse::AudioReuse>,
     allow_bc_textures: bool,
 ) -> Result<super::ResultSlot, String> {
@@ -142,11 +146,18 @@ pub(super) fn spawn_worker(
     let background = request.background;
     let config = ui.source.config.clone();
     let progress = ui.source.loading_progress();
-    let extra_npc_classes = if background {
+    let (extra_npc_classes, mut extra_weapons, extra_npc_weapons) = if background {
         Default::default()
     } else {
-        options.script_npc_classes.clone()
+        (
+            options.script_npc_classes.clone(),
+            options.script_weapons.clone(),
+            options.script_npc_weapons.clone(),
+        )
     };
+    if !new_game && !background {
+        extra_weapons.extend(game.inventory.owned.keys().cloned());
+    }
     let draw_options = (options.cpu_skinning, options.world_partition);
     super::assets::work::Work::spawn("hl2-owned-map-loader", move |cancel| {
         let geometry_cancel = cancel.clone();
@@ -166,6 +177,8 @@ pub(super) fn spawn_worker(
                 audio_reuse,
                 allow_bc_textures,
                 extra_npc_classes,
+                extra_weapons,
+                extra_npc_weapons,
             },
         )?;
         geometry_cancel.check()?;

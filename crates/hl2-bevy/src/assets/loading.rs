@@ -1,10 +1,14 @@
 //! Off-thread map preparation and stage diagnostics.
-use super::{FRAG_RIGID_BODY, LoadedMap, add_static_decals, normalize_bsp_render_winding};
+use super::{LoadedMap, add_static_decals, normalize_bsp_render_winding};
 use anyhow::{Context, Result, bail};
 use modkit_core::World;
 use source_assets::{bsp::Bsp, models, vpk::Vfs};
 use std::time::Instant;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    sync::Arc,
+};
 
 struct Timings {
     started: Instant,
@@ -51,6 +55,8 @@ pub(crate) struct LoadMode {
     pub audio_reuse: Arc<crate::audio::reuse::AudioReuse>,
     pub allow_bc_textures: bool,
     pub extra_npc_classes: std::collections::BTreeSet<String>,
+    pub extra_weapons: std::collections::BTreeSet<String>,
+    pub extra_npc_weapons: std::collections::BTreeSet<String>,
 }
 
 pub fn load_with_progress(
@@ -115,8 +121,6 @@ pub(crate) fn load(input: LoadInput<'_>, mode: LoadMode) -> Result<LoadedMap> {
     mode.cancel.check()?;
     let map = map.trim_end_matches(".bsp");
     let mut timing = Timings::new();
-    let root_lod = config.video.root_lod();
-    let picmip = config.video.picmip();
     let hdr = config.video.hdr.is_hdr();
     let (vfs, bsp) = mount(root, game, map, hdr, progress, &mut timing)?;
     let vfs = Arc::new(vfs);
@@ -129,46 +133,36 @@ pub(crate) fn load(input: LoadInput<'_>, mode: LoadMode) -> Result<LoadedMap> {
         decal_errors,
     } = prepare_world(&bsp, &vfs, map, config, &mut timing, &mode)?;
     progress.report(0.50, "LoadingProgress_SignonDataLocal");
-    let mut gameplay = prepare_gameplay(world, &vfs, bsp.revision, new_game, config)?;
+    let mut gameplay = prepare_gameplay(
+        world,
+        &vfs,
+        bsp.revision,
+        new_game,
+        config,
+        &mode.extra_weapons,
+    )?;
     let world = gameplay.world.clone();
     timing.mark("gameplay");
     mode.cancel.check()?;
-    let (audio_work, aux_work, physics_work) = parallel_resources(
-        vfs.clone(),
-        &gameplay,
-        canvas.clone(),
-        mode.audio_reuse.clone(),
-        hdr,
-        &mode.cancel,
-    )?;
-    timing.mark("parallel_plan");
-    let effects = crate::effects::PreparedEffects::load_with_lod(&vfs, &world, root_lod);
-    timing.mark("effects");
-    let (materials, mut texture_errors) = super::loading_materials::load(
+    let (
+        (materials, mut texture_errors),
+        (cubemaps, cubemap_errors),
+        effects,
+        aux,
+        physics,
+        (audio, pending_audio),
+        shadow_receivers,
+    ) = load_map_resources(
         &vfs,
+        &mut gameplay,
         &world,
-        (&effects, &weapon_models, &gameplay),
-        decal_errors,
-        (picmip, hdr, mode.allow_bc_textures),
-        (progress, &mode.cancel),
+        (map, &bsp, decal_errors, &weapon_models),
+        (canvas.clone(), config, &mode),
+        progress,
+        &mut timing,
     )?;
-    mode.cancel.check()?;
-    timing.mark("materials");
-    let (cubemaps, cubemap_errors) = super::cubemaps::load(&vfs, map, &bsp, (picmip, hdr));
     texture_errors.extend(cubemap_errors);
-    timing.mark("cubemaps");
-    progress.report(0.90, "LoadingProgress_SignonLocal");
-    let aux = aux_work.wait()?;
     texture_errors.extend(aux.errors);
-    timing.mark("aux_wait");
-    let physics = physics_work.wait()?;
-    timing.mark("physics");
-    let (audio, pending_audio) = complete_audio(audio_work, mode.background, &mut gameplay)?;
-    timing.mark("audio");
-    progress.report(1.0, "LoadingProgress_SignonLocal");
-    let shadow_receivers = Arc::new(crate::shadows::receivers(&world, &materials));
-    timing.mark("shadows_cookie");
-    mode.cancel.check()?;
     let mut load_timings = timing.finish();
     load_timings.extend(aux.timings);
     Ok(LoadedMap {
@@ -206,9 +200,15 @@ fn prepare_gameplay(
     revision: u32,
     new_game: bool,
     config: &hl2_ui::config::Config,
+    extra_weapons: &std::collections::BTreeSet<String>,
 ) -> Result<crate::gameplay::Gameplay> {
-    let mut gameplay =
-        crate::gameplay::Gameplay::load_with_campaign(world, vfs, revision, new_game)?;
+    let mut gameplay = crate::gameplay::Gameplay::load_with_campaign_weapons(
+        world,
+        vfs,
+        revision,
+        new_game,
+        extra_weapons,
+    )?;
     let world = gameplay.world.clone();
     hl2_simulation::commentary::CommentaryState::spawn_init(
         &mut gameplay.scene,
@@ -319,7 +319,7 @@ fn prepare_world(
     }
     timing.mark("world");
     let (model_report, weapon_models) =
-        prepare_models(&mut world, vfs, config.video.root_lod(), timing);
+        prepare_models(&mut world, vfs, config.video.root_lod(), timing, mode);
     mode.cancel.check()?;
     let decal_layers = layered
         .into_iter()
@@ -382,25 +382,24 @@ fn prepare_models(
     vfs: &Vfs,
     root_lod: usize,
     timing: &mut Timings,
+    mode: &LoadMode,
 ) -> (models::ModelReport, Vec<String>) {
-    let model_report = models::append_models_lod(world, vfs, root_lod);
+    let model_report = source_assets::models::append_models_lod(world, vfs, root_lod);
     timing.mark("model_props");
-    let _gibs_without_physics = models::append_break_physics(world, vfs);
+    let _gibs_without_physics = source_assets::models::append_break_physics(world, vfs);
     timing.mark("model_gibs");
-    // NPC weapon world models: their sequence events fire NPC weapons (DESIGN 14w).
-    let weapon_models: Vec<String> = hl2_simulation::npc_weapons::definitions(vfs)
-        .map(|defs| {
-            defs.into_values()
-                .map(|d| d.world_model)
-                .filter(|m| !m.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-    for failure in models::append_rigs(world, vfs, &weapon_models) {
-        world.warnings.push(failure);
-    }
+    // NPC weapon world models: only those used by map/pooled NPCs or scripts (DESIGN 14w).
+    let needed_npc_weapons =
+        hl2_simulation::npc_weapons::required_npc_weapons(world, &mode.extra_npc_weapons);
+    let weapon_models = crate::runtime_weapons::load_world_weapon_models(
+        world,
+        vfs,
+        &needed_npc_weapons,
+        root_lod,
+        &BTreeSet::new(),
+    );
     // The player model's hitboxes take NPC bullets (CHL2_Player::Spawn).
-    for failure in models::append_rigs(
+    for failure in source_assets::models::append_rigs(
         world,
         vfs,
         &[hl2_simulation::gameplay::PLAYER_MODEL.to_owned()],
@@ -408,36 +407,92 @@ fn prepare_models(
         world.warnings.push(failure);
     }
     timing.mark("model_rigs");
-    // ... and drawn bone-merged in their owners' hands (CBaseCombatWeapon::Equip).
-    for model in &weapon_models {
-        let key = format!("{}#0", model.to_lowercase());
-        if world.model_assets.contains_key(&key) {
-            continue;
-        }
-        match models::read_model_lod(vfs, model, 0, root_lod) {
-            Ok(surfaces) => {
-                world.model_assets.insert(key, surfaces);
-            }
-            Err(error) => world.warnings.push(format!("{model}: {error:#}")),
-        }
-    }
-    // Dropped NPC weapons are VPhysics objects (CBaseCombatWeapon::FallInit): their
-    // world models' .phy (a model without one is not dropped).
-    for model in &weapon_models {
-        let _ = models::append_model_physics(world, vfs, model);
-    }
     // The thrown frag is a VPhysics object (CGrenadeFrag::CreateVPhysics): a Rapier body
     // from w_grenade.phy (12-sided prism as a round cylinder, the .phy's IVP inertia) and
     // SDK spawn orientation. Session 13 replay against five native throws (lob, roll,
     // overhand, plaza, wall) fits as well as or better than the old fitted swept box.
-    if FRAG_RIGID_BODY.load(std::sync::atomic::Ordering::Relaxed)
-        && let Err(error) =
-            models::append_model_physics(world, vfs, hl2_simulation::projectiles::FRAG_MODEL)
-    {
-        world.warnings.push(format!(
-            "{}: {error:#}",
-            hl2_simulation::projectiles::FRAG_MODEL
-        ));
+    let frag_needed = mode.extra_weapons.contains("weapon_frag")
+        || world.entities.iter().any(|e| {
+            matches!(e.class(), "weapon_frag" | "npc_combine_s")
+                || (e.class().eq_ignore_ascii_case("game_player_equip")
+                    && e.get("weapon_frag").is_some_and(|v| v.trim() != "0"))
+        });
+    if frag_needed {
+        crate::runtime_weapons::load_frag_projectile_physics(world, vfs, &BTreeSet::new());
     }
     (model_report, weapon_models)
+}
+
+#[expect(clippy::type_complexity)]
+fn load_map_resources(
+    vfs: &Arc<Vfs>,
+    gameplay: &mut crate::gameplay::Gameplay,
+    world: &World,
+    (map, bsp, decal_errors, weapon_models): (&str, &Bsp, Vec<String>, &[String]),
+    (canvas, config, mode): (
+        source_ui::canvas::Canvas,
+        &hl2_ui::config::Config,
+        &LoadMode,
+    ),
+    progress: &hl2_ui::gameui::loading::ProgressReport,
+    timing: &mut Timings,
+) -> Result<(
+    (BTreeMap<String, super::MaterialData>, Vec<String>),
+    (Vec<super::cubemaps::Sample>, Vec<String>),
+    crate::effects::PreparedEffects,
+    super::loading_auxiliary::Auxiliary,
+    hl2_simulation::physics::Physics,
+    MapAudio,
+    Arc<hl2_simulation::shadows::receivers::Receivers>,
+)> {
+    let hdr = config.video.hdr.is_hdr();
+    let (picmip, root_lod) = (config.video.picmip(), config.video.root_lod());
+    let (audio_work, aux_work, physics_work) = parallel_resources(
+        vfs.clone(),
+        gameplay,
+        canvas,
+        mode.audio_reuse.clone(),
+        hdr,
+        &mode.cancel,
+    )?;
+    timing.mark("parallel_plan");
+    let effects = crate::effects::PreparedEffects::load_with_lod_for_weapons(
+        vfs,
+        world,
+        root_lod,
+        &gameplay.precached_weapons,
+    );
+    timing.mark("effects");
+    let materials = super::loading_materials::load(
+        vfs,
+        world,
+        (&effects, weapon_models, gameplay),
+        decal_errors,
+        (picmip, hdr, mode.allow_bc_textures),
+        (progress, &mode.cancel),
+    )?;
+    mode.cancel.check()?;
+    timing.mark("materials");
+    let cubemaps = super::cubemaps::load(vfs, map, bsp, (picmip, hdr));
+    timing.mark("cubemaps");
+    progress.report(0.90, "LoadingProgress_SignonLocal");
+    let aux = aux_work.wait()?;
+    timing.mark("aux_wait");
+    let physics = physics_work.wait()?;
+    timing.mark("physics");
+    let audio = complete_audio(audio_work, mode.background, gameplay)?;
+    timing.mark("audio");
+    progress.report(1.0, "LoadingProgress_SignonLocal");
+    let shadow_receivers = Arc::new(crate::shadows::receivers(world, &materials.0));
+    timing.mark("shadows_cookie");
+    mode.cancel.check()?;
+    Ok((
+        materials,
+        cubemaps,
+        effects,
+        aux,
+        physics,
+        audio,
+        shadow_receivers,
+    ))
 }

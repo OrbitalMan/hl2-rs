@@ -2,7 +2,8 @@
 use super::{
     Options, Status, assets, audio, camera, campaign, canvas_renderer, console_host, effects, eyes,
     flashlight, material_proxies, material_slots, monitor, monitors, rendering, runtime_npcs,
-    runtime_props, save_capture, setup, sky, studio_decals, tonemap, video, visibility,
+    runtime_props, runtime_weapons, save_capture, setup, sky, studio_decals, tonemap, video,
+    visibility,
 };
 use anyhow::{Result, bail};
 use bevy::app::PluginGroupBuilder;
@@ -197,9 +198,15 @@ pub(super) fn add_presentation_systems(app: &mut App) {
     )
     .add_systems(
         PostUpdate,
-        runtime_props::poll
-            .run_if(resource_exists::<runtime_props::RuntimeProps>)
-            .before(rendering::present_entities),
+        (
+            runtime_props::poll
+                .run_if(resource_exists::<runtime_props::RuntimeProps>)
+                .before(rendering::present_entities),
+            runtime_weapons::poll
+                .run_if(resource_exists::<runtime_weapons::RuntimeWeapons>)
+                .before(rendering::present_weapons)
+                .before(rendering::present_entities),
+        ),
     );
     add_runtime_entity_systems(app);
     app.add_plugins(material_slots::plugin);

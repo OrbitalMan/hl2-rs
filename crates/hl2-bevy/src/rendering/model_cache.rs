@@ -70,6 +70,24 @@ impl ModelCache {
             self.definitions.entry(name).or_insert(material);
         }
     }
+
+    /// Insert images and stripped definitions already built on a background worker.
+    pub fn add_prebuilt_materials(
+        &mut self,
+        images: &mut Assets<Image>,
+        prebuilt_images: Vec<(String, Image)>,
+        definitions: BTreeMap<String, MaterialData>,
+    ) {
+        for (path, image) in prebuilt_images {
+            self.textures
+                .entry(path)
+                .or_insert_with(|| images.add(image));
+        }
+        for (name, mut material) in definitions {
+            strip_pixels(&mut material);
+            self.definitions.entry(name).or_insert(material);
+        }
+    }
 }
 impl ModelCache {
     /// A late model's light state. It reflects the sample near it when the map's own draws
@@ -90,7 +108,7 @@ impl ModelCache {
         lit.reflecting(self.reflects(definition))
     }
     /// Whether a late model's material reflects its sample.
-    pub(super) fn reflects(&self, definition: &MaterialData) -> bool {
+    pub(crate) fn reflects(&self, definition: &MaterialData) -> bool {
         let mask = definition.envmap_mask_path.as_ref();
         definition.model_envmap && !self.plain && mask.is_none_or(|p| self.textures.contains_key(p))
     }

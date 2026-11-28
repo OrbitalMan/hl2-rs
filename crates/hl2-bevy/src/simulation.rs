@@ -865,14 +865,12 @@ fn fixed_step(
 }
 /// `impulse 101`: the implemented weapons, ammunition and the suit.
 fn grant_loadout(ui: &mut crate::ui_host::Console, game: &mut crate::gameplay::Gameplay) {
-    for name in game.weapons.keys() {
-        game.inventory.give(name, &game.weapons, game.scene.time);
-    }
-    game.inventory.refill_ammo(&game.weapons);
-    game.inventory.suit = true;
-    game.inventory
-        .give("weapon_crowbar", &game.weapons, game.scene.time);
-    ui.source.log("Granted the six implemented weapons, ammunition and suit. Remaining HL2 weapons are not implemented.");
+    let message = if game.request_loadout() {
+        "Granted the six implemented weapons, ammunition and suit. Remaining HL2 weapons are not implemented."
+    } else {
+        "Loading weapons, ammunition and suit..."
+    };
+    ui.source.log(message);
 }
 
 /// The part of the video settings that the window carries: resolution and display mode.

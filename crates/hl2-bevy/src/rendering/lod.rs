@@ -45,8 +45,8 @@ pub fn level_for(switches: &[f32], metric: f32) -> usize {
 }
 
 /// The immutable per-vertex data a facial-flex draw's [`AnimatedMesh`] reads, for one level.
-pub(super) struct Vertices {
-    pub(super) bind: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
+pub(crate) struct Vertices {
+    pub(crate) bind: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
     pub(super) normals: Vec<glam::Vec3>,
     pub(super) flex: Vec<Option<[u16; 3]>>,
 }
@@ -176,7 +176,7 @@ pub(super) fn levels_key(
     )
 }
 
-pub(super) fn apply_skin_attributes(
+pub(crate) fn apply_skin_attributes(
     mesh: &mut Mesh,
     vertices: &[(glam::Vec3, Option<modkit_core::animation::Weights>)],
     joint_count: usize,

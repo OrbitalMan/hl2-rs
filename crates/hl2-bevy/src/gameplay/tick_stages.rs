@@ -42,13 +42,7 @@ impl Gameplay {
     ) {
         let result = match action {
             Action::Loadout => {
-                for name in self.weapons.keys() {
-                    self.inventory.give(name, &self.weapons, self.scene.time);
-                }
-                self.inventory.refill_ammo(&self.weapons);
-                self.inventory.suit = true;
-                self.inventory
-                    .give("weapon_crowbar", &self.weapons, self.scene.time);
+                self.request_loadout();
                 return;
             }
             Action::Slot { slot } => {

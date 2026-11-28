@@ -2,7 +2,7 @@
 use crate::audio::mixer::MixerStream;
 use crate::{
     Status, assets, audio, canvas_renderer, console_host, effects, eyes, monitors, rendering,
-    runtime_npcs, runtime_props, shadows, sky, studio_decals, visibility,
+    runtime_npcs, runtime_props, runtime_weapons, shadows, sky, studio_decals, visibility,
 };
 use bevy::{
     asset::Assets,
@@ -124,16 +124,7 @@ pub(crate) fn install_map(
         stats.materials = 0;
         stats.skipped_background_surfaces = 0;
     }
-    commands.insert_resource(visibility::SourceVisibility::new(
-        loaded.bsp.visibility_index(),
-        no_pvs,
-    ));
-    commands.insert_resource(rendering::FlexModels(loaded.flexes.clone()));
-    commands.insert_resource(runtime_props::RuntimeProps::new(loaded.vfs.clone()));
-    commands.insert_resource(runtime_npcs::RuntimeNpcs::new(
-        loaded.vfs.clone(),
-        audio_reuse,
-    ));
+    insert_runtime_loaders(commands, &loaded, no_pvs, audio_reuse);
     let camera_target = monitors::install(&loaded, commands, images);
     laps.mark("monitors");
     effects::install(
@@ -196,6 +187,29 @@ pub(crate) fn install_map(
     audio::install(commands, sounds, loaded.audio, mute);
     laps.mark("rest");
     laps.finish()
+}
+
+fn insert_runtime_loaders(
+    commands: &mut Commands,
+    loaded: &assets::LoadedMap,
+    no_pvs: bool,
+    audio_reuse: std::sync::Arc<crate::audio::reuse::AudioReuse>,
+) {
+    commands.insert_resource(visibility::SourceVisibility::new(
+        loaded.bsp.visibility_index(),
+        no_pvs,
+    ));
+    commands.insert_resource(rendering::FlexModels(loaded.flexes.clone()));
+    commands.insert_resource(runtime_props::RuntimeProps::new(loaded.vfs.clone()));
+    commands.insert_resource(runtime_weapons::RuntimeWeapons::new(
+        loaded.vfs.clone(),
+        audio_reuse.clone(),
+        loaded.gameplay.precached_weapons.clone(),
+    ));
+    commands.insert_resource(runtime_npcs::RuntimeNpcs::new(
+        loaded.vfs.clone(),
+        audio_reuse,
+    ));
 }
 
 /// Takes the previous map's `R` out of the world just before its replacement is inserted and frees
