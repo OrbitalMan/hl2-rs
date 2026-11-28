@@ -99,6 +99,37 @@ type Roots<'w, 's> = Query<
     (With<SourceEntity>, Without<crate::gpu_skinning::Joint>),
 >;
 
+/// Marks a map draw whose frustum culling the warm-up switched off.
+#[derive(Component)]
+pub(crate) struct WarmingCull;
+
+/// For the warm-up frames every map draw (world faces, props, decals) is drawn whatever the view
+/// can see: `visibility::present` skips PVS culling while the warm-up is active, and this switches
+/// frustum culling off where it was on, so each static variant (an additive face first seen
+/// mid-play, say) compiles behind the loading cover. A culled draw produces no pixels, so the
+/// picture is what the view shows anyway. Runs before `warm_hidden_variants`, so it also sees
+/// the cleanup frame (no frames left) before the resource goes.
+pub(crate) fn warm_world_variants(
+    mut commands: Commands,
+    warmup: Res<VariantWarmup>,
+    culled: Query<Entity, (With<crate::visibility::PvsDraw>, Without<NoFrustumCulling>)>,
+    warming: Query<Entity, With<WarmingCull>>,
+) {
+    if warmup.active() {
+        for entity in &culled {
+            commands
+                .entity(entity)
+                .insert((WarmingCull, NoFrustumCulling));
+        }
+        return;
+    }
+    for entity in &warming {
+        commands
+            .entity(entity)
+            .remove::<(WarmingCull, NoFrustumCulling)>();
+    }
+}
+
 /// Runs after `present_entities`, before transforms propagate and visibility is checked.
 pub fn warm_hidden_variants(
     mut commands: Commands,
@@ -148,6 +179,30 @@ mod tests {
         ecs::system::RunSystemOnce,
         prelude::{Mesh3d, Transform, Vec3, Visibility, World},
     };
+
+    #[test]
+    fn map_draws_lose_frustum_culling_only_while_warming_and_keep_their_own() {
+        use super::{WarmingCull, warm_world_variants};
+        let mut world = World::new();
+        let culled = world.spawn(crate::visibility::PvsDraw::default()).id();
+        let own = world
+            .spawn((crate::visibility::PvsDraw::default(), NoFrustumCulling))
+            .id();
+        world.insert_resource(VariantWarmup::new());
+        world.run_system_once(warm_world_variants).unwrap();
+        assert!(world.get::<NoFrustumCulling>(culled).is_some());
+        assert!(world.get::<WarmingCull>(own).is_none(), "already unculled");
+        // The cleanup frame: no warm-up frames left, the resource still present.
+        world.insert_resource(VariantWarmup::default());
+        world.resource_mut::<VariantWarmup>().frames = 0;
+        world.run_system_once(warm_world_variants).unwrap();
+        assert!(world.get::<NoFrustumCulling>(culled).is_none());
+        assert!(world.get::<WarmingCull>(culled).is_none());
+        assert!(
+            world.get::<NoFrustumCulling>(own).is_some(),
+            "its own flag stays"
+        );
+    }
 
     #[test]
     fn hidden_draws_warm_far_below_for_four_frames_then_everything_is_undone() {
@@ -273,7 +328,7 @@ impl PipelineBacklog {
     pub(crate) fn warming(&self) -> bool {
         self.1.load(std::sync::atomic::Ordering::Relaxed)
     }
-    fn set_warming(&self, warming: bool) {
+    pub(crate) fn set_warming(&self, warming: bool) {
         self.1.store(warming, std::sync::atomic::Ordering::Relaxed);
     }
 }

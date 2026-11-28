@@ -186,7 +186,10 @@ pub fn present(
     game: Res<crate::gameplay::Gameplay>,
     cameras: Query<(&Camera, &GlobalTransform, Option<&RenderLayers>)>,
     mut draws: Query<DrawItem>,
-    performance: Option<Res<crate::performance::Performance>>,
+    (performance, warmup): (
+        Option<Res<crate::performance::Performance>>,
+        Option<Res<crate::rendering::variant_warmup::VariantWarmup>>,
+    ),
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "source_pvs");
     visibility.checked = 0;
@@ -200,7 +203,9 @@ pub fn present(
     let world_layers = RenderLayers::layer(0).with(5);
     let mut rows = std::mem::take(&mut visibility.views);
     rows.clear();
-    let mut unrestricted = visibility.disabled || visibility.index.is_none();
+    // The variant warm-up draws every map draw behind the loading cover (`warm_world_variants`).
+    let mut unrestricted =
+        visibility.disabled || visibility.index.is_none() || warmup.is_some_and(|w| w.active());
     if !unrestricted {
         for (camera, transform, layers) in &cameras {
             if !camera.is_active
@@ -439,5 +444,21 @@ mod tests {
             Visibility::Hidden
         );
         assert!(!app.world().get::<PvsDraw>(back).unwrap().culled);
+        // During the variant warm-up nothing is PVS-culled; afterwards culling resumes.
+        app.world_mut().resource_mut::<SourceVisibility>().index = Some(tree(0));
+        app.world_mut()
+            .insert_resource(crate::rendering::variant_warmup::VariantWarmup::new());
+        app.world_mut().run_system_once(present).unwrap();
+        assert_eq!(
+            *app.world().get::<Visibility>(back).unwrap(),
+            Visibility::Inherited
+        );
+        app.world_mut()
+            .remove_resource::<crate::rendering::variant_warmup::VariantWarmup>();
+        app.world_mut().run_system_once(present).unwrap();
+        assert_eq!(
+            *app.world().get::<Visibility>(back).unwrap(),
+            Visibility::Hidden
+        );
     }
 }

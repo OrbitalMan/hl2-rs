@@ -4,6 +4,7 @@ mod frame_distribution;
 mod frame_windows;
 mod game_hud;
 pub mod hud_pass;
+pub(crate) mod warmup;
 
 use bevy::{
     asset::RenderAssetUsages,

@@ -1,5 +1,42 @@
 # MODLOG
 
+## 2026-11-28 — Warm the HUD's blend states and every map draw behind the loading cover (O9)
+
+- Agent/model — Claude Code desktop (claude-opus-5-5); the HUD design brief and the review of the viewmodel
+  warm-up came from a second agent (Antigravity, Gemini; model id not recorded) and claude-sonnet-5-5 review
+  subagents.
+- Changed — `canvas_renderer/warmup.rs` (new): while the variant warm-up runs, the HUD camera draws one zero-area
+  quad per `HudMaterialKey` (normal, additive, modulate) outside the pooled batches, despawned after.
+  `rendering/variant_warmup.rs` `warm_world_variants` and `visibility.rs`: for the four warm-up frames every
+  `PvsDraw` without `NoFrustumCulling` gets it (marked `WarmingCull`, removed after) and `visibility::present` skips
+  PVS culling, so the main view draws every map draw once behind the cover; scene-hidden draws stay hidden. Review
+  fixes to the viewmodel warm-up: `warm_weapon_variants` runs only while `VariantWarmup` exists (it walked every
+  weapon draw each frame of the session); `a_held_reveal_waits_for_the_pipeline_backlog_then_finishes_loading`
+  covers a warming-only backlog and its cap.
+- Why — the `--profile` pipeline log showed, after the viewmodel warm-up, two kinds of first-use compiles left in
+  play: the HUD's `transparent_mesh2d ... hud.wesl` (in 61 of 71 replays: the HUD first draws after the map's first
+  `logic_auto` think, the modulate state at the first modulating fade) and a static `premultiplied_alpha ...
+  source.wesl [SOURCE_MAY_DISCARD]` variant (alpha-tested `AlphaMode::Add` surfaces first seen mid-play; the worst
+  frame of 5 of 6 checked replays, 13-16 ms at 1280x720). An earlier world-draw warm-up was rejected because the
+  walk stall it targeted had another cause; this one targets variants the log names.
+- Tested how — headless `--profile` replays at real time, 1280x720, default settings, one run per build (compile
+  counts are exact and repeat; frame maxima are single-run): ten station 01/02/04 replays on the HUD build, then the
+  same ten on the world-draw build; `HL2RS_GPU_SILHOUETTES=0` and a raster-at-install variant for the residue; unit
+  tests `one_quad_per_blend_state_draws_through_the_warm_up_then_goes`,
+  `map_draws_lose_frustum_culling_only_while_warming_and_keep_their_own`, the visibility and reveal tests; validate
+  and replays.
+- Result — HUD compiles in play 1 -> 0 in 9 of 10 replays (the tenth had none). The static premultiplied compile is
+  gone in all 8 replays that had it; compiles in play per run: `luggage-shove` 6 -> 1, `player-hurt` 5 -> 1,
+  `attention` 4 -> 1, `use-carry` 2 -> 0, `frag-use-pickup`, `footsteps` and `physcannon-pallet` 1 -> 0. Worst frames
+  there 15.8-16.6 -> 13.1-14.3 ms (`use-carry` 16.3 -> 7.2). Rejected: creating the GPU silhouette raster at the
+  first shadow atlas (no change in the remaining frames; reverted).
+- Still broken or not tested — an ~11-12 ms `render_graph` frame remains where those compiles were, with no compile
+  logged; with GPU silhouettes off it goes in 2 of 3 replays, so some first-use work in the GPU silhouette path is
+  left (not attributed: a trace does not reproduce it). The effect-blend compiles (`effects.wesl`) remain. Maxed
+  Retina settings, windowed live play and Windows **not tested**; the warm-up's extra draws behind the cover are not
+  timed separately (they fall in the held frames).
+- Next — attribute the silhouette first-use frame; the `effects.wesl` warm-up.
+
 ## 2026-11-28 — Selective map-load weapon precaching & async `runtime_weapons` loader (O50, Workstream A)
 
 - Agent/model — Antigravity (Gemini; model id not recorded).

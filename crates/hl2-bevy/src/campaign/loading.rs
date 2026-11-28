@@ -587,6 +587,36 @@ mod tests {
             frames += 1;
         }
         assert_eq!(frames, super::MAX_REVEAL_FRAMES as usize);
+        // Warm-up frames still to draw hold the screen like a backlog, past the two-frame floor,
+        // and a flag left set still releases at the cap.
+        backlog.set_waiting(0);
+        backlog.set_warming(true);
+        hold(&mut campaign);
+        sim.loading = true;
+        for _ in 0..u32::from(super::MIN_REVEAL_FRAMES) + 3 {
+            assert!(super::advance_reveal(
+                &mut campaign,
+                Some(&backlog),
+                &mut ui,
+                &mut sim,
+                None
+            ));
+        }
+        backlog.set_warming(false);
+        assert!(!super::advance_reveal(
+            &mut campaign,
+            Some(&backlog),
+            &mut ui,
+            &mut sim,
+            None
+        ));
+        backlog.set_warming(true);
+        hold(&mut campaign);
+        let mut frames = 0;
+        while super::advance_reveal(&mut campaign, Some(&backlog), &mut ui, &mut sim, None) {
+            frames += 1;
+        }
+        assert_eq!(frames, super::MAX_REVEAL_FRAMES as usize);
     }
     #[test]
     fn rapid_switch_back_reuses_installed_background_and_finishes_loading() {

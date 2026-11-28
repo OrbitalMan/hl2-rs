@@ -176,7 +176,11 @@ pub(super) fn add_presentation_systems(app: &mut App) {
             rendering::variant_warmup::warm_weapon_variants
                 .after(rendering::present_weapons)
                 .before(rendering::sync_viewmodel_camera)
-                .before(rendering::variant_warmup::warm_hidden_variants),
+                .before(rendering::variant_warmup::warm_hidden_variants)
+                .run_if(resource_exists::<rendering::variant_warmup::VariantWarmup>),
+            rendering::variant_warmup::warm_world_variants
+                .before(rendering::variant_warmup::warm_hidden_variants)
+                .run_if(resource_exists::<rendering::variant_warmup::VariantWarmup>),
             effects::present.run_if(crate::isolation::run_effects),
             effects::present_gibs.run_if(crate::isolation::run_effects),
             studio_decals::present,
@@ -188,6 +192,7 @@ pub(super) fn add_presentation_systems(app: &mut App) {
             canvas_renderer::present
                 .after(flashlight::update)
                 .run_if(crate::isolation::run_hud),
+            canvas_renderer::warmup::warm_hud_variants.run_if(crate::isolation::run_hud),
             tonemap::update,
             rendering::sync_viewmodel_camera
                 .after(rendering::present_weapons)
